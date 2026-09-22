@@ -1,0 +1,113 @@
+import { AccessToken } from "livekit-server-sdk";
+import { Router } from "express";
+import { asyncHandler } from "../lib/async-handler.js";
+import { env } from "../lib/env.js";
+import { fail } from "../lib/errors.js";
+import { rateLimit } from "../lib/rate-limit.js";
+import { supabaseAdmin } from "../lib/supabase.js";
+import { requireAuth } from "../middleware/require-auth.js";
+
+export const voiceRouter = Router();
+
+voiceRouter.use(requireAuth);
+
+const tokenLimit = rateLimit({
+  name: "voice-token",
+  windowMs: 10 * 60 * 1000,
+  max: 30,
+  message: "Too many voice joins — try again shortly.",
+});
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// POST /voice/token  { tripId: string } | { groupId: string }
+// Mints a short-lived LiveKit room token, after checking the caller is
+// actually a trip participant / group member — the same membership rule
+// text chat and its RLS policies already enforce (see
+// chat_messages_select_member in 0002_rls_hardening.sql). Room name mirrors
+// the chat channel naming ("trip:<id>" / "group:<id>") so voice and text
+// share one channel concept.
+voiceRouter.post(
+  "/token",
+  tokenLimit,
+  asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const tripId = typeof req.body?.tripId === "string" ? req.body.tripId : undefined;
+    const groupId = typeof req.body?.groupId === "string" ? req.body.groupId : undefined;
+
+    if ((tripId == null) === (groupId == null)) {
+      res.status(400).json({ error: "Pass exactly one of tripId or groupId" });
+      return;
+    }
+    if (tripId != null && !UUID_RE.test(tripId)) {
+      res.status(400).json({ error: "tripId must be a UUID" });
+      return;
+    }
+    if (groupId != null && !UUID_RE.test(groupId)) {
+      res.status(400).json({ error: "groupId must be a UUID" });
+      return;
+    }
+
+    let isMember: boolean;
+    try {
+      isMember = tripId
+        ? await isTripParticipant(tripId, userId)
+        : await isGroupMember(groupId!, userId);
+    } catch (err) {
+      // A failure of the membership RPC is a server problem, not a bad client.
+      fail(res, err, 500, "Something went wrong.", "voice: membership check");
+      return;
+    }
+
+    if (!isMember) {
+      res.status(403).json({ error: "Not a member of this trip/group" });
+      return;
+    }
+
+    try {
+      const roomName = tripId ? `trip:${tripId}` : `group:${groupId}`;
+      const identity = await participantIdentity(userId);
+
+      const token = new AccessToken(env.livekitApiKey, env.livekitApiSecret, {
+        identity: userId,
+        name: identity,
+        ttl: "1h",
+      });
+      token.addGrant({ room: roomName, roomJoin: true, canPublish: true, canSubscribe: true });
+
+      res.json({ url: env.livekitUrl, token: await token.toJwt(), roomName });
+    } catch (err) {
+      fail(res, err, 502, "Could not start the voice channel. Please try again.", "voice: mint token");
+    }
+  }),
+);
+
+// Delegates to the same SQL predicates RLS itself uses (is_trip_participant /
+// is_group_member, 0002_rls_hardening.sql) instead of re-implementing the
+// membership rule here, so this can never drift out of sync with RLS.
+async function isTripParticipant(tripId: string, userId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin.rpc("is_trip_participant", {
+    p_trip: tripId,
+    p_user: userId,
+  });
+  if (error) throw new Error(error.message);
+  return data === true;
+}
+
+async function isGroupMember(groupId: string, userId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin.rpc("is_group_member", {
+    p_group: groupId,
+    p_user: userId,
+  });
+  if (error) throw new Error(error.message);
+  return data === true;
+}
+
+async function participantIdentity(userId: string): Promise<string> {
+  const { data } = await supabaseAdmin
+    .from("profiles")
+    .select("username")
+    .eq("id", userId)
+    .maybeSingle();
+  return data?.username ?? userId;
+}
