@@ -43,7 +43,25 @@ class TripListScreen extends ConsumerWidget {
                 );
               },
               loading: () => const SizedBox.shrink(),
-              error: (e, _) => const SizedBox.shrink(),
+              error: (e, _) => Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error_outline, color: AppTheme.danger, size: 18),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        "Couldn't load invites.",
+                        style: TextStyle(color: AppTheme.danger),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => ref.invalidate(tripInvitesProvider),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
             ),
             tripsAsync.when(
               data: (trips) {
@@ -97,7 +115,7 @@ class _InviteCard extends ConsumerWidget {
     final tripId = invite['trip_id'] as String;
 
     return Card(
-      color: const Color(0xFFFFF3EE),
+      color: AppTheme.cardTint,
       child: ListTile(
         contentPadding: const EdgeInsets.all(16),
         title: Text(trip?['title'] as String? ?? 'Trip'),

@@ -35,3 +35,8 @@ const List<VehicleOption> kVehicleOptions = [
   VehicleOption('scooter', 'Scooter'),
   VehicleOption('suv', 'SUV'),
 ];
+
+/// Vehicle assumed when a profile has none set. Mirrors the `vehicle_type`
+/// column default in the migrations, so a locally-built profile matches one the
+/// database would build.
+const String kDefaultVehicleType = 'car';

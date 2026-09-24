@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import '../../core/constants/defaults.dart';
 import '../models/map_post.dart';
 import '../services/supabase_service.dart';
 
@@ -17,7 +18,7 @@ class MapPostRepository {
     required double lng,
     String? caption,
     String? tripId,
-    String visibility = 'group',
+    String visibility = kDefaultMapPostVisibility,
   }) async {
     final uid = SupabaseService.currentUserId;
     final storagePath =

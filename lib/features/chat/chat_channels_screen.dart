@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/util/error_text.dart';
+import '../../core/widgets/error_retry.dart';
 import '../social/social_providers.dart';
 import '../trip/trip_providers.dart';
 import 'chat_providers.dart';
@@ -21,7 +21,13 @@ class ChatChannelsScreen extends ConsumerWidget {
     }
     final error = tripsAsync.error ?? groupsAsync.error;
     if (error != null) {
-      return Center(child: Text(friendlyError(error)));
+      return ErrorRetry(
+        error: error,
+        onRetry: () {
+          ref.invalidate(myTripsProvider);
+          ref.invalidate(myGroupsProvider);
+        },
+      );
     }
 
     final trips = tripsAsync.valueOrNull ?? const [];

@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
 import 'map_style.dart';
+import 'mapbox_token.dart';
 import 'scene_3d.dart';
 import 'vehicle_models.dart';
 
@@ -11,10 +15,10 @@ import 'vehicle_models.dart';
 /// One-shot commands — recenter, switch basemap, toggle 3D/terrain — are
 /// exposed on [RanmapMapViewState] through a [GlobalKey] rather than as
 /// reactive props, since they're imperative actions, not state.
-class RanmapMapView extends StatefulWidget {
+class RanmapMapView extends ConsumerStatefulWidget {
   const RanmapMapView({
     super.key,
-    required this.center,
+    this.center,
     this.zoom = 15,
     this.pitch = 45,
     this.bearing = 0,
@@ -27,8 +31,9 @@ class RanmapMapView extends StatefulWidget {
     this.onStyleReady,
   });
 
-  /// Initial camera center.
-  final Position center;
+  /// Initial camera center. Null leaves the camera at Mapbox's default position
+  /// (pair it with a wide [zoom]) when the user's location isn't known yet.
+  final Position? center;
   final double zoom;
 
   /// Tilt in degrees — non-zero is what makes the 3D scene read as 3D.
@@ -58,11 +63,16 @@ class RanmapMapView extends StatefulWidget {
   final ValueChanged<MapboxMap>? onStyleReady;
 
   @override
-  State<RanmapMapView> createState() => RanmapMapViewState();
+  ConsumerState<RanmapMapView> createState() => RanmapMapViewState();
 }
 
-class RanmapMapViewState extends State<RanmapMapView> {
+class RanmapMapViewState extends ConsumerState<RanmapMapView> {
   MapboxMap? _map;
+
+  /// Guards the map-token refresh timer, and remembers which token is applied
+  /// so a refresh can be told apart from the initial load.
+  Timer? _refreshTimer;
+  String? _appliedToken;
   late RanmapMapStyle _style = widget.style;
   late bool _threeD = widget.threeD;
   late bool _terrain = widget.terrain;
@@ -72,7 +82,7 @@ class RanmapMapViewState extends State<RanmapMapView> {
   /// is what keeps parent rebuilds (a position update, a provider change) from
   /// yanking the camera back to the initial center while the user is panning.
   late final ViewportState _viewport = CameraViewportState(
-    center: Point(coordinates: widget.center),
+    center: widget.center == null ? null : Point(coordinates: widget.center!),
     zoom: widget.zoom,
     pitch: widget.pitch,
     bearing: widget.bearing,
@@ -173,13 +183,74 @@ class RanmapMapViewState extends State<RanmapMapView> {
   }
 
   @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Refreshes the vendored token shortly before it expires. The lead time is
+  /// deliberately shorter than the server's own refresh margin, so a refresh
+  /// always lands on a freshly minted token rather than looping on a stale one.
+  void _armRefresh(MapboxToken token) {
+    _refreshTimer?.cancel();
+    final until = token.expiresAt.difference(DateTime.now()) - const Duration(minutes: 2);
+    _refreshTimer = Timer(until.isNegative ? Duration.zero : until, () {
+      if (mounted) ref.invalidate(mapboxTokenProvider);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return MapWidget(
-      key: const ValueKey('ranmap-map'),
-      styleUri: _style.uri,
-      viewport: _viewport,
-      onMapCreated: _onMapCreated,
-      onStyleLoadedListener: _onStyleLoaded,
+    // The map can't render without a token, so gate on the vendored one: show a
+    // spinner while it loads and a retry on failure, rather than a blank map.
+    return ref.watch(mapboxTokenProvider).when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (_, _) => _MapTokenError(onRetry: () => ref.invalidate(mapboxTokenProvider)),
+      data: (token) {
+        if (_appliedToken != token.token) {
+          _appliedToken = token.token;
+          _armRefresh(token);
+          // On a refresh (a new token after the map already exists) reload the
+          // style so tile requests pick up the new token. On first load the map
+          // is still null, and the token was already installed by the provider.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _map?.loadStyleURI(widget.style.uri);
+          });
+        }
+        return MapWidget(
+          key: const ValueKey('ranmap-map'),
+          styleUri: _style.uri,
+          viewport: _viewport,
+          onMapCreated: _onMapCreated,
+          onStyleLoadedListener: _onStyleLoaded,
+        );
+      },
+    );
+  }
+}
+
+/// Shown in place of the map when the rendering token can't be fetched.
+class _MapTokenError extends StatelessWidget {
+  const _MapTokenError({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.map_outlined, size: 40),
+            const SizedBox(height: 12),
+            const Text('Could not load the map.', textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            FilledButton(onPressed: onRetry, child: const Text('Try again')),
+          ],
+        ),
+      ),
     );
   }
 }

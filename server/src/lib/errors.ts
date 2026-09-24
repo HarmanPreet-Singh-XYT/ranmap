@@ -25,3 +25,12 @@ export function isUniqueViolation(err: unknown): boolean {
     (err as { code?: unknown }).code === "23505"
   );
 }
+
+/**
+ * 503 for a route whose optional integration has no credentials configured.
+ * Lets the server boot without every third-party key; only the routes that
+ * actually need the missing one fail, and they fail clearly.
+ */
+export function notConfigured(res: Response, feature: string): void {
+  res.status(503).json({ error: `${feature} is not configured on this server.` });
+}

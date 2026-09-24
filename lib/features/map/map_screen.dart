@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 // `Position`, so hide geolocator's to avoid the collision.
 import 'package:geolocator/geolocator.dart' hide Position;
 
+import '../../core/constants/avatars.dart';
+import '../../core/constants/defaults.dart';
 import '../../core/router/auth_state_provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/util/error_text.dart';
@@ -167,10 +169,16 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
   }
 
   Future<void> _searchNearby(Position center) async {
-    final place = await showNearbyPlacesSheet(context, center: center);
+    // Offer "search along the route" when the active trip has a planned route.
+    final polyline = ref.read(activeTripProvider).valueOrNull?.routePolyline;
+    final place = await showNearbyPlacesSheet(
+      context,
+      center: center,
+      routePolyline: (polyline == null || polyline.isEmpty) ? null : polyline,
+    );
     if (place == null || !mounted) return;
     setState(() => _selectedPlace = place);
-    await _mapKey.currentState?.flyTo(place.location, zoom: 16);
+    await _mapKey.currentState?.flyTo(place.location, zoom: kPlaceZoom);
   }
 
   @override
@@ -211,9 +219,11 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
     final here = Geo.pos(deviceLat, deviceLng);
     final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
 
-    final memberLocations = activeTrip == null
-        ? const <String, MemberLocation>{}
-        : ref.watch(tripMemberLocationsProvider(activeTrip.id)).valueOrNull ?? {};
+    // Keep the AsyncValue around (not just valueOrNull) so a failed live-sync
+    // fetch is surfaced instead of silently rendering as "0 teammates".
+    final memberLocationsAsync =
+        activeTrip == null ? null : ref.watch(tripMemberLocationsProvider(activeTrip.id));
+    final memberLocations = memberLocationsAsync?.valueOrNull ?? const <String, MemberLocation>{};
 
     final memberProfiles = activeTrip == null
         ? const <Map<String, dynamic>>[]
@@ -229,7 +239,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
       final loc = entry.value;
       final profile = profileByUserId[entry.key];
       final username = profile?['username'] as String?;
-      final vehicleType = profile?['vehicle_type'] as String? ?? 'car';
+      final vehicleType = profile?['vehicle_type'] as String? ?? kDefaultVehicleType;
       teammates.add((userId: entry.key, username: username, lat: loc.lat, lng: loc.lng));
       poses.add(VehiclePose(
         id: entry.key,
@@ -240,11 +250,16 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
       ));
     }
 
-    final myVehicleType = ref.watch(myProfileProvider).valueOrNull?.vehicleType ?? 'car';
+    final myVehicleType = ref.watch(myProfileProvider).valueOrNull?.vehicleType ?? kDefaultVehicleType;
 
-    final mapPosts = activeTrip == null
-        ? const <MapPost>[]
-        : ref.watch(tripMapPostsProvider(activeTrip.id)).valueOrNull ?? const <MapPost>[];
+    final mapPostsAsync =
+        activeTrip == null ? null : ref.watch(tripMapPostsProvider(activeTrip.id));
+    final mapPosts = mapPostsAsync?.valueOrNull ?? const <MapPost>[];
+
+    // The overlay is decorative — the map still works if it fails — but the
+    // user should know it's stale rather than assume nobody is on the trip.
+    final liveError = memberLocationsAsync?.error ?? mapPostsAsync?.error;
+    final activeTripId = activeTrip?.id;
 
     final routePolyline = activeTrip?.routePolyline;
 
@@ -264,7 +279,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
           RanmapMapView(
             key: _mapKey,
             center: here,
-            zoom: 15.5,
+            zoom: kFollowZoom,
             style: _style,
             threeD: _threeD,
             terrain: _terrain,
@@ -272,6 +287,18 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
             userVehicleType: myVehicleType,
             onStyleReady: _onStyleReady,
           ),
+          if (activeTripId != null && liveError != null)
+            Positioned(
+              top: 16,
+              left: 16,
+              child: _LiveSyncErrorChip(
+                detail: friendlyError(liveError),
+                onRetry: () {
+                  ref.invalidate(tripMemberLocationsProvider(activeTripId));
+                  ref.invalidate(tripMapPostsProvider(activeTripId));
+                },
+              ),
+            ),
           Positioned(
             top: 16,
             right: 16,
@@ -279,7 +306,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
               children: [
                 FloatingActionButton.small(
                   heroTag: 'recenter',
-                  onPressed: () => _mapKey.currentState?.flyTo(here, zoom: 15.5),
+                  onPressed: () => _mapKey.currentState?.flyTo(here, zoom: kFollowZoom),
                   tooltip: 'Recenter on me',
                   child: const Icon(Icons.my_location),
                 ),
@@ -372,7 +399,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
 
     try {
       _photoPin ??= await MapMarkers.pin(
-        const Color(0xFFF5B301),
+        AppTheme.warning,
         Icons.photo_camera_rounded,
         devicePixelRatio: devicePixelRatio,
       );
@@ -439,7 +466,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
       if (placeManager == null) return;
 
       _placePin ??= await MapMarkers.pin(
-        const Color(0xFF8E44AD),
+        AppTheme.photoPin,
         Icons.place_rounded,
         devicePixelRatio: devicePixelRatio,
       );
@@ -474,7 +501,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
             for (final teammate in teammates)
               ListTile(
                 leading: const CircleAvatar(
-                  backgroundColor: Color(0xFFFFE5DC),
+                  backgroundColor: AppTheme.primaryContainer,
                   child: Icon(Icons.directions_car_filled_rounded, color: AppTheme.primary),
                 ),
                 title: Text(teammate.username != null ? '@${teammate.username}' : 'Teammate'),
@@ -490,6 +517,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
       context,
       destination: Geo.pos(selected.lat, selected.lng),
       username: selected.username,
+      vehicleType: ref.read(myProfileProvider).valueOrNull?.vehicleType,
     );
   }
 }
@@ -559,6 +587,47 @@ class _LocationErrorView extends StatelessWidget {
               FilledButton(onPressed: onRetry, child: const Text('Try again')),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Small non-blocking banner shown over the map when the live teammate/photo
+/// overlay fails to load, so a broken connection isn't mistaken for an empty
+/// trip. Explicit retry re-fetches both overlay providers.
+class _LiveSyncErrorChip extends StatelessWidget {
+  const _LiveSyncErrorChip({required this.detail, required this.onRetry});
+
+  final String detail;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.errorContainer,
+      borderRadius: BorderRadius.circular(12),
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Tooltip(
+              message: detail,
+              child: Icon(Icons.cloud_off_rounded, size: 18, color: scheme.onErrorContainer),
+            ),
+            const SizedBox(width: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 180),
+              child: Text(
+                "Live teammates aren't updating",
+                style: TextStyle(color: scheme.onErrorContainer, fontSize: 12),
+              ),
+            ),
+            TextButton(onPressed: onRetry, child: const Text('Retry')),
+          ],
         ),
       ),
     );

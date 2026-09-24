@@ -43,8 +43,9 @@ export function rateLimit({ name, windowMs, max, message, key }: Options) {
     const now = Date.now();
 
     const times = (hits.get(bucket) ?? []).filter((t) => now - t < windowMs);
-    if (times.length >= max) {
-      const retryAfter = Math.max(1, Math.ceil((times[0] + windowMs - now) / 1000));
+    const oldest = times[0];
+    if (times.length >= max && oldest !== undefined) {
+      const retryAfter = Math.max(1, Math.ceil((oldest + windowMs - now) / 1000));
       res.setHeader("Retry-After", String(retryAfter));
       res.status(429).json({ error: message ?? "Too many requests — please slow down." });
       return;

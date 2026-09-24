@@ -1,10 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../data/repositories/phone_repository.dart';
-import '../../data/repositories/profile_repository.dart';
+// Repository providers (profile/phone) live in the data layer; re-exported so
+// existing importers keep working.
+import '../../data/providers/repository_providers.dart';
 
-final profileRepositoryProvider = Provider<ProfileRepository>((ref) => ProfileRepository());
-final phoneRepositoryProvider = Provider<PhoneRepository>((ref) => PhoneRepository());
+export '../../data/providers/repository_providers.dart';
 
 /// The current user's private fields (phone_number / socials /
 /// phone_verified), fetched through the `my_private_profile` RPC.

@@ -19,8 +19,8 @@ number OTP, alternate-route planning + nearby-places search via the
 Directions/Places APIs, and a chat-based AI assistant that can save places,
 create trips, and schedule them. The map is a real 3D layer — Mapbox
 Standard's extruded buildings, trees, landmarks, and terrain, with each
-teammate's vehicle drawn as a bundled 3D model. The rest of the product
-vision is stubbed with `TODO`s at the right seams — see "Roadmap" below.
+teammate's vehicle drawn as a bundled 3D model. What's left of the product
+vision is tracked in "Roadmap" below.
 
 ## Stack
 
@@ -84,7 +84,8 @@ server/           # ranmap-server: Node/TS backend for secret-holding operations
 2. Run the migrations in order: `supabase/migrations/0001_init.sql`,
    `0002_rls_hardening.sql`, `0003_integrity_and_live_locations.sql`,
    `0004_stop_ordering.sql`, `0005_phone_verification.sql`,
-   `0006_trip_route_planning.sql`, then `0007_security_fixes.sql` (either paste
+   `0006_trip_route_planning.sql`, `0007_security_fixes.sql`, then
+   `0008_hardening_followups.sql` (either paste
    them into the SQL editor in that order, or `supabase db push`). `0001`
    creates all tables (profiles,
    groups, trips, stops, expenses, location pings, map posts, chat, AI
@@ -110,6 +111,13 @@ server/           # ranmap-server: Node/TS backend for secret-holding operations
    `map_posts.storage_path` ownership, adds enum/numeric CHECK constraints,
    revokes helper-function EXECUTE from `PUBLIC`, adds missing FK/GiST indexes,
    and makes the scheduler start step atomic. All migrations are idempotent.
+   `0008` closes the remaining follow-ups: it adds an in-function caller check
+   to `prune_location_pings`/`start_due_scheduled_trips` (defence in depth on
+   top of the REVOKE), revokes the lingering PUBLIC EXECUTE on
+   `create_trip`/`create_group`/`update_trip_route` (anon can no longer even
+   invoke them), makes the service-role grants explicit, validates the CHECK
+   constraints `0007` added as `NOT VALID`, and adds the indexes the scheduler
+   and pruner hot paths were missing.
 3. Copy your project URL and **publishable key** from Project Settings →
    API Keys. (The new-style keys are `sb_publishable_…` / `sb_secret_…`;
    they replace the legacy anon / service-role keys.)
@@ -128,25 +136,28 @@ SUPABASE_PUBLISHABLE_KEY=sb_publishable_your-key
 BACKEND_URL=http://localhost:8787
 ```
 
-### 3. Mapbox token (native config)
+### 3. Mapbox (rendering + routing)
 
-The map is rendered by the **Mapbox Maps SDK for Flutter**. It needs a Mapbox
-**public** access token (`pk.…`) — create one at
-<https://console.mapbox.com/account/access-tokens/> and add it to `.env`:
+The map is rendered by the **Mapbox Maps SDK for Flutter**, but the app ships
+**no long-lived Mapbox token**. At runtime it asks ranmap-server for a
+short-lived **temporary** token (`GET /maps/token`): a leaked token expires
+within the hour, and rotating the account's secret is a server-only change —
+installed apps keep working, with no update required. So nothing
+Mapbox-related goes in the app's `.env`.
 
-```
-MAPBOX_ACCESS_TOKEN=pk.your-mapbox-public-token
-```
-
-- **Android** additionally needs a **secret** downloads token (`sk.…`, with the
+- **Android** still needs a **secret** downloads token (`sk.…`, with the
   `DOWNLOADS:READ` scope) so Gradle can pull the SDK from Mapbox's Maven
   repository. Don't commit it — set `MAPBOX_DOWNLOADS_TOKEN` in
   `~/.gradle/gradle.properties` (or as an environment variable);
   `android/build.gradle.kts` reads it.
-- Route planning and nearby-places search still call the **Directions API** and
-  **Places API** through ranmap-server (`GET /maps/directions`,
-  `GET /maps/places/nearby`), which holds a server-side `GOOGLE_MAPS_API_KEY`.
-  That key never ships in the client.
+- The server holds the Mapbox credential(s): one token for Directions + Search
+  Box, which ALSO mints the app's rendering tokens, so it needs `tokens:write`
+  plus `styles:read`, `fonts:read`, and `styles:tiles` — set
+  `MAPBOX_ACCESS_TOKEN` and your account's `MAPBOX_USERNAME` in `server/.env`.
+  Google's Places API (New) is used for **one** thing only — the richer
+  per-place metadata (rating, review count, opening hours) fetched when a user
+  taps a single search result — and its key (`GOOGLE_MAPS_API_KEY`) also stays
+  server-side.
 
 ### 4. ranmap-server (AI trip assistant + phone verification + voice)
 
@@ -160,18 +171,28 @@ cp .env.example .env
 
 Fill in `server/.env`:
 
+Supabase and Anthropic are required — the server won't start without them.
+Everything else is **optional**: leave it unset and the server still runs, with
+only the routes that need it returning `503` (and a startup warning listing
+what's missing). Uncomment + fill in what you have:
+
 ```
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SECRET_KEY=sb_secret_your-key   # Project Settings → API Keys — server-only, never ship this
 ANTHROPIC_API_KEY=your-anthropic-api-key
 # ANTHROPIC_MODEL=claude-sonnet-4-5                 # optional override
-GOOGLE_MAPS_API_KEY=your-google-maps-server-key   # Directions/Places web-service key, restrict by server IP
-TWILIO_ACCOUNT_SID=your-twilio-account-sid
-TWILIO_AUTH_TOKEN=your-twilio-auth-token
-TWILIO_VERIFY_SERVICE_SID=your-twilio-verify-service-sid   # Twilio Console → Verify → Services
-LIVEKIT_URL=wss://your-project.livekit.cloud               # LiveKit Cloud (or a self-hosted server)
-LIVEKIT_API_KEY=your-livekit-api-key
-LIVEKIT_API_SECRET=your-livekit-api-secret
+# --- optional integrations ---
+# GOOGLE_MAPS_API_KEY=your-google-maps-server-key   # Places API (New); per-place details only
+# MAPBOX_ACCESS_TOKEN=sk.your-mapbox-secret-token   # SECRET (sk.), not pk.: mints the app's map token, so needs tokens:write + styles:read/fonts:read/styles:tiles
+# MAPBOX_USERNAME=your-mapbox-username              # account the app's rendering tokens are minted under
+# REVENUECAT_SECRET_KEY=sk_your_revenuecat_secret_key   # billing. Reads subscriber state
+# REVENUECAT_WEBHOOK_AUTH=long-random-string            # matches the RevenueCat webhook's Authorization header
+# TWILIO_ACCOUNT_SID=your-twilio-account-sid
+# TWILIO_AUTH_TOKEN=your-twilio-auth-token
+# TWILIO_VERIFY_SERVICE_SID=your-twilio-verify-service-sid   # Twilio Console → Verify → Services
+# LIVEKIT_URL=wss://your-project.livekit.cloud               # LiveKit Cloud (or a self-hosted server)
+# LIVEKIT_API_KEY=your-livekit-api-key
+# LIVEKIT_API_SECRET=your-livekit-api-secret
 # CORS_ORIGIN=https://app.example.com             # optional; only needed for Flutter web
 ```
 
@@ -190,6 +211,49 @@ caller's own profile with the secret key; for voice, checks the
 caller is actually a trip participant / group member (via the same SQL
 predicates RLS uses) and mints a short-lived LiveKit room token.
 
+### Plans (Ranmap Pro)
+
+Paid features are gated **server-side** — the client's flags are UX only, so a
+patched app can't bypass them. `profiles.plan` (see
+`supabase/migrations/0009_plans.sql`) is written **only** by the billing webhook
+using the secret key; clients can read their own plan via the `my_plan()` RPC
+but have no UPDATE grant on it.
+
+- **Gated, per user**: the AI assistant (`/ai/*`) and a daily cap on route &
+  place search (`/maps/*`). Free accounts get a metered allowance first
+  (`requireProOrTrial`), so the feature is discoverable before it's paywalled.
+  The meter lives in Postgres (`consume_usage`), so it's shared across server
+  instances.
+- **Gated, travel together**: voice channels (`/voice/token`) are unlocked when
+  **any** member of the trip/group is Pro, not just the caller — one subscriber
+  covers the whole crew (`trip_has_pro` / `group_has_pro`).
+- **Gated, hard caps** (`0010_plan_limits.sql`, enforced by DB triggers so a
+  modified client can't bypass them): free accounts may keep **3** active trips,
+  pin **25** photos, and groups are capped at **6** members. Raising a member to
+  Pro lifts that group's cap for everyone.
+- **Gated, display-only**: full trip stats & history.
+- A gate returns **HTTP 402** with `{ code: "premium_required", feature }`, which
+  the client turns into the Ranmap Pro paywall (`showPaywall`); DB cap triggers
+  raise `Ranmap Pro required: …`, which the client maps to the same paywall.
+
+Billing is wired through **RevenueCat** (which wraps StoreKit 2 / Play Billing):
+
+- The client configures the RevenueCat SDK with a **public** key
+  (`REVENUECAT_IOS_KEY` / `REVENUECAT_ANDROID_KEY` in the app `.env`), logs the
+  user in with their Supabase id, and drives the paywall from the `pro`
+  entitlement (`lib/features/premium/revenuecat.dart`).
+- RevenueCat calls `POST /billing/revenuecat`; the server verifies the shared
+  `Authorization` value (`REVENUECAT_WEBHOOK_AUTH`), re-reads the subscriber via
+  the RevenueCat API with the secret key (`REVENUECAT_SECRET_KEY`), and writes
+  `profiles.plan` — the only writer. So a leaked client key can't grant Pro, and
+  the app never holds a secret.
+
+To enable it: create the products in App Store Connect / Play Console, attach
+them to a `pro` entitlement with current + default offerings in RevenueCat, set
+the two public keys in `.env` and the two server keys in `server/.env`, and point
+the RevenueCat webhook at `/billing/revenuecat`. With no keys set the app runs
+normally and the paywall reports billing as unavailable.
+
 ### 5. Install & run
 
 ```
@@ -198,7 +262,16 @@ flutter run
 ```
 
 Location, microphone, and camera permission strings are already declared in
-`Info.plist` (iOS) and `AndroidManifest.xml` (Android).
+`Info.plist` (iOS/macOS) and `AndroidManifest.xml` (Android); the macOS
+entitlements cover network, camera, audio input, and location.
+
+### Release signing (Android)
+
+`flutter run --release` works out of the box (it falls back to the debug
+keys), but a real release must be signed with your own keystore. Copy
+`android/key.properties.example` to `android/key.properties`, point
+`storeFile` at your keystore, and fill in the passwords — `build.gradle.kts`
+picks it up automatically (and both files are gitignored).
 
 ## What's already wired
 
@@ -219,13 +292,14 @@ Location, microphone, and camera permission strings are already declared in
   theirs.
 - **Route planning & nearby places**: `PlanRouteScreen` (from "Plan route"
   in New Trip) lets you pick an origin and destination and fetches
-  alternate routes from the Directions API — tap a route's chip to select it,
+  alternate routes — tap a route's chip to select it,
   then "Use this route" saves it on the trip (`origin_*`/
   `destination_*`/`route_polyline`, via the extended `create_trip` RPC).
   The active trip's route renders as a polyline on the live map. A search
-  FAB on the map opens `NearbyPlacesSheet`, which queries the Places API for
-  nearby food/fuel/lodging/sights around your current position and drops a
-  marker on the one you pick.
+  FAB on the map opens `NearbyPlacesSheet`, which searches nearby
+  food/fuel/lodging/sights around your current position and drops a marker on
+  the one you pick. Tapping a result fetches its rating, review count, and
+  opening hours.
 - **Live sync**: while a trip is active, your own GPS position streams to
   `location_pings` (`locationBroadcastProvider`), and every other member's
   latest position renders as a live 3D vehicle model on the map via the
@@ -263,6 +337,19 @@ Location, microphone, and camera permission strings are already declared in
   bucket and appear as yellow pins for every trip participant
   (`map_posts`, RLS-scoped via `can_view_map_post`); tapping one opens a
   viewer sheet with a signed URL, and the poster can delete their own photo.
+  A **photo gallery** (`TripPhotosScreen`, opened from the trip's app bar)
+  shows every photo on a trip as a grid instead of only as map pins.
+- **Along-the-way places**: the map's nearby-places sheet has a "Search along
+  the route" toggle when the active trip has a planned route — it hands the
+  route polyline to the provider's native search-along-route search (one
+  request covering the whole route), so you can find fuel/food *on the way*
+  rather than only around your current position.
+- **Next-stop ETA**: the Stops tab shows a banner for the next un-arrived
+  stop with the distance from your live position and an ETA derived from the
+  trip's average speed.
+- **Fuel estimate**: the Stats tab derives a `$ / km` rate from the trip's
+  fuel expenses and distance, and (when a route is planned) projects the
+  estimated fuel cost for the whole route from its polyline.
 - **Trip stops & expenses**: `TripDetailScreen` (opened by tapping a trip)
   has a Stops tab and an Expenses tab (log fuel/food/toll/lodging/other with
   optional fuel-liters/odometer, running total + per-category breakdown) —
@@ -283,11 +370,15 @@ Location, microphone, and camera permission strings are already declared in
   `ranmap-server`, with a conversation list screen (`AiConversationsScreen`)
   to browse, resume, or delete past conversations, or start a new one.
   Messages are stored in `ai_conversations`/`ai_messages`; the assistant can
-  call three tools — `save_place` (writes to `ai_saved_places`),
+  call five tools — `save_place` (writes to `ai_saved_places`),
   `create_trip` (creates a trip and enrolls the user as its first accepted
-  member, optionally scheduling it in the same step), and `schedule_trip`
+  member, optionally scheduling it in the same step), `schedule_trip`
   (looks up one of the user's existing trips by title and inserts into
-  `scheduled_trips`). The client only ever talks to the backend,
+  `scheduled_trips`), `invite_friend_to_trip` (looks up a user by exact
+  username and adds them to a trip the caller is on), and `add_stop`
+  (appends a located stop to one of the caller's trips). All tool inputs are
+  validated server-side (latitude/longitude ranges, future-only schedule
+  times, allowlisted stop kinds) and scoped to the authenticated user. The client only ever talks to the backend,
   authenticated via the forwarded Supabase session token — no LLM key on the
   client. A poller in `ranmap-server` (`lib/scheduler.ts`, every 60s) checks
   `scheduled_trips` for entries whose time has arrived and flips the trip to
@@ -324,6 +415,19 @@ Location, microphone, and camera permission strings are already declared in
   friendship graph, chat messages, and AI assistant conversations/saved
   places/scheduled trips — all RLS-scoped to participants.
 
+## Tests & CI
+
+- **Client**: `flutter test` runs the unit tests in `test/` — model
+  parsing/round-trips, the offline outbox, polyline decoding, the trip-stats
+  rollup, the map-engine helpers, and the geo distance helper.
+- **Server**: `cd server && npm test` (Node's built-in test runner via
+  `tsx`) covers the rate limiter's bucketing/`Retry-After` behaviour.
+- **Database**: `supabase test db` runs the pgTAP suite in
+  `supabase/tests/rls_test.sql` — RLS-enabled checks, the RPC EXECUTE grants,
+  and behavioural checks that a non-member can't read or self-join a trip.
+- **CI**: `.github/workflows/ci.yml` runs `flutter analyze` + `flutter test`
+  and, for the server, `npm run typecheck` + `npm test` + `npm run build`.
+
 ## Roadmap (not yet built)
 
 Each of these is a substantial feature; the schema and folder structure
@@ -334,19 +438,19 @@ already anticipate them:
   connection drops. Still open: it's audio-only (no video), there's no
   push-to-talk/deafen, and it isn't "always-on" Discord-style — you join
   explicitly rather than the app auto-joining when a trip goes active.
-- **Photo sharing polish**: capture/pin is live (see above). Still open: a UI
-  for `map_post_shares` (sharing a specific photo with a friend or another
-  group beyond its default trip-participant visibility), and a gallery/grid
-  view of a trip's photos instead of only pins on the map.
-- **AI trip assistant polish**: the chat UI, conversation history, and
-  `save_place`/`create_trip`/`schedule_trip` tools are all live (see above).
-  Still open: more tools (e.g. inviting friends to a trip, adding a stop),
-  and the `ranmap-server` scheduler poller could move to a proper job queue
-  or Supabase Edge Function on a cron trigger for production instead of an
-  in-process `setInterval`.
+- **Photo sharing polish**: capture/pin and the trip gallery/grid are live
+  (see above). Still open: a UI for `map_post_shares` (sharing a specific
+  photo with a friend or another group beyond its default trip-participant
+  visibility).
+- **AI trip assistant polish**: the chat UI, conversation history, and all
+  five tools (`save_place`/`create_trip`/`schedule_trip`/
+  `invite_friend_to_trip`/`add_stop`) are live (see above). Still open: the
+  `ranmap-server` scheduler poller could move to a proper job queue or
+  Supabase Edge Function on a cron trigger for production instead of an
+  in-process `setTimeout` loop.
 - **Route planning polish**: origin/destination are picked on the map
   rather than searched by name/address (no Places Autocomplete/geocoding
   yet), and a planned route isn't re-plannable once a trip is active —
-  `update_trip_route` exists for this but no screen calls it yet. Nearby
-  places also aren't tied to the route itself (e.g. "along the way"), only
-  to a single point.
+  `update_trip_route` exists for this but no screen calls it yet.
+- **Voice always-on**: joining is still explicit; an app-wide voice session
+  that auto-joins when a trip goes active (Discord-style) isn't built.

@@ -76,6 +76,12 @@ class Outbox {
   /// Number of writes still waiting to sync; watch it to surface a badge.
   final ValueNotifier<int> pending = ValueNotifier<int>(0);
 
+  /// Writes that were permanently rejected (RLS denial, validation failure)
+  /// and dropped from the queue without ever reaching the server. Kept here —
+  /// not just logged — so the UI can tell the user their change was lost
+  /// instead of silently discarding it. Cleared via [acknowledgeFailed].
+  final ValueNotifier<List<OutboxEntry>> failed = ValueNotifier<List<OutboxEntry>>(const []);
+
   /// True while a drain pass is running (guards against overlapping drains of
   /// the same outbox).
   bool draining = false;
@@ -146,6 +152,17 @@ class Outbox {
     await _ensureLoaded();
     _entries.removeWhere((e) => e.id == id);
     await _persist();
+  }
+
+  /// Records that [entry] was permanently rejected and removed from the
+  /// queue, so the UI can surface the loss instead of it vanishing silently.
+  void recordFailed(OutboxEntry entry) {
+    failed.value = [...failed.value, entry];
+  }
+
+  /// Dismisses all currently-surfaced failures once the user has seen them.
+  void acknowledgeFailed() {
+    failed.value = const [];
   }
 }
 

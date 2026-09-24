@@ -146,7 +146,7 @@ class _LinkedSocialsScreenState extends ConsumerState<LinkedSocialsScreen> {
                       const Chip(
                         avatar: Icon(Icons.verified_rounded, size: 16, color: Colors.white),
                         label: Text('Verified'),
-                        backgroundColor: Color(0xFF3A9D5C),
+                        backgroundColor: AppTheme.success,
                         labelStyle: TextStyle(color: Colors.white),
                         visualDensity: VisualDensity.compact,
                       ),

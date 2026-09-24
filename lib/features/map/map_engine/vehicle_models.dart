@@ -34,7 +34,7 @@ class VehiclePose {
 ///
 /// Models are authored at real-world scale (meters, glTF Y-up, facing +X), so a
 /// single unit scale reads correctly against Mapbox's 3D buildings. Regenerate
-/// them with `tool/generate_vehicle_models.dart`.
+/// them with `python3 tool/generate_vehicle_models.py`.
 abstract final class VehicleModels {
   const VehicleModels._();
 

@@ -2,12 +2,18 @@ import { Router } from "express";
 import twilio from "twilio";
 import { asyncHandler } from "../lib/async-handler.js";
 import { env } from "../lib/env.js";
-import { fail, isUniqueViolation } from "../lib/errors.js";
+import { fail, isUniqueViolation, notConfigured } from "../lib/errors.js";
 import { rateLimit } from "../lib/rate-limit.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { requireAuth } from "../middleware/require-auth.js";
 
-const twilioClient = twilio(env.twilioAccountSid, env.twilioAuthToken);
+// Twilio is an optional integration. The client is created per request, after
+// the handler has confirmed the credentials exist, so a missing key can't crash
+// startup (see `notConfigured`). The timeout cap stops a hung Twilio call from
+// blocking the request until the SDK's much longer default.
+function createTwilioClient(accountSid: string, authToken: string) {
+  return twilio(accountSid, authToken, { timeout: 10_000 });
+}
 
 export const phoneRouter = Router();
 
@@ -52,6 +58,12 @@ phoneRouter.post(
   sendCodeLimit,
   sendCodePerNumberLimit,
   asyncHandler(async (req, res) => {
+    const { twilioAccountSid, twilioAuthToken, twilioVerifyServiceSid } = env;
+    if (!twilioAccountSid || !twilioAuthToken || !twilioVerifyServiceSid) {
+      notConfigured(res, "Phone verification");
+      return;
+    }
+
     const phoneNumber = String(req.body?.phoneNumber ?? "").trim();
     if (!/^\+[1-9]\d{6,14}$/.test(phoneNumber)) {
       res.status(400).json({ error: "phoneNumber must be in E.164 format, e.g. +15551234567" });
@@ -59,8 +71,8 @@ phoneRouter.post(
     }
 
     try {
-      await twilioClient.verify.v2
-        .services(env.twilioVerifyServiceSid)
+      await createTwilioClient(twilioAccountSid, twilioAuthToken)
+        .verify.v2.services(twilioVerifyServiceSid)
         .verifications.create({ to: phoneNumber, channel: "sms" });
       res.json({ ok: true });
     } catch (err) {
@@ -77,6 +89,12 @@ phoneRouter.post(
   checkCodeLimit,
   checkCodePerNumberLimit,
   asyncHandler(async (req, res) => {
+    const { twilioAccountSid, twilioAuthToken, twilioVerifyServiceSid } = env;
+    if (!twilioAccountSid || !twilioAuthToken || !twilioVerifyServiceSid) {
+      notConfigured(res, "Phone verification");
+      return;
+    }
+
     const userId = req.userId;
     const phoneNumber = String(req.body?.phoneNumber ?? "").trim();
     const code = String(req.body?.code ?? "").trim();
@@ -87,8 +105,8 @@ phoneRouter.post(
 
     let approved = false;
     try {
-      const check = await twilioClient.verify.v2
-        .services(env.twilioVerifyServiceSid)
+      const check = await createTwilioClient(twilioAccountSid, twilioAuthToken)
+        .verify.v2.services(twilioVerifyServiceSid)
         .verificationChecks.create({ to: phoneNumber, code });
       approved = check.status === "approved";
     } catch (err) {

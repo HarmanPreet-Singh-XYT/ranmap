@@ -5,6 +5,8 @@ import '../../core/theme/app_theme.dart';
 import '../../core/util/error_text.dart';
 import '../../data/models/trip.dart';
 import '../../data/services/supabase_service.dart';
+import '../premium/paywall.dart';
+import '../premium/premium_providers.dart';
 import '../social/social_providers.dart';
 import 'plan_route_screen.dart';
 import 'trip_providers.dart';
@@ -130,7 +132,13 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
       }
       Navigator.of(context).pop(trip);
     } catch (e) {
-      setState(() => _error = friendlyError(e));
+      if (!mounted) return;
+      // Over the free active-trip cap (a DB trigger): offer Pro, don't error.
+      if (looksPremiumRequired(e)) {
+        await showPaywall(context, feature: PremiumFeature.trips);
+      } else {
+        setState(() => _error = friendlyError(e));
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }

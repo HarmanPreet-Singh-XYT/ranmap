@@ -20,6 +20,21 @@ class AppTheme {
   /// border/label so selection is conveyed by more than color alone.
   static const Color primaryContainer = Color(0xFFFFE5DC);
 
+  /// Warm tint used for highlighted/featured cards.
+  static const Color cardTint = Color(0xFFFFF3EE);
+
+  /// Positive/confirmed state (successful send, joined, speaking).
+  static const Color success = Color(0xFF3A9D5C);
+
+  /// Informational text on a light surface (~5.9:1 on white).
+  static const Color notice = Color(0xFF2E7D32);
+
+  /// Caution/attention accent (e.g. a warning marker).
+  static const Color warning = Color(0xFFF5B301);
+
+  /// Photo-pin accent, distinct from the coral primary.
+  static const Color photoPin = Color(0xFF8E44AD);
+
   static ThemeData light() {
     final base = ThemeData(
       useMaterial3: true,

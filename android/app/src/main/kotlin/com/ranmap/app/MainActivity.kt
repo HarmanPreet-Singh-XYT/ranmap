@@ -1,4 +1,4 @@
-package com.example.ranmap
+package com.ranmap.app
 
 import io.flutter.embedding.android.FlutterActivity
 

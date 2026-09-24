@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/constants/defaults.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/ai_message.dart';
+import '../premium/paywall.dart';
+import '../premium/premium_providers.dart';
 import 'ai_providers.dart';
 
 class AiAssistantScreen extends ConsumerStatefulWidget {
@@ -19,7 +22,7 @@ class AiAssistantScreen extends ConsumerStatefulWidget {
 class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
   final _inputController = TextEditingController();
   final _scrollController = ScrollController();
-  late String _conversationId = widget.conversationId ?? 'new';
+  late String _conversationId = widget.conversationId ?? kNewConversationId;
   final List<AiMessage> _localMessages = [];
   bool _sending = false;
 
@@ -58,11 +61,25 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
       ref.invalidate(aiConversationsProvider);
     } catch (e) {
       if (!mounted) return;
-      // Drop the optimistic bubble so a failed send isn't shown as delivered,
-      // and restore the text so the user can retry it.
-      setState(() => _localMessages.removeWhere((m) => m.id == local.id));
-      _inputController.text = text;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+      // The server persists the user's message before contacting the
+      // assistant, so a failure here (assistant unavailable) still leaves the
+      // message saved server-side under a real conversation — refetch so it
+      // reappears from the server rather than vanishing along with the local
+      // echo. Only a brand-new conversation with no server round-trip yet
+      // (still "new") has nothing to refetch, so drop the echo there.
+      if (_conversationId == kNewConversationId) {
+        setState(() => _localMessages.removeWhere((m) => m.id == local.id));
+        _inputController.text = text;
+      } else {
+        setState(() => _localMessages.removeWhere((m) => m.id == local.id));
+        ref.invalidate(aiMessagesProvider(_conversationId));
+      }
+      // Out of free messages (or otherwise gated): show the paywall, not an error.
+      if (isPremiumRequired(e)) {
+        await showPaywall(context, feature: PremiumFeature.aiAssistant);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+      }
     } finally {
       if (mounted) setState(() => _sending = false);
       _scrollToBottom();
@@ -82,7 +99,7 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final remoteMessages = _conversationId == 'new'
+    final remoteMessages = _conversationId == kNewConversationId
         ? const AsyncValue<List<AiMessage>>.data([])
         : ref.watch(aiMessagesProvider(_conversationId));
 

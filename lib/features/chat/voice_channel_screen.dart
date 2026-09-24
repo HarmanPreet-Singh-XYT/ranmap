@@ -5,7 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 
+import '../../core/theme/app_theme.dart';
 import '../../core/util/error_text.dart';
+import '../premium/paywall.dart';
+import '../premium/premium_providers.dart';
 import 'chat_providers.dart';
 import 'voice_providers.dart';
 
@@ -108,6 +111,18 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
         await room.dispose();
       }
       if (!mounted) return;
+      // Voice is a Pro feature: show the paywall (never a generic error, and
+      // never a reconnect loop), then return to the channel list.
+      if (isPremiumRequired(e)) {
+        setState(() {
+          _error = friendlyError(e);
+          _connecting = false;
+          _reconnecting = false;
+        });
+        await showPaywall(context, feature: PremiumFeature.voice);
+        if (mounted) Navigator.of(context).maybePop();
+        return;
+      }
       // A dropped connection during an auto-reconnect retries again; a failed
       // first join (bad token, not a member, backend down) surfaces an error
       // with a manual Retry instead of looping.
@@ -191,6 +206,14 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
   Widget build(BuildContext context) {
     final room = _room;
 
+    // "Travel together": this channel is unlocked when ANY member is Pro, even
+    // if the current user isn't — surface that so it's clear why it works.
+    final channel = widget.channel;
+    final proAsync = channel.tripId != null
+        ? ref.watch(tripProProvider(channel.tripId!))
+        : ref.watch(groupProProvider(channel.groupId!));
+    final proUnlocked = proAsync.valueOrNull ?? false;
+
     return Scaffold(
       appBar: AppBar(title: Text('${widget.title} · Voice')),
       body: _connecting
@@ -231,6 +254,7 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
                             child: Text('Reconnecting…'),
                           ),
                         ],
+                        if (proUnlocked) const _ProVoiceBanner(),
                         Expanded(child: _ParticipantList(room: room)),
                       ],
                     ),
@@ -255,6 +279,26 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
               ],
             ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+    );
+  }
+}
+
+class _ProVoiceBanner extends StatelessWidget {
+  const _ProVoiceBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: AppTheme.primaryContainer,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: const Row(
+        children: [
+          Icon(Icons.workspace_premium_rounded, size: 18, color: AppTheme.primary),
+          SizedBox(width: 8),
+          Expanded(child: Text('Pro voice — unlocked for everyone here')),
+        ],
+      ),
     );
   }
 }
@@ -285,7 +329,7 @@ class _ParticipantList extends StatelessWidget {
           child: ListTile(
             leading: CircleAvatar(
               backgroundColor: participant.isSpeaking
-                  ? const Color(0xFF3A9D5C)
+                  ? AppTheme.success
                   : Theme.of(context).colorScheme.surfaceContainerHighest,
               child: const Icon(Icons.person),
             ),
@@ -293,7 +337,7 @@ class _ParticipantList extends StatelessWidget {
             subtitle: Text(isLocal ? 'You' : 'In voice'),
             trailing: Icon(
               participant.isMuted ? Icons.mic_off_rounded : Icons.mic_rounded,
-              color: participant.isMuted ? Colors.grey : const Color(0xFF3A9D5C),
+              color: participant.isMuted ? Colors.grey : AppTheme.success,
             ),
           ),
         );

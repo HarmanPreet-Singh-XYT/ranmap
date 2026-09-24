@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/util/error_text.dart';
@@ -54,7 +53,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
             'Account created. Check $email to confirm your address, then sign in.');
       }
       // If a session came back, the router redirect sends them to onboarding.
-    } on AuthException catch (e) {
+    } catch (e) {
+      // Catches AuthException as well as network failures (offline,
+      // timeout) so a bad connection during sign-up shows a message instead
+      // of surfacing as an unhandled error.
       if (mounted) setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -93,7 +95,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
               ],
               if (_info != null) ...[
                 const SizedBox(height: 12),
-                Text(_info!, style: const TextStyle(color: Color(0xFF2E7D32))),
+                Text(_info!, style: const TextStyle(color: AppTheme.notice)),
               ],
               const SizedBox(height: 24),
               ElevatedButton(

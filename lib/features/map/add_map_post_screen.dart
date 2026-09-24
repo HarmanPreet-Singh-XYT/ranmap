@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/util/error_text.dart';
+import '../premium/paywall.dart';
+import '../premium/premium_providers.dart';
 import 'map_post_providers.dart';
 
 /// Capture or pick a photo and pin it to the current location on the trip's
@@ -62,7 +64,12 @@ class _AddMapPostScreenState extends ConsumerState<AddMapPostScreen> {
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+      // Over the free photo cap (a DB trigger): offer Pro, don't error.
+      if (looksPremiumRequired(e)) {
+        await showPaywall(context, feature: PremiumFeature.photos);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }

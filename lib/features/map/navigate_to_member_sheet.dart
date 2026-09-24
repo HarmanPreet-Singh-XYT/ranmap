@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart' hide Position;
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/constants/defaults.dart';
 import '../../core/theme/app_theme.dart';
 // `LocationSettings` collides with mapbox's; hide it so geolocator's is used.
 import 'map_engine/map_engine.dart' hide LocationSettings;
@@ -15,21 +16,29 @@ Future<void> showNavigateToMemberSheet(
   BuildContext context, {
   required Position destination,
   String? username,
+  String? vehicleType,
 }) {
   return showModalBottomSheet(
     context: context,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
-    builder: (context) => _NavigateToMemberSheet(destination: destination, username: username),
+    builder: (context) => _NavigateToMemberSheet(
+      destination: destination,
+      username: username,
+      vehicleType: vehicleType,
+    ),
   );
 }
 
 class _NavigateToMemberSheet extends StatefulWidget {
-  const _NavigateToMemberSheet({required this.destination, this.username});
+  const _NavigateToMemberSheet({required this.destination, this.username, this.vehicleType});
 
   final Position destination;
   final String? username;
+
+  /// The current user's vehicle, used to pick a sensible hand-off mode.
+  final String? vehicleType;
 
   @override
   State<_NavigateToMemberSheet> createState() => _NavigateToMemberSheetState();
@@ -50,7 +59,7 @@ class _NavigateToMemberSheetState extends State<_NavigateToMemberSheet> {
       final position =
           await Geolocator.getLastKnownPosition() ??
               await Geolocator.getCurrentPosition(
-                locationSettings: const LocationSettings(timeLimit: Duration(seconds: 15)),
+                locationSettings: const LocationSettings(timeLimit: kLocationFixTimeout),
               );
       if (!mounted) return;
       setState(() {
@@ -74,11 +83,19 @@ class _NavigateToMemberSheetState extends State<_NavigateToMemberSheet> {
     }
   }
 
+  /// Google Maps understands driving/walking/bicycling/transit. A bicycle gets
+  /// directions that respect it; every other vehicle (including scooters, which
+  /// Google has no mode for) hands off as driving.
+  String get _travelMode => switch (widget.vehicleType) {
+        'bike' => 'bicycling',
+        _ => 'driving',
+      };
+
   Future<void> _openTurnByTurn() async {
     final uri = Uri.parse(
       'https://www.google.com/maps/dir/?api=1&destination='
       '${widget.destination.lat},${widget.destination.lng}'
-      '&travelmode=driving',
+      '&travelmode=$_travelMode',
     );
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }

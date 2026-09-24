@@ -2,7 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../data/models/profile.dart';
-import '../../data/repositories/profile_repository.dart';
+import '../../data/providers/repository_providers.dart';
 import '../../data/services/supabase_service.dart';
 
 /// Emits the raw Supabase auth state (signed in / signed out).
@@ -15,5 +15,5 @@ final authStateProvider = StreamProvider<AuthState>((ref) {
 final myProfileProvider = FutureProvider<Profile?>((ref) async {
   final authState = ref.watch(authStateProvider).valueOrNull;
   if (authState?.session == null) return null;
-  return ProfileRepository().fetchMyProfile();
+  return ref.watch(profileRepositoryProvider).fetchMyProfile();
 });

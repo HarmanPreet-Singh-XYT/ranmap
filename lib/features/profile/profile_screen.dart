@@ -7,6 +7,8 @@ import '../../core/theme/app_theme.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/services/supabase_service.dart';
+import '../premium/paywall.dart';
+import '../premium/premium_providers.dart';
 import '../social/friends_screen.dart';
 import '../social/groups_screen.dart';
 import '../social/social_providers.dart';
@@ -121,6 +123,22 @@ class ProfileScreen extends ConsumerWidget {
                   MaterialPageRoute(builder: (_) => const TripHistoryScreen()),
                 ),
               ),
+              const SizedBox(height: 8),
+              Builder(builder: (context) {
+                final isPro = ref.watch(isProProvider);
+                return ListTile(
+                  leading: Icon(
+                    Icons.workspace_premium_rounded,
+                    color: isPro ? AppTheme.success : AppTheme.primary,
+                  ),
+                  title: const Text('Ranmap Pro'),
+                  subtitle: Text(
+                    isPro ? 'Active — thanks for the support' : 'Unlock AI, voice & unlimited search',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => showPaywall(context, feature: PremiumFeature.aiAssistant),
+                );
+              }),
               const SizedBox(height: 8),
               ListTile(
                 leading: const Icon(Icons.logout, color: AppTheme.danger),

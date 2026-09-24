@@ -40,4 +40,17 @@ class GroupRepository {
         .eq('group_id', groupId);
     return (rows as List).cast<Map<String, dynamic>>();
   }
+
+  /// Leave a group you're a member of (removes your own membership). RLS
+  /// allows a member to delete only their own row.
+  Future<void> leaveGroup(String groupId) async {
+    final uid = SupabaseService.currentUserId;
+    await _client.from('group_members').delete().eq('group_id', groupId).eq('user_id', uid);
+  }
+
+  /// Remove another member from the group. RLS restricts this to the group
+  /// owner; a non-owner call is rejected by the database.
+  Future<void> removeMember({required String groupId, required String userId}) async {
+    await _client.from('group_members').delete().eq('group_id', groupId).eq('user_id', userId);
+  }
 }

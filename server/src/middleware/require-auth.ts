@@ -24,10 +24,17 @@ function cacheGet(token: string): string | undefined {
     tokenCache.delete(token);
     return undefined;
   }
+  // Refresh insertion order so the Map's oldest-first eviction behaves as LRU:
+  // a hot token is re-inserted at the end and won't be evicted prematurely.
+  tokenCache.delete(token);
+  tokenCache.set(token, entry);
   return entry.userId;
 }
 
 function cacheSet(token: string, userId: string): void {
+  // Delete first so re-setting refreshes recency rather than leaving the old
+  // position in place.
+  tokenCache.delete(token);
   if (tokenCache.size >= TOKEN_CACHE_MAX) {
     const oldest = tokenCache.keys().next().value;
     if (oldest !== undefined) tokenCache.delete(oldest);

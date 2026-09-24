@@ -45,19 +45,28 @@ class MemberLocation {
 /// coming while the app is backgrounded (foreground service / background
 /// location mode), which is what makes live trip sharing work when the phone
 /// is in a pocket.
+///
+/// Background/foreground-service behaviour is only enabled while a trip is
+/// active: [MapScreen] is always mounted in the home shell, so without this
+/// the persistent "sharing your trip" notification (and the wake lock behind
+/// it) would appear from app launch even when nothing is being shared.
 final devicePositionProvider = StreamProvider.autoDispose<Position>((ref) {
+  final sharing = ref.watch(activeTripProvider).valueOrNull != null;
+
   if (Platform.isAndroid) {
     return Geolocator.getPositionStream(
       locationSettings: AndroidSettings(
         accuracy: LocationAccuracy.high,
         distanceFilter: 5,
-        foregroundNotificationConfig: const ForegroundNotificationConfig(
-          notificationTitle: 'Ranmap is sharing your trip',
-          notificationText: 'Your live location is being shared with your group.',
-          notificationChannelName: 'Live trip sharing',
-          enableWakeLock: true,
-          setOngoing: true,
-        ),
+        foregroundNotificationConfig: sharing
+            ? const ForegroundNotificationConfig(
+                notificationTitle: 'Ranmap is sharing your trip',
+                notificationText: 'Your live location is being shared with your group.',
+                notificationChannelName: 'Live trip sharing',
+                enableWakeLock: true,
+                setOngoing: true,
+              )
+            : null,
       ),
     );
   }
@@ -67,8 +76,8 @@ final devicePositionProvider = StreamProvider.autoDispose<Position>((ref) {
         accuracy: LocationAccuracy.high,
         distanceFilter: 5,
         activityType: ActivityType.automotiveNavigation,
-        allowBackgroundLocationUpdates: true,
-        showBackgroundLocationIndicator: true,
+        allowBackgroundLocationUpdates: sharing,
+        showBackgroundLocationIndicator: sharing,
         pauseLocationUpdatesAutomatically: false,
       ),
     );

@@ -7,8 +7,8 @@ import UIKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    // The Mapbox access token is set at runtime from Dart
-    // (MapboxOptions.setAccessToken — see lib/features/map/map_engine/map_engine.dart).
+    // The Mapbox access token is fetched at runtime and set from Dart
+    // (MapboxOptions.setAccessToken — see lib/features/map/map_engine/mapbox_token.dart).
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 

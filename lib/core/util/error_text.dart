@@ -1,8 +1,14 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Turns a raw exception into something worth showing a user, instead of
-/// leaking Postgres/Supabase internals into the UI.
+/// leaking Postgres/Supabase/OS internals into the UI.
 String friendlyError(Object error) {
+  if (error is SocketException || error is TimeoutException) {
+    return "You're offline — check your connection and try again.";
+  }
   if (error is AuthException) return error.message;
   if (error is PostgrestException) {
     switch (error.code) {
@@ -16,7 +22,9 @@ String friendlyError(Object error) {
       case 'PGRST116':
         return 'We couldn\'t find that.';
     }
-    return error.message.isNotEmpty ? error.message : 'Something went wrong.';
+    // No mapped code: a raw code (RLS/constraint text) shouldn't reach the
+    // user, so fall back to a generic message instead of error.message.
+    return 'Something went wrong. Please try again.';
   }
 
   final text = error.toString();

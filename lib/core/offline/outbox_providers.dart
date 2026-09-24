@@ -64,8 +64,10 @@ Future<void> _drain(Ref ref, Outbox outbox) async {
           break;
         }
         // A permanent error (RLS, validation) would wedge the queue, so drop
-        // just this entry.
+        // just this entry — but record it so the UI can tell the user their
+        // change was lost instead of it vanishing without a trace.
         debugPrint('outbox: dropping ${entry.type.wire} ${entry.id}: $error');
+        outbox.recordFailed(entry);
         await outbox.remove(entry.id);
       }
     }

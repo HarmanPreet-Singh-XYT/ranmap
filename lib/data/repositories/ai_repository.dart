@@ -1,9 +1,4 @@
-import 'dart:convert';
-
-import 'package:http/http.dart' as http;
-
-import '../../core/constants/env.dart';
-import '../../core/util/backend_error.dart';
+import '../../core/network/backend_client.dart';
 import '../models/ai_conversation.dart';
 import '../models/ai_message.dart';
 import '../services/supabase_service.dart';
@@ -19,11 +14,17 @@ class AiRepository {
   /// timeout — but not an unbounded one, or a hung server leaves the UI stuck.
   static const _timeout = Duration(seconds: 60);
 
+  // Bound the list sizes so a long-lived account can't pull an unbounded
+  // number of rows into memory.
+  static const _maxConversations = 100;
+  static const _maxMessages = 200;
+
   Future<List<AiConversation>> fetchConversations() async {
     final rows = await _client
         .from('ai_conversations')
         .select('id, title, created_at')
-        .order('created_at', ascending: false);
+        .order('created_at', ascending: false)
+        .limit(_maxConversations);
     return (rows as List)
         .map((r) => AiConversation.fromJson(r as Map<String, dynamic>))
         .toList();
@@ -38,7 +39,8 @@ class AiRepository {
         .from('ai_messages')
         .select()
         .eq('conversation_id', conversationId)
-        .order('created_at');
+        .order('created_at')
+        .limit(_maxMessages);
     return (rows as List)
         .map((r) => AiMessage.fromJson(r as Map<String, dynamic>))
         .toList();
@@ -47,27 +49,12 @@ class AiRepository {
   /// Sends [content] to the assistant for [conversationId] ("new" to start a
   /// fresh conversation) and returns the new conversation id.
   Future<String> sendMessage({required String conversationId, required String content}) async {
-    final token = _client.auth.currentSession?.accessToken;
-    if (token == null) throw StateError('Not signed in');
-
-    final response = await http
-        .post(
-          Uri.parse('${Env.backendUrl}/ai/conversations/$conversationId/messages'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $token',
-          },
-          body: jsonEncode({'content': content}),
-        )
-        .timeout(_timeout);
-
-    if (response.statusCode != 200) {
-      throw Exception(
-        backendErrorMessage(response.statusCode, response.body, 'AI assistant request failed'),
-      );
-    }
-
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = await BackendClient.postJson(
+      '/ai/conversations/$conversationId/messages',
+      {'content': content},
+      timeout: _timeout,
+      fallbackMessage: 'AI assistant request failed',
+    );
     return data['conversationId'] as String;
   }
 }

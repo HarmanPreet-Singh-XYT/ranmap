@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../offline/outbox.dart';
 import '../offline/outbox_providers.dart';
 import '../providers/connectivity_provider.dart';
 import '../theme/app_theme.dart';
@@ -19,40 +20,54 @@ class OfflineBanner extends ConsumerWidget {
     // whenever connectivity returns, for the whole app lifetime.
     ref.watch(outboxDrainProvider);
     final offline = ref.watch(isOfflineProvider);
-    final pending = ref.watch(outboxProvider).pending;
+    final outbox = ref.watch(outboxProvider);
 
     return ValueListenableBuilder<int>(
-      valueListenable: pending,
+      valueListenable: outbox.pending,
       builder: (context, count, _) {
-        final showStrip = offline || count > 0;
-        return Column(
-          children: [
-            if (offline)
-              _Strip(
-                color: AppTheme.danger,
-                icon: Icons.cloud_off_rounded,
-                text: count > 0
-                    ? "You're offline — $count change${count == 1 ? '' : 's'} will sync when you reconnect."
-                    : "You're offline — changes will sync when you reconnect.",
-              )
-            else if (count > 0)
-              _Strip(
-                color: AppTheme.secondary,
-                icon: Icons.sync_rounded,
-                text: 'Syncing $count pending change${count == 1 ? '' : 's'}…',
-              ),
-            Expanded(
-              // The strip already paints the status-bar area, so stop the app
-              // bar below it from adding that inset a second time.
-              child: showStrip
-                  ? MediaQuery.removePadding(
-                      context: context,
-                      removeTop: true,
-                      child: child,
-                    )
-                  : child,
-            ),
-          ],
+        return ValueListenableBuilder<List<OutboxEntry>>(
+          valueListenable: outbox.failed,
+          builder: (context, failedEntries, _) {
+            final showStrip = offline || count > 0 || failedEntries.isNotEmpty;
+            return Column(
+              children: [
+                if (failedEntries.isNotEmpty)
+                  _Strip(
+                    color: AppTheme.danger,
+                    icon: Icons.error_outline_rounded,
+                    text: failedEntries.length == 1
+                        ? "1 change couldn't be saved and was lost. Please try again."
+                        : "${failedEntries.length} changes couldn't be saved and were lost. Please try again.",
+                    onDismiss: outbox.acknowledgeFailed,
+                  )
+                else if (offline)
+                  _Strip(
+                    color: AppTheme.danger,
+                    icon: Icons.cloud_off_rounded,
+                    text: count > 0
+                        ? "You're offline — $count change${count == 1 ? '' : 's'} will sync when you reconnect."
+                        : "You're offline — changes will sync when you reconnect.",
+                  )
+                else if (count > 0)
+                  _Strip(
+                    color: AppTheme.secondary,
+                    icon: Icons.sync_rounded,
+                    text: 'Syncing $count pending change${count == 1 ? '' : 's'}…',
+                  ),
+                Expanded(
+                  // The strip already paints the status-bar area, so stop the app
+                  // bar below it from adding that inset a second time.
+                  child: showStrip
+                      ? MediaQuery.removePadding(
+                          context: context,
+                          removeTop: true,
+                          child: child,
+                        )
+                      : child,
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -60,11 +75,12 @@ class OfflineBanner extends ConsumerWidget {
 }
 
 class _Strip extends StatelessWidget {
-  const _Strip({required this.color, required this.icon, required this.text});
+  const _Strip({required this.color, required this.icon, required this.text, this.onDismiss});
 
   final Color color;
   final IconData icon;
   final String text;
+  final VoidCallback? onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -81,6 +97,14 @@ class _Strip extends StatelessWidget {
               Expanded(
                 child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 13)),
               ),
+              if (onDismiss != null)
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, size: 18, color: Colors.white),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  tooltip: 'Dismiss',
+                  onPressed: onDismiss,
+                ),
             ],
           ),
         ),

@@ -6,7 +6,7 @@ import '../../core/router/auth_state_provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/util/error_text.dart';
 import '../../data/models/profile.dart';
-import '../../data/repositories/profile_repository.dart';
+import '../../data/providers/repository_providers.dart';
 
 class EditProfileScreen extends ConsumerStatefulWidget {
   const EditProfileScreen({super.key, required this.profile});
@@ -50,7 +50,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       _error = null;
     });
 
-    final repo = ProfileRepository();
+    final repo = ref.read(profileRepositoryProvider);
     try {
       if (username.toLowerCase() != widget.profile.username.toLowerCase()) {
         final available = await repo.isUsernameAvailable(username);

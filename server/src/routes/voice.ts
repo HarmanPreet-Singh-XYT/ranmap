@@ -2,7 +2,9 @@ import { AccessToken } from "livekit-server-sdk";
 import { Router } from "express";
 import { asyncHandler } from "../lib/async-handler.js";
 import { env } from "../lib/env.js";
-import { fail } from "../lib/errors.js";
+import { fail, notConfigured } from "../lib/errors.js";
+import { premiumRequired } from "../lib/plans.js";
+import { tripOrGroupHasPro } from "../lib/plan-store.js";
 import { rateLimit } from "../lib/rate-limit.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { requireAuth } from "../middleware/require-auth.js";
@@ -31,6 +33,13 @@ voiceRouter.post(
   "/token",
   tokenLimit,
   asyncHandler(async (req, res) => {
+    // LiveKit is an optional integration: fail fast and clearly if it isn't set.
+    const { livekitUrl, livekitApiKey, livekitApiSecret } = env;
+    if (!livekitUrl || !livekitApiKey || !livekitApiSecret) {
+      notConfigured(res, "Voice channels");
+      return;
+    }
+
     const userId = req.userId;
     const tripId = typeof req.body?.tripId === "string" ? req.body.tripId : undefined;
     const groupId = typeof req.body?.groupId === "string" ? req.body.groupId : undefined;
@@ -64,18 +73,36 @@ voiceRouter.post(
       return;
     }
 
+    // Voice is a Pro feature, but "travel together": if the caller OR any other
+    // member of this trip/group is Pro, the whole trip/group is unlocked.
+    let unlocked: boolean;
+    try {
+      unlocked = await tripOrGroupHasPro(userId, { tripId, groupId });
+    } catch (err) {
+      fail(res, err, 500, "Something went wrong.", "voice: plan check");
+      return;
+    }
+    if (!unlocked) {
+      premiumRequired(
+        res,
+        "voice",
+        "Voice channels are a Ranmap Pro feature — and if anyone on this trip has Pro, everyone gets it.",
+      );
+      return;
+    }
+
     try {
       const roomName = tripId ? `trip:${tripId}` : `group:${groupId}`;
       const identity = await participantIdentity(userId);
 
-      const token = new AccessToken(env.livekitApiKey, env.livekitApiSecret, {
+      const token = new AccessToken(livekitApiKey, livekitApiSecret, {
         identity: userId,
         name: identity,
         ttl: "1h",
       });
       token.addGrant({ room: roomName, roomJoin: true, canPublish: true, canSubscribe: true });
 
-      res.json({ url: env.livekitUrl, token: await token.toJwt(), roomName });
+      res.json({ url: livekitUrl, token: await token.toJwt(), roomName });
     } catch (err) {
       fail(res, err, 502, "Could not start the voice channel. Please try again.", "voice: mint token");
     }

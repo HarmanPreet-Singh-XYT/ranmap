@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/error_retry.dart';
+import '../premium/paywall.dart';
+import '../premium/premium_providers.dart';
 import '../trip/trip_providers.dart';
 
 class TripHistoryScreen extends ConsumerWidget {
@@ -17,6 +19,35 @@ class TripHistoryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Full stats & history are a Pro feature.
+    if (!ref.watch(isProProvider)) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Trip stats & history')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.workspace_premium_rounded, size: 48, color: AppTheme.primary),
+                const SizedBox(height: 16),
+                const Text(
+                  'Trip stats & history are a Ranmap Pro feature.\n'
+                  'Unlock your full distance, speed and duration history across every trip.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed: () => showPaywall(context, feature: PremiumFeature.history),
+                  child: const Text('Upgrade to Pro'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     final statsAsync = ref.watch(myTripStatsProvider);
 
     return Scaffold(
@@ -50,7 +81,7 @@ class TripHistoryScreen extends ConsumerWidget {
             padding: const EdgeInsets.all(16),
             children: [
               Card(
-                color: const Color(0xFFFFF3EE),
+                color: AppTheme.cardTint,
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Row(

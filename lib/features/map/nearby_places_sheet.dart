@@ -4,6 +4,7 @@ import '../../core/util/error_text.dart';
 import '../../data/models/route_option.dart';
 import '../../data/services/google_maps_api_service.dart';
 import 'map_engine/map_engine.dart';
+import 'place_details_sheet.dart';
 
 const _kPlaceTypes = [
   ('restaurant', 'Food', Icons.restaurant_rounded),
@@ -12,21 +13,27 @@ const _kPlaceTypes = [
   ('tourist_attraction', 'Sights', Icons.landscape_rounded),
 ];
 
-/// Search for nearby shops/POIs around [center] (Places API "nearby
-/// search"). Returns the selected [NearbyPlace], or null if dismissed
-/// without a selection.
-Future<NearbyPlace?> showNearbyPlacesSheet(BuildContext context, {required Position center}) {
+/// Search for nearby shops/POIs around [center]. When [routePolyline] is
+/// supplied, the user can also search along that route. Tapping a result opens
+/// its details, where it can be pinned on the map — returns the selected
+/// [NearbyPlace], or null if dismissed without pinning.
+Future<NearbyPlace?> showNearbyPlacesSheet(
+  BuildContext context, {
+  required Position center,
+  String? routePolyline,
+}) {
   return showModalBottomSheet<NearbyPlace>(
     context: context,
     isScrollControlled: true,
-    builder: (_) => _NearbyPlacesSheet(center: center),
+    builder: (_) => _NearbyPlacesSheet(center: center, routePolyline: routePolyline),
   );
 }
 
 class _NearbyPlacesSheet extends StatefulWidget {
   final Position center;
+  final String? routePolyline;
 
-  const _NearbyPlacesSheet({required this.center});
+  const _NearbyPlacesSheet({required this.center, this.routePolyline});
 
   @override
   State<_NearbyPlacesSheet> createState() => _NearbyPlacesSheetState();
@@ -34,9 +41,13 @@ class _NearbyPlacesSheet extends StatefulWidget {
 
 class _NearbyPlacesSheetState extends State<_NearbyPlacesSheet> {
   String _type = _kPlaceTypes.first.$1;
+  bool _alongRoute = false;
   List<NearbyPlace> _places = const [];
   bool _loading = true;
   String? _error;
+
+  bool get _canSearchAlongRoute =>
+      widget.routePolyline != null && widget.routePolyline!.isNotEmpty;
 
   @override
   void initState() {
@@ -50,11 +61,17 @@ class _NearbyPlacesSheetState extends State<_NearbyPlacesSheet> {
       _error = null;
     });
     try {
-      final places = await GoogleMapsApiService.nearbyPlaces(
-        center: widget.center,
-        radiusMeters: 5000,
-        type: _type,
-      );
+      final polyline = widget.routePolyline;
+      final places = _alongRoute && polyline != null && polyline.isNotEmpty
+          ? await GoogleMapsApiService.placesAlongRoute(
+              routePolyline: polyline,
+              category: _type,
+            )
+          : await GoogleMapsApiService.nearbyPlaces(
+              center: widget.center,
+              radiusMeters: 5000,
+              category: _type,
+            );
       if (!mounted) return;
       setState(() => _places = places);
     } catch (e) {
@@ -63,6 +80,12 @@ class _NearbyPlacesSheetState extends State<_NearbyPlacesSheet> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _openDetails(NearbyPlace place) async {
+    final pin = await showPlaceDetailsSheet(context, place);
+    if (!mounted || pin != true) return;
+    Navigator.of(context).pop(place);
   }
 
   @override
@@ -93,6 +116,16 @@ class _NearbyPlacesSheetState extends State<_NearbyPlacesSheet> {
                 }).toList(),
               ),
             ),
+            if (_canSearchAlongRoute)
+              SwitchListTile(
+                title: const Text('Search along the route'),
+                value: _alongRoute,
+                onChanged: (v) {
+                  setState(() => _alongRoute = v);
+                  _search();
+                },
+                dense: true,
+              ),
             const Divider(height: 1),
             Expanded(
               child: _loading
@@ -124,7 +157,7 @@ class _NearbyPlacesSheetState extends State<_NearbyPlacesSheet> {
                                 return ListTile(
                                   leading: const Icon(Icons.place_outlined),
                                   title: Text(place.name),
-                                  onTap: () => Navigator.of(context).pop(place),
+                                  onTap: () => _openDetails(place),
                                 );
                               },
                             ),

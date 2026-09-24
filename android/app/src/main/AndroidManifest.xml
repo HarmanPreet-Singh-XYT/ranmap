@@ -5,15 +5,21 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+    <!-- Android 14+ requires this for a foreground service that uses the mic
+         (LiveKit voice keeps one alive during a call). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+    <!-- Android 12+ needs this to route/control audio on Bluetooth headsets. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.CAMERA"/>
     <application
-        android:label="ranmap"
+        android:label="Ranmap"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
-        <!-- The Mapbox access token is set at runtime via MapboxOptions.setAccessToken
-             (see lib/features/map/map_engine/map_engine.dart), so no key lives in
+        <!-- The Mapbox access token is fetched at runtime and set via
+             MapboxOptions.setAccessToken (see
+             lib/features/map/map_engine/mapbox_token.dart), so no key lives in
              the manifest. -->
         <activity
             android:name=".MainActivity"

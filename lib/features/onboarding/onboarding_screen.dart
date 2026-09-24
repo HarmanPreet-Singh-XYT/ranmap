@@ -6,7 +6,7 @@ import '../../core/router/auth_state_provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/util/error_text.dart';
 import '../../data/models/profile.dart';
-import '../../data/repositories/profile_repository.dart';
+import '../../data/providers/repository_providers.dart';
 import '../../data/services/supabase_service.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
@@ -41,7 +41,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       _error = null;
     });
 
-    final repo = ProfileRepository();
+    final repo = ref.read(profileRepositoryProvider);
     try {
       final available = await repo.isUsernameAvailable(username);
       if (!available) {

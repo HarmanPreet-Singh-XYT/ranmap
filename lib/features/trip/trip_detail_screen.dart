@@ -5,12 +5,16 @@ import 'package:intl/intl.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/util/error_text.dart';
+import '../../core/util/geo_distance.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/trip.dart';
 import '../../data/models/trip_expense.dart';
 import '../../data/models/trip_stats.dart';
 import '../../data/models/trip_stop.dart';
+import '../../data/services/google_maps_api_service.dart';
 import '../../data/services/supabase_service.dart';
+import '../map/live_sync_providers.dart';
+import '../map/trip_photos_screen.dart';
 import 'add_expense_screen.dart';
 import 'add_stop_screen.dart';
 import 'trip_providers.dart';
@@ -114,6 +118,15 @@ class TripDetailScreen extends ConsumerWidget {
         appBar: AppBar(
           title: Text(trip.title),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.photo_library_outlined),
+              tooltip: 'Trip photos',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => TripPhotosScreen(tripId: trip.id, tripTitle: trip.title),
+                ),
+              ),
+            ),
             if (trip.status == TripStatus.active)
               TextButton(
                 onPressed: () => _completeTrip(context, ref),
@@ -142,7 +155,7 @@ class TripDetailScreen extends ConsumerWidget {
         ),
         body: TabBarView(
           children: [
-            _StatsTab(tripId: trip.id),
+            _StatsTab(tripId: trip.id, routePolyline: trip.routePolyline),
             _StopsTab(tripId: trip.id),
             _ExpensesTab(tripId: trip.id),
           ],
@@ -153,9 +166,10 @@ class TripDetailScreen extends ConsumerWidget {
 }
 
 class _StatsTab extends ConsumerWidget {
-  const _StatsTab({required this.tripId});
+  const _StatsTab({required this.tripId, this.routePolyline});
 
   final String tripId;
+  final String? routePolyline;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -173,6 +187,14 @@ class _StatsTab extends ConsumerWidget {
           final fuelAvg = expensesAsync.valueOrNull == null
               ? null
               : _averageFuelCost(expensesAsync.valueOrNull!);
+          final fuelCostPerKm = expensesAsync.valueOrNull == null
+              ? null
+              : _fuelCostPerKm(expensesAsync.valueOrNull!, s.totalDistanceKm);
+          // Project the whole-route fuel cost from the planned polyline, when
+          // both a route and a $/km rate are known.
+          final projectedFuel = fuelCostPerKm == null
+              ? null
+              : _projectedFuelCost(fuelCostPerKm, routePolyline);
 
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -196,6 +218,22 @@ class _StatsTab extends ConsumerWidget {
                 const SizedBox(height: 12),
                 _StatTile(label: 'Avg fuel cost', value: '\$${fuelAvg.toStringAsFixed(2)}', wide: true),
               ],
+              if (fuelCostPerKm != null) ...[
+                const SizedBox(height: 12),
+                _StatTile(
+                  label: 'Fuel cost / km',
+                  value: '\$${fuelCostPerKm.toStringAsFixed(2)}',
+                  wide: true,
+                ),
+              ],
+              if (projectedFuel != null) ...[
+                const SizedBox(height: 12),
+                _StatTile(
+                  label: 'Est. fuel for route',
+                  value: '\$${projectedFuel.toStringAsFixed(2)}',
+                  wide: true,
+                ),
+              ],
               const SizedBox(height: 16),
               Text(
                 'Stats update automatically while the trip is active, or pull to refresh.',
@@ -218,6 +256,36 @@ class _StatsTab extends ConsumerWidget {
     return total / fuelExpenses.length;
   }
 
+  /// Total fuel spend divided by distance actually travelled. Unlike the
+  /// per-entry average above, this is a rate the user can extrapolate.
+  double? _fuelCostPerKm(List<TripExpense> expenses, double distanceKm) {
+    if (distanceKm <= 0) return null;
+    final fuelTotal = expenses
+        .where((e) => e.category == 'fuel')
+        .fold<double>(0, (sum, e) => sum + e.amount);
+    if (fuelTotal <= 0) return null;
+    return fuelTotal / distanceKm;
+  }
+
+  /// Estimated fuel cost for the whole planned route, from its encoded
+  /// polyline. Returns null when there's no route or it can't be decoded.
+  double? _projectedFuelCost(double costPerKm, String? encodedPolyline) {
+    if (encodedPolyline == null || encodedPolyline.isEmpty) return null;
+    final points = GoogleMapsApiService.decodePolyline(encodedPolyline);
+    if (points.length < 2) return null;
+    var meters = 0.0;
+    for (var i = 1; i < points.length; i++) {
+      meters += haversineMeters(
+        points[i - 1].lat.toDouble(),
+        points[i - 1].lng.toDouble(),
+        points[i].lat.toDouble(),
+        points[i].lng.toDouble(),
+      );
+    }
+    if (meters <= 0) return null;
+    return (meters / 1000) * costPerKm;
+  }
+
   String _formatDuration(int seconds) {
     final duration = Duration(seconds: seconds);
     final hours = duration.inHours;
@@ -237,7 +305,7 @@ class _StatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      color: const Color(0xFFFFF3EE),
+      color: AppTheme.cardTint,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -306,36 +374,54 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
             );
           }
           final stops = _optimisticOrder ?? fetched;
-          return ReorderableListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: stops.length,
-            onReorderItem: (oldIndex, newIndex) => _onReorder(stops, oldIndex, newIndex),
-            itemBuilder: (context, i) {
-              final stop = stops[i];
-              return Padding(
-                key: ValueKey(stop.id),
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Dismissible(
-                  key: ValueKey('dismiss-${stop.id}'),
-                  direction: DismissDirection.endToStart,
-                  confirmDismiss: (_) => _confirmDeleteDialog(context, 'Delete stop?'),
-                  onDismissed: (_) async {
-                    try {
-                      await ref.read(tripRepositoryProvider).deleteStop(stop.id);
-                      ref.invalidate(tripStopsProvider(widget.tripId));
-                    } catch (_) {
-                      ref.invalidate(tripStopsProvider(widget.tripId));
-                    }
+          TripStop? nextStop;
+          for (final s in stops) {
+            if (s.actualArrival == null) {
+              nextStop = s;
+              break;
+            }
+          }
+          return Column(
+            children: [
+              if (nextStop != null)
+                _NextStopEta(tripId: widget.tripId, stop: nextStop),
+              Expanded(
+                child: ReorderableListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: stops.length,
+                  onReorderItem: (oldIndex, newIndex) => _onReorder(stops, oldIndex, newIndex),
+                  itemBuilder: (context, i) {
+                    final stop = stops[i];
+                    return Padding(
+                      key: ValueKey(stop.id),
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Dismissible(
+                        key: ValueKey('dismiss-${stop.id}'),
+                        direction: DismissDirection.endToStart,
+                        confirmDismiss: (_) => _confirmDeleteDialog(context, 'Delete stop?'),
+                        onDismissed: (_) async {
+                          try {
+                            await ref.read(tripRepositoryProvider).deleteStop(stop.id);
+                            ref.invalidate(tripStopsProvider(widget.tripId));
+                          } catch (_) {
+                            ref.invalidate(tripStopsProvider(widget.tripId));
+                          }
+                        },
+                        background: _dismissBackground(),
+                        child: _StopCard(stop: stop),
+                      ),
+                    );
                   },
-                  background: _dismissBackground(),
-                  child: _StopCard(stop: stop),
                 ),
-              );
-            },
+              ),
+            ],
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text(friendlyError(e))),
+        error: (e, _) => ErrorRetry(
+          error: e,
+          onRetry: () => ref.invalidate(tripStopsProvider(widget.tripId)),
+        ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
@@ -345,6 +431,57 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
         },
         icon: const Icon(Icons.add_location_alt_rounded),
         label: const Text('Add stop'),
+      ),
+    );
+  }
+}
+
+/// A one-line "next stop" banner: distance from the device's live position
+/// and an ETA from the trip's average speed. Hidden until a position and a
+/// prior average are both available.
+class _NextStopEta extends ConsumerWidget {
+  const _NextStopEta({required this.tripId, required this.stop});
+
+  final String tripId;
+  final TripStop stop;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final position = ref.watch(devicePositionProvider).valueOrNull;
+    if (position == null) return const SizedBox.shrink();
+
+    final km = haversineMeters(
+          position.latitude,
+          position.longitude,
+          stop.point.lat,
+          stop.point.lng,
+        ) /
+        1000;
+    final avgKmh = ref.watch(tripStatsProvider(tripId)).valueOrNull?.avgSpeedKmh ?? 0;
+
+    final eta = avgKmh > 1 ? '~${((km / avgKmh) * 60).round()} min' : '—';
+
+    return Material(
+      color: AppTheme.cardTint,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: Row(
+          children: [
+            const Icon(Icons.flag_rounded, color: AppTheme.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Next: ${stop.name}',
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+            Text(
+              '${km.toStringAsFixed(1)} km · $eta',
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -428,7 +565,7 @@ class _ExpensesTab extends ConsumerWidget {
             padding: const EdgeInsets.all(16),
             children: [
               Card(
-                color: const Color(0xFFFFF3EE),
+                color: AppTheme.cardTint,
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
@@ -470,7 +607,10 @@ class _ExpensesTab extends ConsumerWidget {
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text(friendlyError(e))),
+        error: (e, _) => ErrorRetry(
+          error: e,
+          onRetry: () => ref.invalidate(tripExpensesProvider(tripId)),
+        ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {

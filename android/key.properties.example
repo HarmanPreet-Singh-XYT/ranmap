@@ -1,0 +1,8 @@
+# Copy to android/key.properties and fill in with your release keystore.
+#   keytool -genkey -v -keystore ~/ranmap-release.jks -keyalg RSA -keysize 2048 \
+#     -validity 10000 -alias ranmap
+# This file is gitignored — never commit the real key.properties or keystore.
+storePassword=your-keystore-password
+keyPassword=your-key-password
+keyAlias=ranmap
+storeFile=/absolute/path/to/ranmap-release.jks

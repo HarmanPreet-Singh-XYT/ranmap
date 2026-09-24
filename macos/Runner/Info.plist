@@ -14,6 +14,16 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
+	<key>NSLocationUsageDescription</key>
+	<string>Ranmap uses your location to show you on the map and keep your trip in sync with your group.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Ranmap uses your location to show you on the map and keep your trip in sync with your group.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Ranmap uses the microphone for voice chat and calls with your group.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Ranmap uses the camera so you can share photos pinned to the map.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Ranmap needs access to your photos to share pictures on the map.</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

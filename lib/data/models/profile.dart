@@ -1,3 +1,5 @@
+import '../../core/constants/avatars.dart';
+
 /// Columns of `public.profiles` that are readable by every authenticated user.
 /// `phone_number` and `socials` are deliberately excluded (RLS column grants
 /// in 0002_rls_hardening.sql) and must be fetched only by their owner.
@@ -10,7 +12,7 @@ class Profile {
     required this.username,
     this.displayName,
     this.avatarId = 'default',
-    this.vehicleType = 'car',
+    this.vehicleType = kDefaultVehicleType,
     this.phoneNumber,
     this.socials = const {},
   });
@@ -28,7 +30,7 @@ class Profile {
         username: json['username'] as String,
         displayName: json['display_name'] as String?,
         avatarId: json['avatar_id'] as String? ?? 'default',
-        vehicleType: json['vehicle_type'] as String? ?? 'car',
+        vehicleType: json['vehicle_type'] as String? ?? kDefaultVehicleType,
         phoneNumber: json['phone_number'] as String?,
         socials: (json['socials'] as Map<String, dynamic>?)
                 ?.map((k, v) => MapEntry(k, v as String)) ??

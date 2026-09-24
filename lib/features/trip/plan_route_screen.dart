@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart' hide Position;
 
+import '../../core/constants/defaults.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/util/error_text.dart';
 import '../../data/models/route_option.dart';
@@ -64,12 +65,21 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
     _resolveCurrentLocationAsOrigin();
   }
 
+  @override
+  void dispose() {
+    // Drop the native annotation-manager handles; the overlay syncs are
+    // guarded and no-op once these are null.
+    _pins = null;
+    _lines = null;
+    super.dispose();
+  }
+
   Future<void> _resolveCurrentLocationAsOrigin() async {
     try {
       final position =
           await Geolocator.getLastKnownPosition() ??
               await Geolocator.getCurrentPosition(
-                locationSettings: const LocationSettings(timeLimit: Duration(seconds: 15)),
+                locationSettings: const LocationSettings(timeLimit: kLocationFixTimeout),
               );
       if (!mounted) return;
       setState(() {
@@ -90,7 +100,7 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
       MaterialPageRoute(
         builder: (_) => PickLocationScreen(
           title: 'Pick origin',
-          initialCenter: _origin ?? Position(0, 0),
+          initialCenter: _origin,
         ),
       ),
     );
@@ -104,7 +114,7 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
       MaterialPageRoute(
         builder: (_) => PickLocationScreen(
           title: 'Pick destination',
-          initialCenter: _destination ?? _origin ?? Position(0, 0),
+          initialCenter: _destination ?? _origin,
         ),
       ),
     );
@@ -176,7 +186,7 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
     if (_renderedPinKey != pinKey) {
       _renderedPinKey = pinKey;
       _originPin ??= await MapMarkers.pin(
-        const Color(0xFF3A9D5C), Icons.trip_origin, devicePixelRatio: devicePixelRatio);
+        AppTheme.success, Icons.trip_origin, devicePixelRatio: devicePixelRatio);
       _destinationPin ??= await MapMarkers.pin(
         AppTheme.primary, Icons.place_rounded, devicePixelRatio: devicePixelRatio);
       await pins.deleteAll();
@@ -240,7 +250,7 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
                     children: [
                       ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.trip_origin, color: Color(0xFF3A9D5C)),
+                        leading: const Icon(Icons.trip_origin, color: AppTheme.success),
                         title: Text(_origin == null ? 'Set origin' : 'Origin set'),
                         trailing: TextButton(onPressed: _pickOrigin, child: const Text('Pick')),
                       ),
@@ -303,7 +313,7 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(route.summary, maxLines: 1, overflow: TextOverflow.ellipsis),
-                                Text('${route.distanceText} · ${route.durationText}'),
+                                Text('${route.distanceLabel} · ${route.durationLabel}'),
                               ],
                             ),
                           ),

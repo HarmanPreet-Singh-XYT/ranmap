@@ -16,3 +16,18 @@ String backendErrorMessage(int statusCode, String body, String fallback) {
   }
   return '$fallback (HTTP $statusCode)';
 }
+
+/// Extracts the machine-readable `code` from a ranmap-server error body (e.g.
+/// `premium_required`), or null when the body carries none.
+String? backendErrorCode(String body) {
+  try {
+    final data = jsonDecode(body);
+    if (data is Map<String, dynamic>) {
+      final code = data['code'];
+      if (code is String && code.isNotEmpty) return code;
+    }
+  } catch (_) {
+    // Body wasn't JSON — no code to report.
+  }
+  return null;
+}
