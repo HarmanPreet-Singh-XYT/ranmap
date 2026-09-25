@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:forui/forui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../core/theme/app_theme.dart';
+import '../../core/theme/nav_palette.dart';
+import '../../core/widgets/app_spinner.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/app_toast.dart';
 import '../../data/services/supabase_service.dart';
 import 'widgets/auth_text_field.dart';
+import 'widgets/brand_mark.dart';
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
@@ -64,9 +69,7 @@ class _SignInScreenState extends State<SignInScreen> {
     try {
       await SupabaseService.auth.resetPasswordForEmail(email);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('If an account exists for $email, a reset link is on its way.')),
-      );
+      showAppToast(context, 'If an account exists for $email, a reset link is on its way.');
     } catch (e) {
       if (mounted) setState(() => _error = friendlyError(e));
     } finally {
@@ -76,8 +79,11 @@ class _SignInScreenState extends State<SignInScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
+    final c = NavColors.of(context);
+
+    return FScaffold(
+      childPad: false,
+      child: SafeArea(
         child: Center(
           // Scrollable so the on-screen keyboard can't overflow the layout.
           child: SingleChildScrollView(
@@ -85,20 +91,18 @@ class _SignInScreenState extends State<SignInScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(Icons.map_rounded, size: 72, color: AppTheme.primary),
-                const SizedBox(height: 12),
+                const Center(child: BrandMark()),
+                const SizedBox(height: 20),
                 Text(
                   'Ranmap',
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                  style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800, letterSpacing: -0.5, color: c.foreground),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 Text(
                   'Travel together, stay in sync.',
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium,
+                  style: TextStyle(fontSize: 16, color: c.mutedForeground),
                 ),
                 const SizedBox(height: 32),
                 AuthTextField(
@@ -108,7 +112,7 @@ class _SignInScreenState extends State<SignInScreen> {
                   textInputAction: TextInputAction.next,
                   autofillHints: const [AutofillHints.email],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
                 AuthTextField(
                   controller: _passwordCtrl,
                   label: 'Password',
@@ -118,28 +122,37 @@ class _SignInScreenState extends State<SignInScreen> {
                   onSubmitted: (_) => _signIn(),
                 ),
                 if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(_error!, style: const TextStyle(color: AppTheme.danger)),
+                  const SizedBox(height: 14),
+                  FAlert(variant: .destructive, title: Text(_error!)),
                 ],
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: _loading ? null : _signIn,
+                const SizedBox(height: 20),
+                FButton(
+                  size: .lg,
+                  onPress: _loading ? null : _signIn,
                   child: _loading
                       ? const SizedBox(
-                          height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          height: 20,
+                          width: 20,
+                          child: AppSpinner(color: Colors.white),
+                        )
                       : const Text('Sign in'),
                 ),
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: _loading ? null : _resetPassword,
+                const SizedBox(height: 4),
+                FButton(
+                  variant: .ghost,
+                  onPress: _loading ? null : _resetPassword,
                   child: const Text('Forgot password?'),
                 ),
-                TextButton(
-                  onPressed: () => context.go('/sign-up'),
+                FButton(
+                  variant: .ghost,
+                  onPress: () => context.go('/sign-up'),
                   child: const Text('New here? Create an account'),
                 ),
               ],
-            ),
+            )
+                .animate()
+                .fadeIn(duration: 420.ms, curve: Curves.easeOut)
+                .slideY(begin: 0.06, end: 0, curve: Curves.easeOutCubic),
           ),
         ),
       ),

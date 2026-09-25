@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:forui/forui.dart';
 
+import '../../core/theme/nav_palette.dart';
 import '../../core/widgets/error_retry.dart';
 import '../social/social_providers.dart';
 import '../trip/trip_providers.dart';
@@ -13,11 +15,12 @@ class ChatChannelsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final c = NavColors.of(context);
     final tripsAsync = ref.watch(myTripsProvider);
     final groupsAsync = ref.watch(myGroupsProvider);
 
     if (tripsAsync.isLoading || groupsAsync.isLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: FCircularProgress());
     }
     final error = tripsAsync.error ?? groupsAsync.error;
     if (error != null) {
@@ -34,50 +37,61 @@ class ChatChannelsScreen extends ConsumerWidget {
     final groups = groupsAsync.valueOrNull ?? const [];
 
     if (trips.isEmpty && groups.isEmpty) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(32),
+          padding: const EdgeInsets.all(32),
           child: Text(
             'Join a trip or group to start chatting.',
             textAlign: TextAlign.center,
+            style: TextStyle(color: c.mutedForeground),
           ),
         ),
       );
     }
 
     return ListView(
+      padding: const EdgeInsets.all(16),
       children: [
         if (trips.isNotEmpty) ...[
-          const _SectionHeader('Trips'),
-          for (final trip in trips)
-            ListTile(
-              leading: const Icon(Icons.directions_car_filled_rounded),
-              title: Text(trip.title),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => ChatScreen(
-                    channel: ChatChannel.trip(trip.id),
-                    title: trip.title,
+          _SectionHeader(title: 'Trips', color: c),
+          FTileGroup(
+            children: [
+              for (final trip in trips)
+                FTile(
+                  prefix: const Icon(Icons.directions_car_filled_rounded),
+                  title: Text(trip.title),
+                  onPress: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ChatScreen(
+                        channel: ChatChannel.trip(trip.id),
+                        title: trip.title,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
+            ],
+          ),
         ],
         if (groups.isNotEmpty) ...[
-          const _SectionHeader('Groups'),
-          for (final group in groups)
-            ListTile(
-              leading: const Icon(Icons.groups_rounded),
-              title: Text(group.name),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => ChatScreen(
-                    channel: ChatChannel.group(group.id),
-                    title: group.name,
+          const SizedBox(height: 8),
+          _SectionHeader(title: 'Groups', color: c),
+          FTileGroup(
+            children: [
+              for (final group in groups)
+                FTile(
+                  prefix: const Icon(Icons.groups_rounded),
+                  title: Text(group.name),
+                  onPress: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ChatScreen(
+                        channel: ChatChannel.group(group.id),
+                        title: group.name,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
+            ],
+          ),
         ],
       ],
     );
@@ -85,20 +99,23 @@ class ChatChannelsScreen extends ConsumerWidget {
 }
 
 class _SectionHeader extends StatelessWidget {
-  final String title;
+  const _SectionHeader({required this.title, required this.color});
 
-  const _SectionHeader(this.title);
+  final String title;
+  final NavColors color;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
       child: Text(
         title,
-        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-              fontWeight: FontWeight.bold,
-            ),
+        style: TextStyle(
+          color: color.activeRoute,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+          letterSpacing: 0.4,
+        ),
       ),
     );
   }

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:forui/forui.dart';
 
 import '../../core/constants/defaults.dart';
-import '../../core/theme/app_theme.dart';
+import '../../core/theme/nav_palette.dart';
 import 'map_engine/map_engine.dart';
 
 /// Lets the user pick an arbitrary point on the map (rather than defaulting
@@ -34,17 +35,22 @@ class _PickLocationScreenState extends State<PickLocationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
+    final c = NavColors.of(context);
+
+    return FScaffold(
+      childPad: false,
+      header: FHeader.nested(
         title: Text(widget.title),
-        actions: [
-          TextButton(
-            onPressed: _confirm,
+        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+        suffixes: [
+          FButton(
+            size: .sm,
+            onPress: _confirm,
             child: const Text('Use this spot'),
           ),
         ],
       ),
-      body: Stack(
+      child: Stack(
         alignment: Alignment.center,
         children: [
           RanmapMapView(
@@ -54,10 +60,10 @@ class _PickLocationScreenState extends State<PickLocationScreen> {
             pitch: 0,
             showUserLocation: true,
           ),
-          const IgnorePointer(
+          IgnorePointer(
             child: Padding(
-              padding: EdgeInsets.only(bottom: 36),
-              child: Icon(Icons.location_pin, size: 48, color: AppTheme.primary),
+              padding: const EdgeInsets.only(bottom: 36),
+              child: Icon(Icons.location_pin, size: 48, color: c.activeRoute),
             ),
           ),
         ],

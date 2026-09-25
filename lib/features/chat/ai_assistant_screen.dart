@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:forui/forui.dart';
 
 import '../../core/constants/defaults.dart';
+import '../../core/theme/nav_palette.dart';
 import '../../core/util/error_text.dart';
+import '../../core/util/validation.dart';
+import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/ai_message.dart';
 import '../premium/paywall.dart';
@@ -36,6 +40,11 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
   Future<void> _send() async {
     final text = _inputController.text.trim();
     if (text.isEmpty || _sending) return;
+    final validationError = messageError(text);
+    if (validationError != null) {
+      showAppToast(context, validationError, error: true);
+      return;
+    }
 
     final local = AiMessage(
       id: 'local-${DateTime.now().microsecondsSinceEpoch}',
@@ -78,7 +87,7 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
       if (isPremiumRequired(e)) {
         await showPaywall(context, feature: PremiumFeature.aiAssistant);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+        showAppToast(context, friendlyError(e), error: true);
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -99,17 +108,22 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = NavColors.of(context);
     final remoteMessages = _conversationId == kNewConversationId
         ? const AsyncValue<List<AiMessage>>.data([])
         : ref.watch(aiMessagesProvider(_conversationId));
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('AI Assistant')),
-      body: Column(
+    return FScaffold(
+      childPad: false,
+      header: FHeader.nested(
+        title: const Text('AI Assistant'),
+        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+      ),
+      child: Column(
         children: [
           Expanded(
             child: remoteMessages.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
+              loading: () => const Center(child: FCircularProgress()),
               error: (e, _) => ErrorRetry(
                 error: e,
                 onRetry: () => ref.invalidate(aiMessagesProvider(_conversationId)),
@@ -122,15 +136,16 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
                 final all = [...remote, ...pendingLocal]..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
                 if (all.isEmpty) {
-                  return const Center(
+                  return Center(
                     child: Padding(
-                      padding: EdgeInsets.all(32),
+                      padding: const EdgeInsets.all(32),
                       child: Text(
                         'Ask me to remember a place, plan a new trip, or schedule '
                         'one — e.g. "save Joshua Tree as a stop", "create a trip '
                         'called Road Trip", or "schedule Road Trip for next Friday '
                         'at 8am".',
                         textAlign: TextAlign.center,
+                        style: TextStyle(color: c.mutedForeground),
                       ),
                     ),
                   );
@@ -147,32 +162,32 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
           ),
           if (_sending)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 4),
-              child: LinearProgressIndicator(minHeight: 2),
+              padding: EdgeInsets.symmetric(vertical: 6),
+              child: FProgress(),
             ),
           SafeArea(
             top: false,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Expanded(
-                    child: TextField(
-                      controller: _inputController,
-                      decoration: const InputDecoration(
-                        hintText: 'Ask the trip assistant…',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
+                    child: FTextField(
+                      control: FTextFieldControl.managed(controller: _inputController),
+                      hint: 'Ask the trip assistant…',
+                      maxLines: 4,
+                      minLines: 1,
+                      maxLength: kChatMessageMaxLength,
                       textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _send(),
+                      onSubmit: (_) => _send(),
                       enabled: !_sending,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  IconButton.filled(
-                    onPressed: _sending ? null : _send,
-                    icon: const Icon(Icons.send_rounded),
+                  FButton.icon(
+                    onPress: _sending ? null : _send,
+                    child: const Icon(Icons.send_rounded),
                   ),
                 ],
               ),
@@ -191,8 +206,8 @@ class _MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = NavColors.of(context);
     final isUser = message.isUser;
-    final colorScheme = Theme.of(context).colorScheme;
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -201,12 +216,12 @@ class _MessageBubble extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
         decoration: BoxDecoration(
-          color: isUser ? colorScheme.primary : colorScheme.surfaceContainerHighest,
+          color: isUser ? c.activeRoute : c.surfaceAlt,
           borderRadius: BorderRadius.circular(16),
         ),
         child: Text(
           message.content,
-          style: TextStyle(color: isUser ? colorScheme.onPrimary : colorScheme.onSurface),
+          style: TextStyle(color: isUser ? Colors.white : c.foreground),
         ),
       ),
     );

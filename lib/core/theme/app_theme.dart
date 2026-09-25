@@ -1,147 +1,126 @@
 import 'package:flutter/material.dart';
 
-/// Friendly, rounded, high-contrast theme used across Ranmap.
+import 'nav_palette.dart';
+
+/// Legacy color constants, kept so screens can be migrated to the Forui theme
+/// (`context.theme.colors` / `NavColors.of(context)`) incrementally without
+/// breaking. New code should prefer the theme accessors instead.
+///
+/// Values mirror [NavColors.light] — see `nav_palette.dart`.
 class AppTheme {
   AppTheme._();
 
-  // Darkened from the original #FF6B4A coral, which only reached ~2.8:1
-  // against white (fails WCAG AA). This burnt coral clears 4.5:1 both as a
-  // button fill behind white text and as an accent on the light background.
-  static const Color primary = Color(0xFFC2410C); // warm burnt coral — "on the road"
-  static const Color secondary = Color(0xFF2EC4B6); // teal accent
-  static const Color background = Color(0xFFFAF7F2);
+  /// The active-route / primary action blue.
+  static const Color primary = Color(0xFF1A73E8);
+
+  /// A soft blue tint used for selected/tonal fills.
+  static const Color primaryContainer = Color(0xFFD8E6FB);
+
+  /// A neutral slate, used for the mid-priority "syncing" affordance.
+  static const Color secondary = Color(0xFF5F6368);
+
+  static const Color background = Color(0xFFF4F2EF);
   static const Color surface = Colors.white;
-  static const Color textDark = Color(0xFF1F2933);
+  static const Color textDark = Color(0xFF1A1C1E);
 
-  /// Error/destructive text and actions (Material error red, ~6.5:1 on white).
-  static const Color danger = Color(0xFFB3261E);
+  /// Error/destructive text and actions.
+  static const Color danger = Color(0xFFD93025);
 
-  /// Light coral used as a selected/tonal fill. Pairs with [primary] for the
-  /// border/label so selection is conveyed by more than color alone.
-  static const Color primaryContainer = Color(0xFFFFE5DC);
+  /// A cool surface tint for highlighted/featured cards.
+  static const Color cardTint = Color(0xFFEDF1F6);
 
-  /// Warm tint used for highlighted/featured cards.
-  static const Color cardTint = Color(0xFFFFF3EE);
+  /// Positive/confirmed state (semantic only).
+  static const Color success = Color(0xFF188038);
 
-  /// Positive/confirmed state (successful send, joined, speaking).
-  static const Color success = Color(0xFF3A9D5C);
+  /// Informational text on a light surface.
+  static const Color notice = Color(0xFF188038);
 
-  /// Informational text on a light surface (~5.9:1 on white).
-  static const Color notice = Color(0xFF2E7D32);
+  /// Caution/attention accent.
+  static const Color warning = Color(0xFFF9AB00);
 
-  /// Caution/attention accent (e.g. a warning marker).
-  static const Color warning = Color(0xFFF5B301);
-
-  /// Photo-pin accent, distinct from the coral primary.
+  /// Photo-pin accent, distinct from the route blue.
   static const Color photoPin = Color(0xFF8E44AD);
 
-  static ThemeData light() {
+  /// The Material theme used by leftover Material widgets (SnackBar, native
+  /// date/time pickers, the Mapbox platform-view host). Kept in step with the
+  /// Forui theme's tokens.
+  static ThemeData light() => _build(NavColors.light, Brightness.light);
+
+  static ThemeData dark() => _build(NavColors.dark, Brightness.dark);
+
+  static ThemeData _build(NavColors c, Brightness brightness) {
     final base = ThemeData(
       useMaterial3: true,
-      brightness: Brightness.light,
+      brightness: brightness,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: primary,
-        brightness: Brightness.light,
-        secondary: secondary,
-        surface: surface,
+        seedColor: c.activeRoute,
+        brightness: brightness,
+        primary: c.activeRoute,
+        surface: c.canvas,
       ),
-      scaffoldBackgroundColor: background,
-      fontFamily: 'Roboto',
+      scaffoldBackgroundColor: c.canvas,
     );
 
     return base.copyWith(
-      appBarTheme: const AppBarTheme(
-        backgroundColor: background,
-        foregroundColor: textDark,
+      appBarTheme: AppBarTheme(
+        backgroundColor: c.canvas,
+        foregroundColor: c.foreground,
         elevation: 0,
         centerTitle: true,
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: primary,
+          backgroundColor: c.activeRoute,
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-        ),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: surface,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
-          borderSide: BorderSide.none,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
         ),
       ),
       cardTheme: CardThemeData(
-        color: surface,
-        elevation: 2,
-        shadowColor: Colors.black12,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        color: c.surface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(color: c.border),
+        ),
       ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: surface,
-        selectedItemColor: primary,
-        unselectedItemColor: Color(0xFFB0B8C1),
-        type: BottomNavigationBarType.fixed,
-        showUnselectedLabels: true,
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: c.surface,
+        surfaceTintColor: Colors.transparent,
+        modalBackgroundColor: c.surface,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
       ),
-    );
-  }
-
-  static ThemeData dark() {
-    const darkBackground = Color(0xFF14171C);
-    const darkSurface = Color(0xFF1E222A);
-
-    final base = ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.dark,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: primary,
-        brightness: Brightness.dark,
-        secondary: secondary,
-        surface: darkSurface,
+      dialogTheme: DialogThemeData(
+        backgroundColor: c.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       ),
-      scaffoldBackgroundColor: darkBackground,
-      fontFamily: 'Roboto',
-    );
-
-    return base.copyWith(
-      appBarTheme: const AppBarTheme(
-        backgroundColor: darkBackground,
+      chipTheme: ChipThemeData(
+        backgroundColor: c.surfaceAlt,
+        selectedColor: c.activeRoute,
+        side: BorderSide(color: c.border),
+        shape: const StadiumBorder(),
+        labelStyle: TextStyle(color: c.foreground, fontWeight: FontWeight.w500),
+        secondaryLabelStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: c.foreground,
+        contentTextStyle: TextStyle(color: c.canvas),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: c.activeRoute,
         foregroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
+        extendedTextStyle: const TextStyle(fontWeight: FontWeight.w600),
       ),
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: primary,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-        ),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: darkSurface,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
-          borderSide: BorderSide.none,
-        ),
-      ),
-      cardTheme: CardThemeData(
-        color: darkSurface,
-        elevation: 2,
-        shadowColor: Colors.black45,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: darkSurface,
-        selectedItemColor: primary,
-        unselectedItemColor: Color(0xFF7A828E),
+      bottomNavigationBarTheme: BottomNavigationBarThemeData(
+        backgroundColor: c.surface,
+        selectedItemColor: c.activeRoute,
+        unselectedItemColor: c.mutedForeground,
         type: BottomNavigationBarType.fixed,
         showUnselectedLabels: true,
       ),

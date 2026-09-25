@@ -80,6 +80,10 @@ export const env = {
   livekitUrl: optionalValue("LIVEKIT_URL"),
   livekitApiKey: optionalValue("LIVEKIT_API_KEY"),
   livekitApiSecret: optionalValue("LIVEKIT_API_SECRET"),
+  // Firebase service-account JSON (the whole file, stringified) for FCM push.
+  // Optional: without it device tokens can still be registered but no
+  // notification is ever delivered.
+  firebaseServiceAccountJson: optionalValue("FIREBASE_SERVICE_ACCOUNT_JSON"),
   // Comma-separated origin allowlist. Unset => no cross-origin access (fine
   // for the mobile app, which isn't subject to CORS); set it for Flutter web.
   // Empty entries (e.g. from a trailing comma) are dropped.

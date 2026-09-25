@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:forui/forui.dart';
 
+import '../../core/theme/nav_palette.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/app_dialog.dart';
+import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/group.dart';
 import '../../data/services/supabase_service.dart';
@@ -19,23 +23,14 @@ class GroupDetailScreen extends ConsumerWidget {
     required String title,
     required String body,
     required String confirmLabel,
-  }) async {
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(body),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(confirmLabel),
-          ),
-        ],
-      ),
-    );
-    return result == true;
-  }
+  }) =>
+      showAppConfirmDialog(
+        context,
+        title: title,
+        message: body,
+        confirmLabel: confirmLabel,
+        destructive: true,
+      );
 
   Future<void> _leaveGroup(BuildContext context, WidgetRef ref) async {
     final confirmed = await _confirm(
@@ -50,9 +45,7 @@ class GroupDetailScreen extends ConsumerWidget {
       ref.invalidate(myGroupsProvider);
       if (context.mounted) Navigator.of(context).pop();
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
-      }
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
     }
   }
 
@@ -68,9 +61,7 @@ class GroupDetailScreen extends ConsumerWidget {
       await ref.read(groupRepositoryProvider).removeMember(groupId: group.id, userId: userId);
       ref.invalidate(groupMembersProvider(group.id));
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
-      }
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
     }
   }
 
@@ -79,9 +70,7 @@ class GroupDetailScreen extends ConsumerWidget {
     try {
       friendsAsync = await ref.read(friendsProvider.future);
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
-      }
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
       return;
     }
     final myUid = SupabaseService.currentUser?.id;
@@ -95,27 +84,34 @@ class GroupDetailScreen extends ConsumerWidget {
 
     if (candidates.isEmpty) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Add friends first, then invite them to a group.')),
-        );
+        showAppToast(context, 'Add friends first, then invite them to a group.');
       }
       return;
     }
 
     if (!context.mounted) return;
-    final selected = await showModalBottomSheet<Map<String, dynamic>>(
+    final selected = await showFSheet<Map<String, dynamic>>(
       context: context,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: candidates.map((profile) {
-            return ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.person)),
-              title: Text('@${profile['username']}'),
-              onTap: () => Navigator.of(context).pop(profile),
-            );
-          }).toList(),
-        ),
+      side: FLayout.btt,
+      builder: (context) => ListView(
+        shrinkWrap: true,
+        children: [
+          FTileGroup(
+            children: [
+              for (final profile in candidates)
+                FTile(
+                  prefix: Container(
+                    height: 40,
+                    width: 40,
+                    decoration: BoxDecoration(color: NavColors.of(context).surfaceAlt, shape: BoxShape.circle),
+                    child: Icon(Icons.person, color: NavColors.of(context).activeRoute, size: 20),
+                  ),
+                  title: Text('@${profile['username']}'),
+                  onPress: () => Navigator.of(context).pop(profile),
+                ),
+            ],
+          ),
+        ],
       ),
     );
 
@@ -131,60 +127,89 @@ class GroupDetailScreen extends ConsumerWidget {
       if (looksPremiumRequired(e)) {
         await showPaywall(context, feature: PremiumFeature.groupSize);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+        showAppToast(context, friendlyError(e), error: true);
       }
     }
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final c = NavColors.of(context);
     final membersAsync = ref.watch(groupMembersProvider(group.id));
     final myUid = SupabaseService.currentUser?.id;
     final isOwner = myUid == group.ownerId;
 
-    return Scaffold(
-      appBar: AppBar(
+    return FScaffold(
+      childPad: false,
+      header: FHeader.nested(
         title: Text(group.name),
-        actions: [
+        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+        suffixes: [
           if (!isOwner)
-            IconButton(
+            FHeaderAction(
               icon: const Icon(Icons.logout_rounded),
-              tooltip: 'Leave group',
-              onPressed: () => _leaveGroup(context, ref),
+              onPress: () => _leaveGroup(context, ref),
             ),
         ],
       ),
-      body: membersAsync.when(
-        data: (members) => ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: members.length,
-          itemBuilder: (context, i) {
-            final member = members[i];
-            final profile = member['profiles'] as Map<String, dynamic>?;
-            final userId = member['user_id'] as String?;
-            final username = profile?['username'] as String? ?? 'unknown';
-            final canRemove = isOwner && userId != null && userId != myUid;
-            return ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.person)),
-              title: Text('@$username'),
-              trailing: canRemove
-                  ? IconButton(
-                      icon: const Icon(Icons.person_remove_outlined),
-                      tooltip: 'Remove @$username',
-                      onPressed: () => _removeMember(context, ref, userId, username),
-                    )
-                  : Text(member['role'] as String? ?? 'member'),
-            );
-          },
-        ),
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => ErrorRetry(error: e, onRetry: () => ref.invalidate(groupMembersProvider(group.id))),
+      child: Stack(
+        children: [
+          membersAsync.when(
+            data: (members) => ListView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+              children: [
+                FTileGroup(
+                  children: [
+                    for (final member in members) _memberTile(context, c, ref, member, isOwner, myUid),
+                  ],
+                ),
+              ],
+            ),
+            loading: () => const Center(child: FCircularProgress()),
+            error: (e, _) => ErrorRetry(error: e, onRetry: () => ref.invalidate(groupMembersProvider(group.id))),
+          ),
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: FButton(
+              onPress: () => _addFriend(context, ref),
+              prefix: const Icon(Icons.person_add),
+              child: const Text('Add member'),
+            ),
+          ),
+        ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _addFriend(context, ref),
-        icon: const Icon(Icons.person_add),
-        label: const Text('Add member'),
+    );
+  }
+
+  FTile _memberTile(
+    BuildContext context,
+    NavColors c,
+    WidgetRef ref,
+    Map<String, dynamic> member,
+    bool isOwner,
+    String? myUid,
+  ) {
+    final profile = member['profiles'] as Map<String, dynamic>?;
+    final userId = member['user_id'] as String?;
+    final username = profile?['username'] as String? ?? 'unknown';
+    final canRemove = isOwner && userId != null && userId != myUid;
+    return FTile(
+      prefix: Container(
+        height: 40,
+        width: 40,
+        decoration: BoxDecoration(color: c.surfaceAlt, shape: BoxShape.circle),
+        child: Icon(Icons.person, color: c.activeRoute, size: 20),
       ),
+      title: Text('@$username'),
+      suffix: canRemove
+          ? FButton.icon(
+              variant: .ghost,
+              size: .sm,
+              onPress: () => _removeMember(context, ref, userId, username),
+              child: Icon(Icons.person_remove_outlined, color: c.destructive),
+            )
+          : Text(member['role'] as String? ?? 'member'),
     );
   }
 }

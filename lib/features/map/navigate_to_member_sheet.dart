@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 // Hide geolocator's `Position`; `Position` here is the GeoJSON type from the
 // map engine.
 import 'package:geolocator/geolocator.dart' hide Position;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:forui/forui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants/defaults.dart';
-import '../../core/theme/app_theme.dart';
+import '../../core/providers/settings_provider.dart';
+import '../../core/theme/nav_palette.dart';
+import '../../core/util/units.dart';
 // `LocationSettings` collides with mapbox's; hide it so geolocator's is used.
 import 'map_engine/map_engine.dart' hide LocationSettings;
 
@@ -18,11 +22,9 @@ Future<void> showNavigateToMemberSheet(
   String? username,
   String? vehicleType,
 }) {
-  return showModalBottomSheet(
+  return showFSheet(
     context: context,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-    ),
+    side: FLayout.btt,
     builder: (context) => _NavigateToMemberSheet(
       destination: destination,
       username: username,
@@ -31,7 +33,7 @@ Future<void> showNavigateToMemberSheet(
   );
 }
 
-class _NavigateToMemberSheet extends StatefulWidget {
+class _NavigateToMemberSheet extends ConsumerStatefulWidget {
   const _NavigateToMemberSheet({required this.destination, this.username, this.vehicleType});
 
   final Position destination;
@@ -41,10 +43,10 @@ class _NavigateToMemberSheet extends StatefulWidget {
   final String? vehicleType;
 
   @override
-  State<_NavigateToMemberSheet> createState() => _NavigateToMemberSheetState();
+  ConsumerState<_NavigateToMemberSheet> createState() => _NavigateToMemberSheetState();
 }
 
-class _NavigateToMemberSheetState extends State<_NavigateToMemberSheet> {
+class _NavigateToMemberSheetState extends ConsumerState<_NavigateToMemberSheet> {
   double? _distanceMeters;
   double? _bearingDegrees;
 
@@ -100,11 +102,10 @@ class _NavigateToMemberSheetState extends State<_NavigateToMemberSheet> {
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
-  String get _distanceLabel {
+  String _distanceLabel(DistanceUnit unit) {
     final meters = _distanceMeters;
     if (meters == null) return 'Calculating…';
-    if (meters < 1000) return '${meters.round()} m away';
-    return '${(meters / 1000).toStringAsFixed(1)} km away';
+    return formatShortDistance(meters, unit);
   }
 
   String get _directionLabel {
@@ -118,6 +119,9 @@ class _NavigateToMemberSheetState extends State<_NavigateToMemberSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final c = NavColors.of(context);
+    final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
+
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -127,22 +131,30 @@ class _NavigateToMemberSheetState extends State<_NavigateToMemberSheet> {
           children: [
             Row(
               children: [
-                const CircleAvatar(
-                  backgroundColor: AppTheme.primaryContainer,
-                  child: Icon(Icons.directions_car_filled_rounded, color: AppTheme.primary),
+                Container(
+                  height: 52,
+                  width: 52,
+                  decoration: BoxDecoration(
+                    color: c.surfaceAlt,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.directions_car_filled_rounded, color: c.activeRoute),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         widget.username != null ? '@${widget.username}' : 'Teammate',
-                        style: Theme.of(context).textTheme.titleMedium,
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: c.foreground),
                       ),
+                      const SizedBox(height: 2),
                       Text(
-                        _bearingDegrees == null ? _distanceLabel : '$_distanceLabel · $_directionLabel',
-                        style: Theme.of(context).textTheme.bodyMedium,
+                        _bearingDegrees == null
+                            ? _distanceLabel(unit)
+                            : '${_distanceLabel(unit)} · $_directionLabel',
+                        style: TextStyle(fontSize: 15, color: c.mutedForeground),
                       ),
                     ],
                   ),
@@ -150,10 +162,11 @@ class _NavigateToMemberSheetState extends State<_NavigateToMemberSheet> {
               ],
             ),
             const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: _openTurnByTurn,
-              icon: const Icon(Icons.navigation_rounded),
-              label: const Text('Navigate to them'),
+            FButton(
+              size: .lg,
+              onPress: _openTurnByTurn,
+              prefix: const Icon(Icons.navigation_rounded),
+              child: const Text('Navigate to them'),
             ),
           ],
         ),

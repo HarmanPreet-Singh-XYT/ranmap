@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:forui/forui.dart';
 
+import '../../core/theme/nav_palette.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/map_post.dart';
 import 'map_post_providers.dart';
@@ -17,24 +19,30 @@ class TripPhotosScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final c = NavColors.of(context);
     final postsAsync = ref.watch(tripMapPostsProvider(tripId));
 
-    return Scaffold(
-      appBar: AppBar(title: Text('$tripTitle photos')),
-      body: postsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+    return FScaffold(
+      childPad: false,
+      header: FHeader.nested(
+        title: Text('$tripTitle photos'),
+        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+      ),
+      child: postsAsync.when(
+        loading: () => const Center(child: FCircularProgress()),
         error: (e, _) => ErrorRetry(
           error: e,
           onRetry: () => ref.invalidate(tripMapPostsProvider(tripId)),
         ),
         data: (posts) {
           if (posts.isEmpty) {
-            return const Center(
+            return Center(
               child: Padding(
-                padding: EdgeInsets.all(32),
+                padding: const EdgeInsets.all(32),
                 child: Text(
                   'No photos yet.\nCapture one from the map during a trip.',
                   textAlign: TextAlign.center,
+                  style: TextStyle(color: c.mutedForeground),
                 ),
               ),
             );
@@ -62,6 +70,7 @@ class _PhotoTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final c = NavColors.of(context);
     final urlAsync = ref.watch(mapPostSignedUrlProvider(post.storagePath));
     final label = post.caption?.trim().isNotEmpty == true
         ? 'Photo: ${post.caption}'
@@ -75,14 +84,14 @@ class _PhotoTile extends ConsumerWidget {
       child: GestureDetector(
         onTap: () => showMapPostViewerSheet(context, post),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           child: urlAsync.when(
-            loading: () => Container(color: Theme.of(context).colorScheme.surfaceContainerHighest),
-            error: (_, _) => const Icon(Icons.broken_image_outlined),
+            loading: () => Container(color: c.surfaceAlt),
+            error: (_, _) => Icon(Icons.broken_image_outlined, color: c.mutedForeground),
             data: (url) => Image.network(
               url,
               fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined),
+              errorBuilder: (_, _, _) => Icon(Icons.broken_image_outlined, color: c.mutedForeground),
             ),
           ),
         ),

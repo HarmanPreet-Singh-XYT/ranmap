@@ -5,9 +5,11 @@ import type { NextFunction, Request, Response } from "express";
 import { env } from "./lib/env.js";
 import { rateLimit } from "./lib/rate-limit.js";
 import { startScheduler } from "./lib/scheduler.js";
+import { accountRouter } from "./routes/account.js";
 import { aiRouter } from "./routes/ai.js";
 import { billingRouter } from "./routes/billing.js";
 import { mapsRouter } from "./routes/maps.js";
+import { notificationsRouter } from "./routes/notifications.js";
 import { phoneRouter } from "./routes/phone.js";
 import { voiceRouter } from "./routes/voice.js";
 
@@ -37,13 +39,15 @@ const preAuthLimit = rateLimit({
   max: 300,
   message: "Too many requests — please slow down.",
 });
-app.use(["/ai", "/phone", "/voice", "/maps"], preAuthLimit);
+app.use(["/ai", "/phone", "/voice", "/maps", "/account", "/notifications"], preAuthLimit);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 app.use("/ai", aiRouter);
 app.use("/phone", phoneRouter);
 app.use("/voice", voiceRouter);
 app.use("/maps", mapsRouter);
+app.use("/account", accountRouter);
+app.use("/notifications", notificationsRouter);
 // Not behind the pre-auth IP limit above: RevenueCat's webhook has no session
 // and a burst of events shouldn't get rate-limited; it authenticates with a
 // shared secret (see billing.ts) instead.
@@ -90,6 +94,7 @@ const unconfigured = [
     ? "LIVEKIT_* (voice channels)"
     : null,
   !env.revenueCatSecretKey || !env.revenueCatWebhookAuth ? "REVENUECAT_* (billing)" : null,
+  !env.firebaseServiceAccountJson ? "FIREBASE_SERVICE_ACCOUNT_JSON (push delivery)" : null,
 ].filter((entry): entry is string => entry !== null);
 
 if (unconfigured.length > 0) {

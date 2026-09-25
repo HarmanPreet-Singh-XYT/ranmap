@@ -31,11 +31,16 @@ dependencies:
 
   # Env & utils
   flutter_dotenv: ^5.2.1
-  intl: ^0.19.0
+  intl: ^0.20.3
   http: ^1.2.2
   connectivity_plus: ^7.3.1
   shared_preferences: ^2.5.5
   purchases_flutter: ^10.13.1
+  forui: ^0.27.0
+  flutter_animate: ^4.5.2
+  multiavatar_plus: ^0.2.0+1
+  flutter_svg: ^2.3.0
+  package_info_plus: ^10.2.1
 
 dev_dependencies:
   flutter_test:

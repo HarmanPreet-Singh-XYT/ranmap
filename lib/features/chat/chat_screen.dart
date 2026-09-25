@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:forui/forui.dart';
 
 import '../../core/offline/outbox.dart';
 import '../../core/offline/outbox_providers.dart';
 import '../../core/providers/connectivity_provider.dart';
+import '../../core/theme/nav_palette.dart';
 import '../../core/util/error_text.dart';
+import '../../core/util/validation.dart';
+import '../../core/widgets/app_dialog.dart';
+import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/chat_message.dart';
 import '../../data/services/supabase_service.dart';
@@ -40,6 +45,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Future<void> _send() async {
     final text = _inputController.text.trim();
     if (text.isEmpty || _sending) return;
+    final validationError = messageError(text);
+    if (validationError != null) {
+      showAppToast(context, validationError, error: true);
+      return;
+    }
 
     final id = generateUuidV4();
     setState(() => _sending = true);
@@ -75,14 +85,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 body: text,
                 createdAt: DateTime.now(),
               )));
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("You're offline — your message will send when you reconnect.")),
-          );
+          showAppToast(context, "You're offline — your message will send when you reconnect.");
         }
       } else {
         // Put the text back so a failed send doesn't lose what the user typed.
         _inputController.text = text;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+        showAppToast(context, friendlyError(e), error: true);
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -91,29 +99,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _confirmDelete(ChatMessage message) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete message?'),
-        content: const Text('This message will be removed for everyone.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirmed = await showAppConfirmDialog(
+      context,
+      title: 'Delete message?',
+      message: 'This message will be removed for everyone.',
+      confirmLabel: 'Delete',
+      destructive: true,
     );
-    if (confirmed != true) return;
+    if (!confirmed) return;
     try {
       await ref.read(chatRepositoryProvider).deleteMessage(message.id);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+      showAppToast(context, friendlyError(e), error: true);
     }
   }
 
@@ -130,6 +128,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = NavColors.of(context);
     final messagesAsync = ref.watch(chatMessagesProvider(widget.channel));
     final myUid = SupabaseService.currentUser?.id;
 
@@ -143,14 +142,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       _scrollToBottom();
     });
 
-    return Scaffold(
-      appBar: AppBar(
+    return FScaffold(
+      childPad: false,
+      header: FHeader.nested(
         title: Text(widget.title),
-        actions: [
-          IconButton(
-            tooltip: 'Join voice',
+        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+        suffixes: [
+          FHeaderAction(
             icon: const Icon(Icons.call_rounded),
-            onPressed: () => Navigator.of(context).push(
+            onPress: () => Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (_) => VoiceChannelScreen(channel: widget.channel, title: widget.title),
               ),
@@ -158,11 +158,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ),
         ],
       ),
-      body: Column(
+      child: Column(
         children: [
           Expanded(
             child: messagesAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
+              loading: () => const Center(child: FCircularProgress()),
               error: (e, _) => ErrorRetry(
                 error: e,
                 onRetry: () => ref.invalidate(chatMessagesProvider(widget.channel)),
@@ -174,10 +174,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   ..._pending.where((p) => !remoteIds.contains(p.id)),
                 ]..sort((a, b) => a.createdAt.compareTo(b.createdAt));
                 if (merged.isEmpty) {
-                  return const Center(
+                  return Center(
                     child: Padding(
-                      padding: EdgeInsets.all(32),
-                      child: Text('No messages yet — say hi!', textAlign: TextAlign.center),
+                      padding: const EdgeInsets.all(32),
+                      child: Text(
+                        'No messages yet — say hi!',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: c.mutedForeground),
+                      ),
                     ),
                   );
                 }
@@ -204,24 +208,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Expanded(
-                    child: TextField(
-                      controller: _inputController,
-                      decoration: const InputDecoration(
-                        hintText: 'Message…',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
+                    child: FTextField(
+                      control: FTextFieldControl.managed(controller: _inputController),
+                      hint: 'Message…',
+                      maxLines: 4,
+                      minLines: 1,
+                      maxLength: kChatMessageMaxLength,
                       textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _send(),
+                      onSubmit: (_) => _send(),
                       enabled: !_sending,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  IconButton.filled(
-                    onPressed: _sending ? null : _send,
-                    icon: const Icon(Icons.send_rounded),
+                  FButton.icon(
+                    onPress: _sending ? null : _send,
+                    child: const Icon(Icons.send_rounded),
                   ),
                 ],
               ),
@@ -242,7 +246,7 @@ class _ChatBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final c = NavColors.of(context);
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -253,7 +257,7 @@ class _ChatBubble extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
           decoration: BoxDecoration(
-            color: isMe ? colorScheme.primary : colorScheme.surfaceContainerHighest,
+            color: isMe ? c.activeRoute : c.surfaceAlt,
             borderRadius: BorderRadius.circular(16),
           ),
           child: Column(
@@ -267,13 +271,13 @@ class _ChatBubble extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
-                      color: colorScheme.onSurfaceVariant,
+                      color: c.activeRoute,
                     ),
                   ),
                 ),
               Text(
                 message.body ?? '',
-                style: TextStyle(color: isMe ? colorScheme.onPrimary : colorScheme.onSurface),
+                style: TextStyle(color: isMe ? Colors.white : c.foreground),
               ),
             ],
           ),

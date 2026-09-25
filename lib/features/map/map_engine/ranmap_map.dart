@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:forui/forui.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
 import 'map_style.dart';
@@ -204,7 +205,7 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
     // The map can't render without a token, so gate on the vendored one: show a
     // spinner while it loads and a retry on failure, rather than a blank map.
     return ref.watch(mapboxTokenProvider).when(
-      loading: () => const Center(child: CircularProgressIndicator()),
+      loading: () => const Center(child: FCircularProgress()),
       error: (_, _) => _MapTokenError(onRetry: () => ref.invalidate(mapboxTokenProvider)),
       data: (token) {
         if (_appliedToken != token.token) {
@@ -247,7 +248,7 @@ class _MapTokenError extends StatelessWidget {
             const SizedBox(height: 12),
             const Text('Could not load the map.', textAlign: TextAlign.center),
             const SizedBox(height: 16),
-            FilledButton(onPressed: onRetry, child: const Text('Try again')),
+            FButton(onPress: onRetry, child: const Text('Try again')),
           ],
         ),
       ),

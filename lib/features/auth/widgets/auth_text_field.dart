@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:forui/forui.dart';
 
-class AuthTextField extends StatefulWidget {
+/// A labelled auth input. Password fields get a visibility toggle.
+class AuthTextField extends StatelessWidget {
   const AuthTextField({
     super.key,
     required this.controller,
@@ -21,34 +23,26 @@ class AuthTextField extends StatefulWidget {
   final ValueChanged<String>? onSubmitted;
 
   @override
-  State<AuthTextField> createState() => _AuthTextFieldState();
-}
-
-class _AuthTextFieldState extends State<AuthTextField> {
-  late bool _obscured = widget.obscureText;
-
-  @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: widget.controller,
-      obscureText: _obscured,
-      keyboardType: widget.keyboardType,
-      textInputAction: widget.textInputAction,
-      autofillHints: widget.autofillHints,
-      // A password field shouldn't offer autocomplete/suggestions.
-      enableSuggestions: !widget.obscureText,
-      autocorrect: !widget.obscureText,
-      onSubmitted: widget.onSubmitted,
-      decoration: InputDecoration(
-        labelText: widget.label,
-        suffixIcon: widget.obscureText
-            ? IconButton(
-                tooltip: _obscured ? 'Show password' : 'Hide password',
-                icon: Icon(_obscured ? Icons.visibility_off_rounded : Icons.visibility_rounded),
-                onPressed: () => setState(() => _obscured = !_obscured),
-              )
-            : null,
-      ),
+    final control = FTextFieldControl.managed(controller: controller);
+
+    if (obscureText) {
+      return FTextField.password(
+        control: control,
+        label: Text(label),
+        textInputAction: textInputAction ?? TextInputAction.done,
+        autofillHints: autofillHints ?? const [AutofillHints.password],
+        onSubmit: onSubmitted,
+      );
+    }
+
+    return FTextField(
+      control: control,
+      label: Text(label),
+      keyboardType: keyboardType,
+      textInputAction: textInputAction,
+      autofillHints: autofillHints,
+      onSubmit: onSubmitted,
     );
   }
 }

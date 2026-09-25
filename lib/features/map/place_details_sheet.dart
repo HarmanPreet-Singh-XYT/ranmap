@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:forui/forui.dart';
 
-import '../../core/theme/app_theme.dart';
+import '../../core/theme/nav_palette.dart';
 import '../../core/util/error_text.dart';
 import '../../data/models/place_details.dart';
 import '../../data/models/route_option.dart';
@@ -10,9 +11,10 @@ import '../../data/services/google_maps_api_service.dart';
 /// fetched from Google on demand, since the search results themselves come
 /// from Mapbox. Pops `true` if the user chooses to pin it on the map.
 Future<bool?> showPlaceDetailsSheet(BuildContext context, NearbyPlace place) {
-  return showModalBottomSheet<bool>(
+  return showFSheet<bool>(
     context: context,
-    isScrollControlled: true,
+    side: FLayout.btt,
+    mainAxisMaxRatio: null,
     builder: (_) => _PlaceDetailsSheet(place: place),
   );
 }
@@ -37,9 +39,11 @@ class _PlaceDetailsSheetState extends State<_PlaceDetailsSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final c = NavColors.of(context);
+
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: FutureBuilder<PlaceDetails>(
           future: _future,
           builder: (context, snapshot) {
@@ -49,18 +53,16 @@ class _PlaceDetailsSheetState extends State<_PlaceDetailsSheet> {
               children: [
                 Text(
                   snapshot.data?.name ?? widget.place.name,
-                  style: Theme.of(context).textTheme.titleLarge,
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: c.foreground),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 _buildBody(context, snapshot),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: () => Navigator.of(context).pop(true),
-                    icon: const Icon(Icons.place_rounded),
-                    label: const Text('Pin on map'),
-                  ),
+                const SizedBox(height: 20),
+                FButton(
+                  size: .lg,
+                  onPress: () => Navigator.of(context).pop(true),
+                  prefix: const Icon(Icons.place_rounded),
+                  child: const Text('Pin on map'),
                 ),
               ],
             );
@@ -71,54 +73,55 @@ class _PlaceDetailsSheetState extends State<_PlaceDetailsSheet> {
   }
 
   Widget _buildBody(BuildContext context, AsyncSnapshot<PlaceDetails> snapshot) {
+    final c = NavColors.of(context);
+
     if (snapshot.connectionState == ConnectionState.waiting) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 24),
-        child: Center(child: CircularProgressIndicator()),
+        child: Center(child: FCircularProgress()),
       );
     }
     if (snapshot.hasError) {
       // The place is still pinnable even when the detail lookup fails.
       return Text(
         friendlyError(snapshot.error!),
-        style: const TextStyle(color: AppTheme.danger),
+        style: TextStyle(color: c.destructive),
       );
     }
 
     final details = snapshot.data;
     if (details == null) return const SizedBox.shrink();
 
-    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (details.ratingLabel != null)
           Row(
             children: [
-              Text(details.ratingLabel!, style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text(details.ratingLabel!, style: TextStyle(fontWeight: FontWeight.w600, color: c.foreground)),
               if (details.priceLabel != null) ...[
                 const SizedBox(width: 12),
-                Text(details.priceLabel!, style: TextStyle(color: muted)),
+                Text(details.priceLabel!, style: TextStyle(color: c.mutedForeground)),
               ],
               if (details.openNow != null) ...[
                 const SizedBox(width: 12),
                 Text(
                   details.openNow! ? 'Open now' : 'Closed',
-                  style: TextStyle(color: details.openNow! ? AppTheme.success : muted),
+                  style: TextStyle(color: details.openNow! ? c.success : c.mutedForeground),
                 ),
               ],
             ],
           ),
         if (details.address != null) ...[
           const SizedBox(height: 8),
-          Text(details.address!, style: TextStyle(color: muted)),
+          Text(details.address!, style: TextStyle(color: c.mutedForeground)),
         ],
         if (details.weekdayHours.isNotEmpty) ...[
           const SizedBox(height: 12),
           for (final line in details.weekdayHours)
             Padding(
               padding: const EdgeInsets.only(bottom: 2),
-              child: Text(line, style: TextStyle(color: muted, fontSize: 12)),
+              child: Text(line, style: TextStyle(color: c.mutedForeground, fontSize: 12)),
             ),
         ],
       ],

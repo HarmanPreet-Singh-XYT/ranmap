@@ -30,6 +30,8 @@ PODS:
     - MapboxCommon (= 24.31.0)
     - MapboxCoreMaps (= 11.31.0)
     - Turf (= 4.0.0)
+  - package_info_plus (0.4.5):
+    - Flutter
   - purchases_flutter (10.13.1):
     - Flutter
     - PurchasesHybridCommon (= 19.2.0)
@@ -54,6 +56,7 @@ DEPENDENCIES:
   - image_picker_ios (from `.symlinks/plugins/image_picker_ios/ios`)
   - livekit_client (from `.symlinks/plugins/livekit_client/ios`)
   - mapbox_maps_flutter (from `.symlinks/plugins/mapbox_maps_flutter/ios`)
+  - package_info_plus (from `.symlinks/plugins/package_info_plus/ios`)
   - purchases_flutter (from `.symlinks/plugins/purchases_flutter/ios`)
   - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
   - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
@@ -87,6 +90,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/livekit_client/ios"
   mapbox_maps_flutter:
     :path: ".symlinks/plugins/mapbox_maps_flutter/ios"
+  package_info_plus:
+    :path: ".symlinks/plugins/package_info_plus/ios"
   purchases_flutter:
     :path: ".symlinks/plugins/purchases_flutter/ios"
   shared_preferences_foundation:
@@ -107,6 +112,7 @@ SPEC CHECKSUMS:
   MapboxCommon: cc28b41df14f1de999550bc5040b4c33756f31ca
   MapboxCoreMaps: bc2056387df6ba1d85bf2cd26d53a5c04f611461
   MapboxMaps: ab7e1d900ee0f76f9e4ec70f02cb664412576ef9
+  package_info_plus: af8e2ca6888548050f16fa2f1938db7b5a5df499
   purchases_flutter: e6d8940221d596f33a25f789a76b63d0ec8c0dd3
   PurchasesHybridCommon: d3ac1e960252e66c535d5bde6ac6dc7c9716d7eb
   RevenueCat: fafa0b7c0c2f6b04333f4a2c81624723c672f38e

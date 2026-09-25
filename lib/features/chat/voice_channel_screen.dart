@@ -3,10 +3,12 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:forui/forui.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 
-import '../../core/theme/app_theme.dart';
+import '../../core/theme/nav_palette.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/app_toast.dart';
 import '../premium/paywall.dart';
 import '../premium/premium_providers.dart';
 import 'chat_providers.dart';
@@ -186,9 +188,7 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
     try {
       await room!.localParticipant!.setMicrophoneEnabled(!next);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
-      }
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
       return;
     }
     // The room may have been torn down while the await was in flight.
@@ -204,6 +204,7 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = NavColors.of(context);
     final room = _room;
 
     // "Travel together": this channel is unlocked when ANY member is Pro, even
@@ -214,10 +215,39 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
         : ref.watch(groupProProvider(channel.groupId!));
     final proUnlocked = proAsync.valueOrNull ?? false;
 
-    return Scaffold(
-      appBar: AppBar(title: Text('${widget.title} · Voice')),
-      body: _connecting
-          ? const Center(child: CircularProgressIndicator())
+    return FScaffold(
+      childPad: false,
+      header: FHeader.nested(
+        title: Text('${widget.title} · Voice'),
+        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+      ),
+      footer: room == null
+          ? null
+          : Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  FButton.icon(
+                    onPress: _toggleMute,
+                    variant: _muted ? .primary : .outline,
+                    size: .lg,
+                    semanticsLabel: _muted ? 'Unmute' : 'Mute',
+                    child: Icon(_muted ? Icons.mic_off_rounded : Icons.mic_rounded),
+                  ),
+                  const SizedBox(width: 16),
+                  FButton.icon(
+                    onPress: _leave,
+                    variant: .destructive,
+                    size: .lg,
+                    semanticsLabel: 'Leave voice',
+                    child: const Icon(Icons.call_end_rounded),
+                  ),
+                ],
+              ),
+            ),
+      child: _connecting
+          ? const Center(child: FCircularProgress())
           : _error != null
               ? Center(
                   child: Padding(
@@ -225,9 +255,9 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(_error!, textAlign: TextAlign.center),
+                        Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: c.foreground)),
                         const SizedBox(height: 16),
-                        FilledButton(onPressed: () => _join(), child: const Text('Retry')),
+                        FButton(onPress: () => _join(), child: const Text('Retry')),
                       ],
                     ),
                   ),
@@ -237,10 +267,10 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const CircularProgressIndicator(),
+                          const FCircularProgress(),
                           if (_reconnecting) ...[
                             const SizedBox(height: 12),
-                            const Text('Reconnecting…'),
+                            Text('Reconnecting…', style: TextStyle(color: c.mutedForeground)),
                           ],
                         ],
                       ),
@@ -248,37 +278,16 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
                   : Column(
                       children: [
                         if (_reconnecting) ...[
-                          const LinearProgressIndicator(minHeight: 2),
-                          const Padding(
-                            padding: EdgeInsets.all(8),
-                            child: Text('Reconnecting…'),
+                          const FProgress(),
+                          Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Text('Reconnecting…', style: TextStyle(color: c.mutedForeground)),
                           ),
                         ],
                         if (proUnlocked) const _ProVoiceBanner(),
                         Expanded(child: _ParticipantList(room: room)),
                       ],
                     ),
-      floatingActionButton: room == null
-          ? null
-          : Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                FloatingActionButton(
-                  heroTag: 'mute',
-                  onPressed: _toggleMute,
-                  backgroundColor: _muted ? Colors.grey : null,
-                  child: Icon(_muted ? Icons.mic_off_rounded : Icons.mic_rounded),
-                ),
-                const SizedBox(width: 16),
-                FloatingActionButton(
-                  heroTag: 'leave',
-                  backgroundColor: Colors.red,
-                  onPressed: _leave,
-                  child: const Icon(Icons.call_end_rounded),
-                ),
-              ],
-            ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
 }
@@ -288,15 +297,21 @@ class _ProVoiceBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = NavColors.of(context);
     return Container(
       width: double.infinity,
-      color: AppTheme.primaryContainer,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: const Row(
+      color: c.surfaceAlt,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
         children: [
-          Icon(Icons.workspace_premium_rounded, size: 18, color: AppTheme.primary),
-          SizedBox(width: 8),
-          Expanded(child: Text('Pro voice — unlocked for everyone here')),
+          Icon(Icons.workspace_premium_rounded, size: 18, color: c.highway),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Pro voice — unlocked for everyone here',
+              style: TextStyle(color: c.foreground),
+            ),
+          ),
         ],
       ),
     );
@@ -310,13 +325,14 @@ class _ParticipantList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = NavColors.of(context);
     final participants = <lk.Participant>[
       if (room.localParticipant != null) room.localParticipant!,
       ...room.remoteParticipants.values,
     ];
 
     if (participants.isEmpty) {
-      return const Center(child: Text('Connecting…'));
+      return Center(child: Text('Connecting…', style: TextStyle(color: c.mutedForeground)));
     }
 
     return ListView.builder(
@@ -325,19 +341,27 @@ class _ParticipantList extends StatelessWidget {
       itemBuilder: (context, i) {
         final participant = participants[i];
         final isLocal = participant is lk.LocalParticipant;
-        return Card(
-          child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: participant.isSpeaking
-                  ? AppTheme.success
-                  : Theme.of(context).colorScheme.surfaceContainerHighest,
-              child: const Icon(Icons.person),
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: FTile(
+            prefix: Container(
+              height: 40,
+              width: 40,
+              decoration: BoxDecoration(
+                color: participant.isSpeaking ? c.success : c.surfaceAlt,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.person,
+                size: 20,
+                color: participant.isSpeaking ? Colors.white : c.foreground,
+              ),
             ),
             title: Text(participant.name.isNotEmpty ? participant.name : participant.identity),
             subtitle: Text(isLocal ? 'You' : 'In voice'),
-            trailing: Icon(
+            suffix: Icon(
               participant.isMuted ? Icons.mic_off_rounded : Icons.mic_rounded,
-              color: participant.isMuted ? Colors.grey : AppTheme.success,
+              color: participant.isMuted ? c.mutedForeground : c.success,
             ),
           ),
         );

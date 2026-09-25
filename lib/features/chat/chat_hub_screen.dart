@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:forui/forui.dart';
 
 import 'ai_conversations_screen.dart';
 import 'chat_channels_screen.dart';
@@ -12,24 +13,15 @@ class ChatHubScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Chat & Voice'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'AI Assistant'),
-              Tab(text: 'Group Chat'),
-            ],
-          ),
-        ),
-        body: const TabBarView(
-          children: [
-            AiConversationsScreen(showAppBar: false),
-            ChatChannelsScreen(),
-          ],
-        ),
+    return FScaffold(
+      childPad: false,
+      header: FHeader(title: const Text('Chat & Voice')),
+      child: FTabs(
+        expands: true,
+        children: const [
+          FTabEntry(label: Text('AI Assistant'), child: AiConversationsScreen(showAppBar: false)),
+          FTabEntry(label: Text('Group Chat'), child: ChatChannelsScreen()),
+        ],
       ),
     );
   }

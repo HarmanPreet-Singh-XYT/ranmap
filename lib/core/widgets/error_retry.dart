@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:forui/forui.dart';
 
 import '../offline/outbox.dart';
+import '../theme/nav_palette.dart';
 import '../util/error_text.dart';
 
 /// Standard error state with a retry affordance, so a failed load isn't a dead
@@ -18,6 +20,7 @@ class ErrorRetry extends StatelessWidget {
     final message = isNetworkError(error)
         ? "Couldn't reach the server — check your connection and try again."
         : friendlyError(error);
+    final c = NavColors.of(context);
 
     return Center(
       child: Padding(
@@ -25,16 +28,18 @@ class ErrorRetry extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Icon(Icons.cloud_off_rounded, size: 40, color: c.mutedForeground),
+            const SizedBox(height: 16),
             Semantics(
               liveRegion: true,
               child: Text(
                 message,
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+                style: TextStyle(color: c.destructive),
               ),
             ),
-            const SizedBox(height: 16),
-            FilledButton(onPressed: onRetry, child: const Text('Try again')),
+            const SizedBox(height: 20),
+            FButton(onPress: onRetry, child: const Text('Try again')),
           ],
         ),
       ),

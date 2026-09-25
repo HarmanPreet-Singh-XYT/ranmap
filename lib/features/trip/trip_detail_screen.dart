@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:forui/forui.dart';
 
 import 'package:intl/intl.dart';
 
-import '../../core/theme/app_theme.dart';
+import '../../core/theme/nav_palette.dart';
+import '../../core/providers/settings_provider.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/geo_distance.dart';
+import '../../core/util/units.dart';
+import '../../core/widgets/app_dialog.dart';
+import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/trip.dart';
 import '../../data/models/trip_expense.dart';
@@ -25,18 +30,13 @@ class TripDetailScreen extends ConsumerWidget {
   final Trip trip;
 
   Future<void> _completeTrip(BuildContext context, WidgetRef ref) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Complete trip?'),
-        content: const Text('This finalizes your stats for the trip.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Complete')),
-        ],
-      ),
+    final confirmed = await _confirm(
+      context,
+      title: 'Complete trip?',
+      body: 'This finalizes your stats for the trip.',
+      confirmLabel: 'Complete',
     );
-    if (confirmed != true) return;
+    if (!confirmed) return;
 
     try {
       await ref.read(tripRepositoryProvider).completeTrip(trip.id);
@@ -44,7 +44,7 @@ class TripDetailScreen extends ConsumerWidget {
       ref.invalidate(tripStatsProvider(trip.id));
       if (context.mounted) Navigator.of(context).pop();
     } catch (e) {
-      if (context.mounted) _toast(context, friendlyError(e));
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
     }
   }
 
@@ -54,6 +54,7 @@ class TripDetailScreen extends ConsumerWidget {
       title: 'Leave trip?',
       body: 'You will stop sharing your location on this trip.',
       confirmLabel: 'Leave',
+      destructive: true,
     );
     if (!confirmed) return;
     try {
@@ -61,7 +62,7 @@ class TripDetailScreen extends ConsumerWidget {
       ref.invalidate(myTripsProvider);
       if (context.mounted) Navigator.of(context).pop();
     } catch (e) {
-      if (context.mounted) _toast(context, friendlyError(e));
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
     }
   }
 
@@ -71,6 +72,7 @@ class TripDetailScreen extends ConsumerWidget {
       title: 'Cancel trip?',
       body: 'This permanently deletes the trip, its stops and expenses for everyone.',
       confirmLabel: 'Delete',
+      destructive: true,
     );
     if (!confirmed) return;
     try {
@@ -78,7 +80,7 @@ class TripDetailScreen extends ConsumerWidget {
       ref.invalidate(myTripsProvider);
       if (context.mounted) Navigator.of(context).pop();
     } catch (e) {
-      if (context.mounted) _toast(context, friendlyError(e));
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
     }
   }
 
@@ -87,79 +89,85 @@ class TripDetailScreen extends ConsumerWidget {
     required String title,
     required String body,
     required String confirmLabel,
-  }) async {
-    final result = await showDialog<bool>(
+    bool destructive = false,
+  }) =>
+      showAppConfirmDialog(
+        context,
+        title: title,
+        message: body,
+        confirmLabel: confirmLabel,
+        destructive: destructive,
+      );
+
+  Future<void> _showActions(BuildContext context, WidgetRef ref, bool isCreator) async {
+    await showFSheet<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(body),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(confirmLabel),
+      side: FLayout.btt,
+      builder: (sheetContext) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FTileGroup(
+            children: [
+              FTile(
+                variant: .destructive,
+                prefix: Icon(isCreator ? Icons.delete_outline : Icons.logout),
+                title: Text(isCreator ? 'Delete trip' : 'Leave trip'),
+                onPress: () {
+                  Navigator.of(sheetContext).pop();
+                  if (isCreator) {
+                    _cancelTrip(context, ref);
+                  } else {
+                    _leaveTrip(context, ref);
+                  }
+                },
+              ),
+            ],
           ),
         ],
       ),
     );
-    return result == true;
-  }
-
-  void _toast(BuildContext context, String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isCreator = SupabaseService.currentUser?.id == trip.createdBy;
-    return DefaultTabController(
-      length: 3,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(trip.title),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.photo_library_outlined),
-              tooltip: 'Trip photos',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => TripPhotosScreen(tripId: trip.id, tripTitle: trip.title),
-                ),
+
+    return FScaffold(
+      childPad: false,
+      header: FHeader.nested(
+        title: Text(trip.title),
+        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+        suffixes: [
+          FHeaderAction(
+            icon: const Icon(Icons.photo_library_outlined),
+            onPress: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => TripPhotosScreen(tripId: trip.id, tripTitle: trip.title),
               ),
             ),
-            if (trip.status == TripStatus.active)
-              TextButton(
-                onPressed: () => _completeTrip(context, ref),
+          ),
+          if (trip.status == TripStatus.active)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: FButton(
+                size: .sm,
+                onPress: () => _completeTrip(context, ref),
                 child: const Text('Complete'),
               ),
-            PopupMenuButton<String>(
-              onSelected: (value) {
-                if (value == 'leave') _leaveTrip(context, ref);
-                if (value == 'cancel') _cancelTrip(context, ref);
-              },
-              itemBuilder: (context) => [
-                if (!isCreator)
-                  const PopupMenuItem(value: 'leave', child: Text('Leave trip')),
-                if (isCreator)
-                  const PopupMenuItem(value: 'cancel', child: Text('Delete trip')),
-              ],
             ),
-          ],
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Stats'),
-              Tab(text: 'Stops'),
-              Tab(text: 'Expenses'),
-            ],
+          FHeaderAction(
+            icon: const Icon(Icons.more_vert),
+            onPress: () => _showActions(context, ref, isCreator),
           ),
-        ),
-        body: TabBarView(
-          children: [
-            _StatsTab(tripId: trip.id, routePolyline: trip.routePolyline),
-            _StopsTab(tripId: trip.id),
-            _ExpensesTab(tripId: trip.id),
-          ],
-        ),
+        ],
+      ),
+      child: FTabs(
+        expands: true,
+        children: [
+          FTabEntry(label: const Text('Stats'), child: _StatsTab(tripId: trip.id, routePolyline: trip.routePolyline)),
+          FTabEntry(label: const Text('Stops'), child: _StopsTab(tripId: trip.id)),
+          FTabEntry(label: const Text('Expenses'), child: _ExpensesTab(tripId: trip.id)),
+        ],
       ),
     );
   }
@@ -173,6 +181,8 @@ class _StatsTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final c = NavColors.of(context);
+    final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
     final statsAsync = ref.watch(tripStatsProvider(tripId));
     final expensesAsync = ref.watch(tripExpensesProvider(tripId));
 
@@ -208,9 +218,9 @@ class _StatsTab extends ConsumerWidget {
                 crossAxisSpacing: 12,
                 childAspectRatio: 1.5,
                 children: [
-                  _StatTile(label: 'Distance', value: '${s.totalDistanceKm.toStringAsFixed(1)} km'),
-                  _StatTile(label: 'Max speed', value: '${s.maxSpeedKmh.toStringAsFixed(0)} km/h'),
-                  _StatTile(label: 'Avg speed', value: '${s.avgSpeedKmh.toStringAsFixed(0)} km/h'),
+                  _StatTile(label: 'Distance', value: formatDistance(s.totalDistanceKm, unit)),
+                  _StatTile(label: 'Max speed', value: formatSpeed(s.maxSpeedKmh, unit)),
+                  _StatTile(label: 'Avg speed', value: formatSpeed(s.avgSpeedKmh, unit)),
                   _StatTile(label: 'Duration', value: _formatDuration(s.durationSeconds)),
                 ],
               ),
@@ -221,8 +231,8 @@ class _StatsTab extends ConsumerWidget {
               if (fuelCostPerKm != null) ...[
                 const SizedBox(height: 12),
                 _StatTile(
-                  label: 'Fuel cost / km',
-                  value: '\$${fuelCostPerKm.toStringAsFixed(2)}',
+                  label: 'Fuel cost / ${distanceUnitSymbol(unit)}',
+                  value: '\$${costPerDistance(fuelCostPerKm, unit).toStringAsFixed(2)}',
                   wide: true,
                 ),
               ],
@@ -237,13 +247,13 @@ class _StatsTab extends ConsumerWidget {
               const SizedBox(height: 16),
               Text(
                 'Stats update automatically while the trip is active, or pull to refresh.',
-                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                style: TextStyle(color: c.mutedForeground),
                 textAlign: TextAlign.center,
               ),
             ],
           );
         },
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const Center(child: FCircularProgress()),
         error: (e, _) => ErrorRetry(error: e, onRetry: () => ref.invalidate(tripStatsProvider(tripId))),
       ),
     );
@@ -304,17 +314,25 @@ class _StatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: AppTheme.cardTint,
+    final c = NavColors.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: c.border),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(label, style: const TextStyle(color: Colors.grey)),
+            Text(label, style: TextStyle(color: c.mutedForeground, fontSize: 13)),
             const SizedBox(height: 4),
-            Text(value, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20)),
+            Text(
+              value,
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: c.foreground),
+            ),
           ],
         ),
       ),
@@ -349,9 +367,7 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
             orderedStopIds: reordered.map((s) => s.id).toList(),
           );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
-      }
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
     } finally {
       ref.invalidate(tripStopsProvider(widget.tripId));
       if (mounted) setState(() => _optimisticOrder = null);
@@ -360,16 +376,22 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
 
   @override
   Widget build(BuildContext context) {
+    final c = NavColors.of(context);
     final stopsAsync = ref.watch(tripStopsProvider(widget.tripId));
 
-    return Scaffold(
-      body: stopsAsync.when(
+    return Stack(
+      children: [
+        stopsAsync.when(
         data: (fetched) {
           if (fetched.isEmpty) {
-            return const Center(
+            return Center(
               child: Padding(
-                padding: EdgeInsets.all(32),
-                child: Text('No stops planned yet.', textAlign: TextAlign.center),
+                padding: const EdgeInsets.all(32),
+                child: Text(
+                  'No stops planned yet.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: c.mutedForeground),
+                ),
               ),
             );
           }
@@ -407,7 +429,7 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
                             ref.invalidate(tripStopsProvider(widget.tripId));
                           }
                         },
-                        background: _dismissBackground(),
+                        background: _dismissBackground(c),
                         child: _StopCard(stop: stop),
                       ),
                     );
@@ -417,21 +439,26 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
             ],
           );
         },
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const Center(child: FCircularProgress()),
         error: (e, _) => ErrorRetry(
           error: e,
           onRetry: () => ref.invalidate(tripStopsProvider(widget.tripId)),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          await Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => AddStopScreen(tripId: widget.tripId)),
-          );
-        },
-        icon: const Icon(Icons.add_location_alt_rounded),
-        label: const Text('Add stop'),
-      ),
+        Positioned(
+          right: 16,
+          bottom: 16,
+          child: FButton(
+            onPress: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => AddStopScreen(tripId: widget.tripId)),
+              );
+            },
+            prefix: const Icon(Icons.add_location_alt_rounded),
+            child: const Text('Add stop'),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -447,6 +474,8 @@ class _NextStopEta extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final c = NavColors.of(context);
+    final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
     final position = ref.watch(devicePositionProvider).valueOrNull;
     if (position == null) return const SizedBox.shrink();
 
@@ -462,23 +491,23 @@ class _NextStopEta extends ConsumerWidget {
     final eta = avgKmh > 1 ? '~${((km / avgKmh) * 60).round()} min' : '—';
 
     return Material(
-      color: AppTheme.cardTint,
+      color: c.surfaceAlt,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
         child: Row(
           children: [
-            const Icon(Icons.flag_rounded, color: AppTheme.primary),
+            Icon(Icons.flag_rounded, color: c.activeRoute),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 'Next: ${stop.name}',
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w600),
+                style: TextStyle(fontWeight: FontWeight.w600, color: c.foreground),
               ),
             ),
             Text(
-              '${km.toStringAsFixed(1)} km · $eta',
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              '${formatDistance(km, unit)} · $eta',
+              style: TextStyle(color: c.mutedForeground),
             ),
           ],
         ),
@@ -509,27 +538,29 @@ class _StopCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        contentPadding: const EdgeInsets.all(16),
-        leading: CircleAvatar(
-          backgroundColor: AppTheme.primaryContainer,
-          child: Icon(_icon, color: AppTheme.primary),
-        ),
-        title: Text(stop.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (stop.plannedArrival != null)
-              Text(
-                'ETA ${DateFormat.yMMMd().add_jm().format(stop.plannedArrival!)}',
-                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              ),
-            if (stop.notes != null) Text(stop.notes!),
-          ],
-        ),
-        trailing: Icon(Icons.drag_handle_rounded, color: Theme.of(context).colorScheme.onSurfaceVariant),
+    final c = NavColors.of(context);
+    return FTile(
+      prefix: Container(
+        height: 40,
+        width: 40,
+        decoration: BoxDecoration(color: c.surfaceAlt, shape: BoxShape.circle),
+        child: Icon(_icon, color: c.activeRoute, size: 20),
       ),
+      title: Text(stop.name, style: const TextStyle(fontWeight: FontWeight.w700)),
+      subtitle: (stop.plannedArrival != null || stop.notes != null)
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (stop.plannedArrival != null)
+                  Text(
+                    'ETA ${DateFormat.yMMMd().add_jm().format(stop.plannedArrival!)}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                if (stop.notes != null) Text(stop.notes!),
+              ],
+            )
+          : null,
+      suffix: Icon(Icons.drag_handle_rounded, color: c.mutedForeground),
     );
   }
 }
@@ -541,16 +572,22 @@ class _ExpensesTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final c = NavColors.of(context);
     final expensesAsync = ref.watch(tripExpensesProvider(tripId));
 
-    return Scaffold(
-      body: expensesAsync.when(
+    return Stack(
+      children: [
+        expensesAsync.when(
         data: (expenses) {
           if (expenses.isEmpty) {
-            return const Center(
+            return Center(
               child: Padding(
-                padding: EdgeInsets.all(32),
-                child: Text('No expenses logged yet.', textAlign: TextAlign.center),
+                padding: const EdgeInsets.all(32),
+                child: Text(
+                  'No expenses logged yet.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: c.mutedForeground),
+                ),
               ),
             );
           }
@@ -564,8 +601,12 @@ class _ExpensesTab extends ConsumerWidget {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              Card(
-                color: AppTheme.cardTint,
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: c.surfaceAlt,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: c.border),
+                ),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
@@ -573,14 +614,17 @@ class _ExpensesTab extends ConsumerWidget {
                     children: [
                       Text(
                         'Total: \$${total.toStringAsFixed(2)}',
-                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.foreground),
                       ),
                       const SizedBox(height: 8),
                       Wrap(
                         spacing: 12,
                         runSpacing: 4,
                         children: byCategory.entries
-                            .map((e) => Text('${e.key}: \$${e.value.toStringAsFixed(2)}'))
+                            .map((e) => Text(
+                                  '${e.key}: \$${e.value.toStringAsFixed(2)}',
+                                  style: TextStyle(color: c.mutedForeground),
+                                ))
                             .toList(),
                       ),
                     ],
@@ -600,27 +644,32 @@ class _ExpensesTab extends ConsumerWidget {
                         ref.invalidate(tripExpensesProvider(tripId));
                       }
                     },
-                    background: _dismissBackground(),
+                    background: _dismissBackground(c),
                     child: _ExpenseCard(expense: e),
                   )),
             ],
           );
         },
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const Center(child: FCircularProgress()),
         error: (e, _) => ErrorRetry(
           error: e,
           onRetry: () => ref.invalidate(tripExpensesProvider(tripId)),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          await Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => AddExpenseScreen(tripId: tripId)),
-          );
-        },
-        icon: const Icon(Icons.add),
-        label: const Text('Log expense'),
-      ),
+        Positioned(
+          right: 16,
+          bottom: 16,
+          child: FButton(
+            onPress: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => AddExpenseScreen(tripId: tripId)),
+              );
+            },
+            prefix: const Icon(Icons.add),
+            child: const Text('Log expense'),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -632,11 +681,16 @@ class _ExpenseCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
-        contentPadding: const EdgeInsets.all(16),
-        leading: const CircleAvatar(child: Icon(Icons.receipt_long_rounded)),
+    final c = NavColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: FTile(
+        prefix: Container(
+          height: 40,
+          width: 40,
+          decoration: BoxDecoration(color: c.surfaceAlt, shape: BoxShape.circle),
+          child: Icon(Icons.receipt_long_rounded, color: c.activeRoute, size: 20),
+        ),
         title: Text('\$${expense.amount.toStringAsFixed(2)} · ${expense.category}'),
         subtitle: expense.note != null ? Text(expense.note!) : null,
       ),
@@ -644,27 +698,21 @@ class _ExpenseCard extends StatelessWidget {
   }
 }
 
-Future<bool> _confirmDeleteDialog(BuildContext context, String title) async {
-  final result = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text(title),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-        ElevatedButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Delete')),
-      ],
-    ),
-  );
-  return result == true;
-}
+Future<bool> _confirmDeleteDialog(BuildContext context, String title) =>
+    showAppConfirmDialog(
+      context,
+      title: title,
+      confirmLabel: 'Delete',
+      destructive: true,
+    );
 
-Widget _dismissBackground() {
+Widget _dismissBackground(NavColors c) {
   return Container(
     alignment: Alignment.centerRight,
     padding: const EdgeInsets.only(right: 24),
     decoration: BoxDecoration(
-      color: AppTheme.danger,
-      borderRadius: BorderRadius.circular(24),
+      color: c.destructive,
+      borderRadius: BorderRadius.circular(18),
     ),
     child: const Icon(Icons.delete_outline, color: Colors.white),
   );

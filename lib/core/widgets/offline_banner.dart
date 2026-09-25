@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../offline/outbox.dart';
 import '../offline/outbox_providers.dart';
 import '../providers/connectivity_provider.dart';
-import '../theme/app_theme.dart';
+import '../theme/nav_palette.dart';
 
 /// Wraps the app and shows a thin banner while offline or while queued writes
 /// are still syncing, so the user understands the state of their data instead
@@ -21,6 +21,7 @@ class OfflineBanner extends ConsumerWidget {
     ref.watch(outboxDrainProvider);
     final offline = ref.watch(isOfflineProvider);
     final outbox = ref.watch(outboxProvider);
+    final c = NavColors.of(context);
 
     return ValueListenableBuilder<int>(
       valueListenable: outbox.pending,
@@ -33,7 +34,8 @@ class OfflineBanner extends ConsumerWidget {
               children: [
                 if (failedEntries.isNotEmpty)
                   _Strip(
-                    color: AppTheme.danger,
+                    color: c.destructive,
+                    foreground: Colors.white,
                     icon: Icons.error_outline_rounded,
                     text: failedEntries.length == 1
                         ? "1 change couldn't be saved and was lost. Please try again."
@@ -42,7 +44,8 @@ class OfflineBanner extends ConsumerWidget {
                   )
                 else if (offline)
                   _Strip(
-                    color: AppTheme.danger,
+                    color: c.destructive,
+                    foreground: Colors.white,
                     icon: Icons.cloud_off_rounded,
                     text: count > 0
                         ? "You're offline — $count change${count == 1 ? '' : 's'} will sync when you reconnect."
@@ -50,7 +53,8 @@ class OfflineBanner extends ConsumerWidget {
                   )
                 else if (count > 0)
                   _Strip(
-                    color: AppTheme.secondary,
+                    color: c.activeRoute,
+                    foreground: Colors.white,
                     icon: Icons.sync_rounded,
                     text: 'Syncing $count pending change${count == 1 ? '' : 's'}…',
                   ),
@@ -75,9 +79,16 @@ class OfflineBanner extends ConsumerWidget {
 }
 
 class _Strip extends StatelessWidget {
-  const _Strip({required this.color, required this.icon, required this.text, this.onDismiss});
+  const _Strip({
+    required this.color,
+    required this.foreground,
+    required this.icon,
+    required this.text,
+    this.onDismiss,
+  });
 
   final Color color;
+  final Color foreground;
   final IconData icon;
   final String text;
   final VoidCallback? onDismiss;
@@ -92,14 +103,14 @@ class _Strip extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             children: [
-              Icon(icon, size: 18, color: Colors.white),
+              Icon(icon, size: 18, color: foreground),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                child: Text(text, style: TextStyle(color: foreground, fontSize: 13)),
               ),
               if (onDismiss != null)
                 IconButton(
-                  icon: const Icon(Icons.close_rounded, size: 18, color: Colors.white),
+                  icon: Icon(Icons.close_rounded, size: 18, color: foreground),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
                   tooltip: 'Dismiss',

@@ -1,16 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:forui/forui.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/theme/nav_palette.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/app_dialog.dart';
+import '../../core/widgets/app_toast.dart';
 import '../../data/models/map_post.dart';
 import '../../data/services/supabase_service.dart';
 import 'map_post_providers.dart';
 
 Future<void> showMapPostViewerSheet(BuildContext context, MapPost post) {
-  return showModalBottomSheet(
+  return showFSheet(
     context: context,
-    isScrollControlled: true,
+    side: FLayout.btt,
+    mainAxisMaxRatio: null,
     builder: (_) => _MapPostViewerSheet(post: post),
   );
 }
@@ -22,6 +27,7 @@ class _MapPostViewerSheet extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final c = NavColors.of(context);
     final signedUrlAsync = ref.watch(mapPostSignedUrlProvider(post.storagePath));
     final isMine = post.userId == SupabaseService.currentUser?.id;
 
@@ -33,11 +39,11 @@ class _MapPostViewerSheet extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(18),
               child: signedUrlAsync.when(
                 loading: () => const SizedBox(
                   height: 240,
-                  child: Center(child: CircularProgressIndicator()),
+                  child: Center(child: FCircularProgress()),
                 ),
                 error: (e, _) => SizedBox(
                   height: 120,
@@ -54,65 +60,51 @@ class _MapPostViewerSheet extends ConsumerWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Row(
               children: [
                 Expanded(
                   child: Text(
                     post.posterUsername != null ? '@${post.posterUsername}' : 'Someone',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: c.foreground),
                   ),
                 ),
                 Text(
                   DateFormat.yMMMd().add_jm().format(post.createdAt),
-                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
+                  style: TextStyle(color: c.mutedForeground, fontSize: 12),
                 ),
               ],
             ),
             if (post.caption != null && post.caption!.isNotEmpty) ...[
               const SizedBox(height: 8),
-              Text(post.caption!),
+              Text(post.caption!, style: TextStyle(color: c.foreground)),
             ],
             if (isMine) ...[
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () async {
-                    final confirmed = await showDialog<bool>(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: const Text('Delete photo?'),
-                        content: const Text('This photo will be removed for everyone.'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.of(context).pop(false),
-                            child: const Text('Cancel'),
-                          ),
-                          ElevatedButton(
-                            onPressed: () => Navigator.of(context).pop(true),
-                            child: const Text('Delete'),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (confirmed != true) return;
-                    try {
-                      await ref.read(mapPostRepositoryProvider).deletePost(post.id);
-                      if (post.tripId != null) {
-                        ref.invalidate(tripMapPostsProvider(post.tripId!));
-                      }
-                      if (context.mounted) Navigator.of(context).pop();
-                    } catch (e) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context)
-                            .showSnackBar(SnackBar(content: Text(friendlyError(e))));
-                      }
+              const SizedBox(height: 16),
+              FButton(
+                variant: .destructive,
+                onPress: () async {
+                  final confirmed = await showAppConfirmDialog(
+                    context,
+                    title: 'Delete photo?',
+                    message: 'This photo will be removed for everyone.',
+                    confirmLabel: 'Delete',
+                    destructive: true,
+                  );
+                  if (!confirmed) return;
+                  try {
+                    await ref.read(mapPostRepositoryProvider).deletePost(post.id);
+                    if (post.tripId != null) {
+                      ref.invalidate(tripMapPostsProvider(post.tripId!));
                     }
-                  },
-                  icon: const Icon(Icons.delete_outline),
-                  label: const Text('Delete photo'),
-                ),
+                  } catch (e) {
+                    if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+                    return;
+                  }
+                  if (context.mounted) Navigator.of(context).pop();
+                },
+                prefix: const Icon(Icons.delete_outline),
+                child: const Text('Delete photo'),
               ),
             ],
           ],

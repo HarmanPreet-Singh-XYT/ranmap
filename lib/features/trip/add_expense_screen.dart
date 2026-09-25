@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:forui/forui.dart';
 
 import '../../core/offline/outbox.dart';
 import '../../core/offline/outbox_providers.dart';
 import '../../core/providers/connectivity_provider.dart';
-import '../../core/theme/app_theme.dart';
+import '../../core/theme/nav_palette.dart';
+import '../../core/widgets/app_spinner.dart';
 import '../../core/util/error_text.dart';
+import '../../core/util/validation.dart';
+import '../../core/widgets/app_toast.dart';
 import '../../data/models/trip_expense.dart';
 import '../../data/services/supabase_service.dart';
 import 'trip_providers.dart';
@@ -36,10 +40,28 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
   bool _saving = false;
   String? _error;
 
+  @override
+  void dispose() {
+    _amountCtrl.dispose();
+    _fuelLitersCtrl.dispose();
+    _odometerCtrl.dispose();
+    _noteCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _save() async {
     final amount = double.tryParse(_amountCtrl.text.trim());
-    if (amount == null || amount <= 0) {
-      setState(() => _error = 'Enter a valid amount');
+    final amountValidationError = expenseAmountError(amount);
+    if (amountValidationError != null) {
+      setState(() => _error = amountValidationError);
+      return;
+    }
+    // expenseAmountError rejects a null amount, so this is the parsed value.
+    final validAmount = amount!;
+    final note = _noteCtrl.text.trim();
+    final noteValidationError = notesError(note);
+    if (noteValidationError != null) {
+      setState(() => _error = noteValidationError);
       return;
     }
 
@@ -51,11 +73,11 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
     final expense = TripExpense.draft(
       tripId: widget.tripId,
       userId: SupabaseService.currentUserId,
-      amount: amount,
+      amount: validAmount,
       category: _category,
       fuelLiters: double.tryParse(_fuelLitersCtrl.text.trim()),
       odometerKm: double.tryParse(_odometerCtrl.text.trim()),
-      note: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+      note: note.isEmpty ? null : note,
     );
 
     final id = generateUuidV4();
@@ -72,9 +94,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
               createdAt: DateTime.now(),
             ));
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("You're offline — this expense will sync when you reconnect.")),
-          );
+          showAppToast(context, "You're offline — this expense will sync when you reconnect.");
           Navigator.of(context).pop();
         }
       } else {
@@ -87,71 +107,89 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = NavColors.of(context);
     final isFuel = _category == 'fuel';
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Log expense')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            Text('Category', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              children: _kExpenseCategories.map((c) {
-                final (id, label, icon) = c;
-                return ChoiceChip(
-                  avatar: Icon(icon, size: 18),
-                  label: Text(label),
-                  selected: _category == id,
-                  onSelected: (_) => setState(() => _category = id),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 16),
-            TextField(
+    return FScaffold(
+      childPad: false,
+      header: FHeader.nested(
+        title: const Text('Log expense'),
+        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+      ),
+      child: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Text('Category', style: _section(c)),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _kExpenseCategories.map((entry) {
+              final (id, label, icon) = entry;
+              final selected = _category == id;
+              return FButton(
+                variant: selected ? .primary : .outline,
+                size: .sm,
+                selected: selected,
+                onPress: () => setState(() => _category = id),
+                prefix: Icon(icon),
+                child: Text(label),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 20),
+          FTextField(
+            control: FTextFieldControl.managed(
               controller: _amountCtrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              onChanged: (_) {
+              onChange: (_) {
                 if (_error != null) setState(() => _error = null);
               },
-              decoration: const InputDecoration(labelText: 'Amount', prefixText: '\$ '),
             ),
-            if (isFuel) ...[
-              const SizedBox(height: 16),
-              TextField(
-                controller: _fuelLitersCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Fuel (liters, optional)'),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _odometerCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Odometer (km, optional)'),
-              ),
-            ],
+            label: const Text('Amount'),
+            hint: '0.00',
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          ),
+          if (isFuel) ...[
             const SizedBox(height: 16),
-            TextField(
-              controller: _noteCtrl,
-              decoration: const InputDecoration(labelText: 'Note (optional)'),
+            FTextField(
+              control: FTextFieldControl.managed(controller: _fuelLitersCtrl),
+              label: const Text('Fuel (liters, optional)'),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
             ),
-            if (_error != null) ...[
-              const SizedBox(height: 16),
-              Text(_error!, style: const TextStyle(color: AppTheme.danger)),
-            ],
-            const SizedBox(height: 32),
-            ElevatedButton(
-              onPressed: _saving ? null : _save,
-              child: _saving
-                  ? const SizedBox(
-                      height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Text('Log expense'),
+            const SizedBox(height: 16),
+            FTextField(
+              control: FTextFieldControl.managed(controller: _odometerCtrl),
+              label: const Text('Odometer (km, optional)'),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
             ),
           ],
-        ),
+          const SizedBox(height: 16),
+          FTextField(
+            control: FTextFieldControl.managed(controller: _noteCtrl),
+            label: const Text('Note (optional)'),
+            maxLength: kNotesMaxLength,
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 16),
+            FAlert(variant: .destructive, title: Text(_error!)),
+          ],
+          const SizedBox(height: 28),
+          FButton(
+            size: .lg,
+            onPress: _saving ? null : _save,
+            child: _saving
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: AppSpinner(color: Colors.white),
+                  )
+                : const Text('Log expense'),
+          ),
+        ],
       ),
     );
   }
+
+  TextStyle _section(NavColors c) =>
+      TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.foreground);
 }

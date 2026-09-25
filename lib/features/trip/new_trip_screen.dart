@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:forui/forui.dart';
 
-import '../../core/theme/app_theme.dart';
+import '../../core/theme/nav_palette.dart';
+import '../../core/widgets/app_spinner.dart';
 import '../../core/util/error_text.dart';
+import '../../core/util/validation.dart';
+import '../../core/widgets/app_toast.dart';
 import '../../data/models/trip.dart';
 import '../../data/services/supabase_service.dart';
 import '../premium/paywall.dart';
@@ -31,6 +35,13 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
   bool _saving = false;
   String? _error;
 
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    _inviteCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _planRoute() async {
     final result = await Navigator.of(context).push<PlannedRoute>(
       MaterialPageRoute(builder: (_) => const PlanRouteScreen()),
@@ -58,27 +69,36 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
     if (!mounted) return;
 
     if (friends.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No friends yet — add some from Profile > Friends.')),
-      );
+      showAppToast(context, 'No friends yet — add some from Profile > Friends.');
       return;
     }
 
-    final selected = await showModalBottomSheet<String>(
+    final selected = await showFSheet<String>(
       context: context,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: friends.map((profile) {
-            final username = profile['username'] as String;
-            return ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.person)),
-              title: Text('@$username'),
-              enabled: !_invitees.contains(username),
-              onTap: () => Navigator.of(context).pop(username),
-            );
-          }).toList(),
-        ),
+      side: FLayout.btt,
+      builder: (context) => ListView(
+        shrinkWrap: true,
+        children: [
+          FTileGroup(
+            children: [
+              for (final profile in friends)
+                FTile(
+                  enabled: !_invitees.contains(profile['username'] as String),
+                  prefix: Container(
+                    height: 40,
+                    width: 40,
+                    decoration: BoxDecoration(
+                      color: NavColors.of(context).surfaceAlt,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.person, color: NavColors.of(context).activeRoute, size: 20),
+                  ),
+                  title: Text('@${profile['username']}'),
+                  onPress: () => Navigator.of(context).pop(profile['username'] as String),
+                ),
+            ],
+          ),
+        ],
       ),
     );
 
@@ -89,8 +109,9 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
 
   Future<void> _createTrip() async {
     final title = _titleCtrl.text.trim();
-    if (title.isEmpty) {
-      setState(() => _error = 'Give your trip a name');
+    final titleValidationError = nameError(title, label: 'Trip name');
+    if (titleValidationError != null) {
+      setState(() => _error = titleValidationError);
       return;
     }
 
@@ -126,9 +147,7 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
 
       if (!mounted) return;
       if (failedInvites.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Trip created. Could not find: ${failedInvites.join(', ')}')),
-        );
+        showAppToast(context, 'Trip created. Could not find: ${failedInvites.join(', ')}');
       }
       Navigator.of(context).pop(trip);
     } catch (e) {
@@ -146,85 +165,135 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('New trip')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            TextField(
+    final c = NavColors.of(context);
+
+    return FScaffold(
+      childPad: false,
+      header: FHeader.nested(
+        title: const Text('New trip'),
+        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+      ),
+      child: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          FTextField(
+            control: FTextFieldControl.managed(
               controller: _titleCtrl,
-              onChanged: (_) {
+              onChange: (_) {
                 if (_error != null) setState(() => _error = null);
               },
-              decoration: const InputDecoration(labelText: 'Trip name'),
             ),
-            const SizedBox(height: 24),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.alt_route_rounded),
-              title: Text(_plannedRoute == null ? 'No route planned' : 'Route planned'),
-              subtitle: _plannedRoute == null
-                  ? const Text('Optional — pick an origin, destination, and route')
-                  : null,
-              trailing: TextButton(
-                onPressed: _planRoute,
-                child: Text(_plannedRoute == null ? 'Plan route' : 'Change'),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: Text('Invite group members', style: Theme.of(context).textTheme.titleMedium),
-                ),
-                TextButton.icon(
-                  onPressed: _pickFromFriends,
-                  icon: const Icon(Icons.group_add),
-                  label: const Text('From friends'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _inviteCtrl,
-                    decoration: const InputDecoration(labelText: 'Username', prefixText: '@'),
-                    onSubmitted: (_) => _addInvitee(),
+            label: const Text('Trip name'),
+            hint: 'Weekend to the coast',
+            maxLength: kNameMaxLength,
+          ),
+          const SizedBox(height: 20),
+          FCard(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  Icon(Icons.alt_route_rounded, color: c.activeRoute),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _plannedRoute == null ? 'No route planned' : 'Route planned',
+                          style: TextStyle(fontWeight: FontWeight.w600, color: c.foreground),
+                        ),
+                        if (_plannedRoute == null) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            'Optional — pick an origin, destination, and route',
+                            style: TextStyle(color: c.mutedForeground, fontSize: 13),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filled(onPressed: _addInvitee, icon: const Icon(Icons.add)),
-              ],
+                  FButton(
+                    variant: .outline,
+                    size: .sm,
+                    onPress: _planRoute,
+                    child: Text(_plannedRoute == null ? 'Plan route' : 'Change'),
+                  ),
+                ],
+              ),
             ),
-            if (_invitees.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                children: _invitees
-                    .map((u) => Chip(
-                          label: Text('@$u'),
-                          onDeleted: () => setState(() => _invitees.remove(u)),
-                        ))
-                    .toList(),
+          ),
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Invite group members',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.foreground),
+                ),
+              ),
+              FButton(
+                variant: .ghost,
+                size: .sm,
+                onPress: _pickFromFriends,
+                prefix: const Icon(Icons.group_add),
+                child: const Text('From friends'),
               ),
             ],
-            if (_error != null) ...[
-              const SizedBox(height: 16),
-              Text(_error!, style: const TextStyle(color: AppTheme.danger)),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: FTextField(
+                  control: FTextFieldControl.managed(controller: _inviteCtrl),
+                  label: const Text('Username'),
+                  hint: 'theirname',
+                  onSubmit: (_) => _addInvitee(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FButton.icon(
+                onPress: _addInvitee,
+                child: const Icon(Icons.add),
+              ),
             ],
-            const SizedBox(height: 32),
-            ElevatedButton(
-              onPressed: _saving ? null : _createTrip,
-              child: _saving
-                  ? const SizedBox(
-                      height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Text('Create trip'),
+          ),
+          if (_invitees.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _invitees
+                  .map((u) => FButton(
+                        variant: .outline,
+                        size: .xs,
+                        semanticsLabel: 'Remove @$u',
+                        onPress: () => setState(() => _invitees.remove(u)),
+                        suffix: const Icon(Icons.close),
+                        child: Text('@$u'),
+                      ))
+                  .toList(),
             ),
           ],
-        ),
+          if (_error != null) ...[
+            const SizedBox(height: 16),
+            FAlert(variant: .destructive, title: Text(_error!)),
+          ],
+          const SizedBox(height: 28),
+          FButton(
+            size: .lg,
+            onPress: _saving ? null : _createTrip,
+            child: _saving
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: AppSpinner(color: Colors.white),
+                  )
+                : const Text('Create trip'),
+          ),
+        ],
       ),
     );
   }

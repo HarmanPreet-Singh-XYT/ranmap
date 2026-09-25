@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:forui/forui.dart';
 
+import '../../core/theme/nav_palette.dart';
 import '../../core/util/error_text.dart';
 import '../../data/models/route_option.dart';
 import '../../data/services/google_maps_api_service.dart';
@@ -22,9 +24,10 @@ Future<NearbyPlace?> showNearbyPlacesSheet(
   required Position center,
   String? routePolyline,
 }) {
-  return showModalBottomSheet<NearbyPlace>(
+  return showFSheet<NearbyPlace>(
     context: context,
-    isScrollControlled: true,
+    side: FLayout.btt,
+    mainAxisMaxRatio: null,
     builder: (_) => _NearbyPlacesSheet(center: center, routePolyline: routePolyline),
   );
 }
@@ -90,6 +93,8 @@ class _NearbyPlacesSheetState extends State<_NearbyPlacesSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final c = NavColors.of(context);
+
     return DraggableScrollableSheet(
       initialChildSize: 0.6,
       minChildSize: 0.3,
@@ -98,38 +103,54 @@ class _NearbyPlacesSheetState extends State<_NearbyPlacesSheet> {
       builder: (context, scrollController) {
         return Column(
           children: [
+            // Grab handle.
+            Container(
+              margin: const EdgeInsets.only(top: 10, bottom: 4),
+              height: 4,
+              width: 40,
+              decoration: BoxDecoration(
+                color: c.border,
+                borderRadius: BorderRadius.circular(100),
+              ),
+            ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
               child: Wrap(
                 spacing: 8,
+                runSpacing: 8,
                 children: _kPlaceTypes.map((t) {
                   final (id, label, icon) = t;
-                  return ChoiceChip(
-                    avatar: Icon(icon, size: 18),
-                    label: Text(label),
-                    selected: _type == id,
-                    onSelected: (_) {
+                  final selected = _type == id;
+                  return FButton(
+                    variant: selected ? .primary : .outline,
+                    size: .sm,
+                    selected: selected,
+                    onPress: () {
                       setState(() => _type = id);
                       _search();
                     },
+                    prefix: Icon(icon),
+                    child: Text(label),
                   );
                 }).toList(),
               ),
             ),
             if (_canSearchAlongRoute)
-              SwitchListTile(
-                title: const Text('Search along the route'),
-                value: _alongRoute,
-                onChanged: (v) {
-                  setState(() => _alongRoute = v);
-                  _search();
-                },
-                dense: true,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: FSwitch(
+                  label: const Text('Search along the route'),
+                  value: _alongRoute,
+                  onChange: (v) {
+                    setState(() => _alongRoute = v);
+                    _search();
+                  },
+                ),
               ),
-            const Divider(height: 1),
+            const FDivider(),
             Expanded(
               child: _loading
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const Center(child: FCircularProgress())
                   : _error != null
                       ? Center(
                           child: Padding(
@@ -141,23 +162,28 @@ class _NearbyPlacesSheetState extends State<_NearbyPlacesSheet> {
                                   liveRegion: true,
                                   child: Text(_error!, textAlign: TextAlign.center),
                                 ),
-                                const SizedBox(height: 12),
-                                FilledButton(onPressed: _search, child: const Text('Try again')),
+                                const SizedBox(height: 14),
+                                FButton(onPress: _search, child: const Text('Try again')),
                               ],
                             ),
                           ),
                         )
                       : _places.isEmpty
-                          ? const Center(child: Text('No places found nearby.'))
+                          ? Center(
+                              child: Text(
+                                'No places found nearby.',
+                                style: TextStyle(color: c.mutedForeground),
+                              ),
+                            )
                           : ListView.builder(
                               controller: scrollController,
                               itemCount: _places.length,
                               itemBuilder: (context, i) {
                                 final place = _places[i];
-                                return ListTile(
-                                  leading: const Icon(Icons.place_outlined),
+                                return FTile(
+                                  prefix: Icon(Icons.place_outlined, color: c.activeRoute),
                                   title: Text(place.name),
-                                  onTap: () => _openDetails(place),
+                                  onPress: () => _openDetails(place),
                                 );
                               },
                             ),

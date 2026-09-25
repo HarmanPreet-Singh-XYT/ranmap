@@ -6,6 +6,8 @@ import '../../features/auth/sign_in_screen.dart';
 import '../../features/auth/sign_up_screen.dart';
 import '../../features/home/home_shell.dart';
 import '../../features/onboarding/onboarding_screen.dart';
+import '../../features/welcome/welcome_screen.dart';
+import '../providers/app_prefs_provider.dart';
 import 'auth_state_provider.dart';
 
 final goRouterProvider = Provider<GoRouter>((ref) {
@@ -20,11 +22,17 @@ final goRouterProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final authAsync = ref.read(authStateProvider);
       final profileAsync = ref.read(myProfileProvider);
+      final introSeen = ref.read(appPrefsProvider).introSeen;
 
       final signedIn = authAsync.valueOrNull?.session != null;
-      final loggingInRoute = state.matchedLocation == '/sign-in' || state.matchedLocation == '/sign-up';
+      final loc = state.matchedLocation;
+      final loggingInRoute = loc == '/sign-in' || loc == '/sign-up';
+      final welcomeRoute = loc == '/welcome';
 
       if (!signedIn) {
+        // First launch: show the intro carousel before the auth screens.
+        if (!introSeen) return welcomeRoute ? null : '/welcome';
+        if (welcomeRoute) return '/sign-in';
         return loggingInRoute ? null : '/sign-in';
       }
 
@@ -43,11 +51,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         return onboardingRoute ? null : '/onboarding';
       }
 
-      if (onboardingRoute || loggingInRoute) return '/';
+      if (onboardingRoute || loggingInRoute || welcomeRoute) return '/';
       return null;
     },
     routes: [
       GoRoute(path: '/', builder: (context, state) => const HomeShell()),
+      GoRoute(path: '/welcome', builder: (context, state) => const WelcomeScreen()),
       GoRoute(path: '/sign-in', builder: (context, state) => const SignInScreen()),
       GoRoute(path: '/sign-up', builder: (context, state) => const SignUpScreen()),
       GoRoute(path: '/onboarding', builder: (context, state) => const OnboardingScreen()),

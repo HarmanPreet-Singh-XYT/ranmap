@@ -164,6 +164,16 @@ class Outbox {
   void acknowledgeFailed() {
     failed.value = const [];
   }
+
+  /// Drops every queued (not-yet-synced) write and clears surfaced failures.
+  /// Exposed for Settings → Clear offline queue; the caller must confirm first,
+  /// since the queued writes are permanently lost.
+  Future<void> clear() async {
+    await _ensureLoaded();
+    _entries.clear();
+    failed.value = const [];
+    await _persist();
+  }
 }
 
 /// True when [error] looks like a connectivity problem (worth retrying).

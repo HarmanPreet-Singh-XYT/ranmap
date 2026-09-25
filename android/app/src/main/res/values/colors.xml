@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches NavColors.canvas so the window behind Flutter has no flash. -->
+    <color name="ranmap_launch_light">#F4F2EF</color>
+    <color name="ranmap_launch_dark">#1A1C1E</color>
+</resources>

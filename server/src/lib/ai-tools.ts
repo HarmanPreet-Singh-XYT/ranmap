@@ -1,5 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { isUniqueViolation } from "./errors.js";
+import { notifyUsers } from "./push.js";
 import { supabaseAdmin } from "./supabase.js";
 
 export const aiTools: Anthropic.Tool[] = [
@@ -87,6 +88,16 @@ export const aiTools: Anthropic.Tool[] = [
 
 const STOP_KINDS = new Set(["food", "scenery", "fuel", "rest", "custom"]);
 
+// Defense-in-depth caps on LLM-generated free text before it's stored. These
+// come from the model, not directly from the user, but an adversarial or
+// degenerate completion shouldn't be able to write an unbounded row.
+const MAX_NAME_CHARS = 200;
+const MAX_NOTES_CHARS = 2000;
+
+function clamp(value: string, maxLength: number): string {
+  return value.length > maxLength ? value.slice(0, maxLength) : value;
+}
+
 /**
  * Looks up one of the caller's accepted trips by exact title. Returns the trip
  * id, or an error string explaining why it couldn't be found.
@@ -126,7 +137,7 @@ export async function runTool(
     input && typeof input === "object" ? input : {};
 
   if (name === "save_place") {
-    const placeName = String(args.name ?? "").trim();
+    const placeName = clamp(String(args.name ?? "").trim(), MAX_NAME_CHARS);
     if (!placeName) return JSON.stringify({ error: "Missing place name" });
 
     const lat = validLatitude(args.latitude);
@@ -135,7 +146,7 @@ export async function runTool(
     const { error } = await supabaseAdmin.from("ai_saved_places").insert({
       user_id: userId,
       name: placeName,
-      notes: typeof args.notes === "string" ? args.notes : null,
+      notes: typeof args.notes === "string" ? clamp(args.notes, MAX_NOTES_CHARS) : null,
       point: lat !== null && lng !== null ? `SRID=4326;POINT(${lng} ${lat})` : null,
     });
 
@@ -144,7 +155,7 @@ export async function runTool(
   }
 
   if (name === "schedule_trip") {
-    const title = String(args.trip_title ?? "").trim();
+    const title = clamp(String(args.trip_title ?? "").trim(), MAX_NAME_CHARS);
     const scheduledFor = validFutureIso(args.scheduled_for);
     if (!title || !scheduledFor) {
       return JSON.stringify({ error: "Missing trip_title or a valid future scheduled_for" });
@@ -164,7 +175,7 @@ export async function runTool(
   }
 
   if (name === "create_trip") {
-    const title = String(args.title ?? "").trim();
+    const title = clamp(String(args.title ?? "").trim(), MAX_NAME_CHARS);
     if (!title) return JSON.stringify({ error: "Missing title" });
 
     // Use the atomic RPC so the trip and its creator-membership can't half-apply.
@@ -207,8 +218,8 @@ export async function runTool(
   }
 
   if (name === "invite_friend_to_trip") {
-    const title = String(args.trip_title ?? "").trim();
-    const username = String(args.username ?? "").trim();
+    const title = clamp(String(args.trip_title ?? "").trim(), MAX_NAME_CHARS);
+    const username = clamp(String(args.username ?? "").trim(), MAX_NAME_CHARS);
     if (!title || !username) {
       return JSON.stringify({ error: "Missing trip_title or username" });
     }
@@ -240,12 +251,26 @@ export async function runTool(
       }
       return JSON.stringify({ error: "Could not invite that user." });
     }
+
+    // Best-effort push so the invitee hears about it without opening the app.
+    // Awaited but non-throwing (see notifyUsers), so a push problem can't fail
+    // the tool call.
+    await notifyUsers(
+      [invitee.id],
+      {
+        title: "Trip invitation",
+        body: `You've been invited to "${title}"`,
+        data: { type: "trip_invite", tripId: found.tripId },
+      },
+      "trip_invites",
+    );
+
     return JSON.stringify({ ok: true, trip_title: title, username });
   }
 
   if (name === "add_stop") {
-    const title = String(args.trip_title ?? "").trim();
-    const stopName = String(args.name ?? "").trim();
+    const title = clamp(String(args.trip_title ?? "").trim(), MAX_NAME_CHARS);
+    const stopName = clamp(String(args.name ?? "").trim(), MAX_NAME_CHARS);
     const lat = validLatitude(args.latitude);
     const lng = validLongitude(args.longitude);
     if (!title || !stopName) {
@@ -275,7 +300,7 @@ export async function runTool(
       kind,
       name: stopName,
       point: `SRID=4326;POINT(${lng} ${lat})`,
-      notes: typeof args.notes === "string" ? args.notes : null,
+      notes: typeof args.notes === "string" ? clamp(args.notes, MAX_NOTES_CHARS) : null,
       sort_order: nextSortOrder,
     });
     if (error) return JSON.stringify({ error: "Could not add that stop." });

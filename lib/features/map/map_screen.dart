@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:forui/forui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 // `Position` is geolocator's own type; the map engine exports the GeoJSON
 // `Position`, so hide geolocator's to avoid the collision.
@@ -11,8 +12,10 @@ import 'package:geolocator/geolocator.dart' hide Position;
 import '../../core/constants/avatars.dart';
 import '../../core/constants/defaults.dart';
 import '../../core/router/auth_state_provider.dart';
-import '../../core/theme/app_theme.dart';
+import '../../core/providers/settings_provider.dart';
+import '../../core/theme/nav_palette.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/nav_surface.dart';
 import '../../data/models/map_post.dart';
 import '../../data/models/route_option.dart';
 import '../../data/models/trip.dart';
@@ -60,9 +63,9 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
   final Map<String, MapPost> _postByAnnotationId = {};
 
   NearbyPlace? _selectedPlace;
-  RanmapMapStyle _style = RanmapMapStyle.standard;
-  bool _threeD = true;
-  bool _terrain = true;
+  late RanmapMapStyle _style;
+  late bool _threeD;
+  late bool _terrain;
 
   Uint8List? _photoPin;
   Uint8List? _placePin;
@@ -75,6 +78,30 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Map defaults come from Settings; changes there are applied live below.
+    final settings = ref.read(appSettingsProvider);
+    _style = RanmapMapStyle.fromId(settings.mapStyleId);
+    _threeD = settings.mapThreeD;
+    _terrain = settings.mapTerrain;
+  }
+
+  /// Mirrors a Settings change onto the live map (avoids a rebuild loop by
+  /// only acting when the value actually differs).
+  void _applySettings(AppSettings settings) {
+    final style = RanmapMapStyle.fromId(settings.mapStyleId);
+    final mapState = _mapKey.currentState;
+    if (style != _style) {
+      setState(() => _style = style);
+      unawaited(mapState?.setStyle(style));
+    }
+    if (settings.mapThreeD != _threeD) {
+      setState(() => _threeD = settings.mapThreeD);
+      unawaited(mapState?.setBuildings(settings.mapThreeD));
+    }
+    if (settings.mapTerrain != _terrain) {
+      setState(() => _terrain = settings.mapTerrain);
+      unawaited(mapState?.setTerrain(settings.mapTerrain));
+    }
   }
 
   @override
@@ -155,16 +182,19 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
 
   Future<void> _cycleStyle() async {
     setState(() => _style = _style.next);
+    ref.read(appSettingsProvider.notifier).setMapStyleId(_style.name);
     await _mapKey.currentState?.setStyle(_style);
   }
 
   Future<void> _toggleThreeD() async {
     setState(() => _threeD = !_threeD);
+    ref.read(appSettingsProvider.notifier).setMapThreeD(_threeD);
     await _mapKey.currentState?.setBuildings(_threeD);
   }
 
   Future<void> _toggleTerrain() async {
     setState(() => _terrain = !_terrain);
+    ref.read(appSettingsProvider.notifier).setMapTerrain(_terrain);
     await _mapKey.currentState?.setTerrain(_terrain);
   }
 
@@ -183,12 +213,14 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
 
   @override
   Widget build(BuildContext context) {
+    // Apply Settings changes (map style / 3D / terrain) to the live map.
+    ref.listen(appSettingsProvider, (_, next) => _applySettings(next));
     final permissionAsync = ref.watch(locationPermissionProvider);
 
     return permissionAsync.when(
       data: (granted) =>
           granted ? _buildLocationView(context) : const _LocationDeniedView(),
-      loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
+      loading: () => const Center(child: FCircularProgress()),
       error: (e, _) => _LocationErrorView(detail: friendlyError(e), onRetry: _retryLocation),
     );
   }
@@ -210,7 +242,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
     return positionAsync.when(
       data: (position) =>
           _buildMap(context, position.latitude, position.longitude, activeTrip),
-      loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
+      loading: () => const Center(child: FCircularProgress()),
       error: (e, _) => _LocationErrorView(detail: friendlyError(e), onRetry: _retryLocation),
     );
   }
@@ -218,6 +250,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
   Widget _buildMap(BuildContext context, double deviceLat, double deviceLng, Trip? activeTrip) {
     final here = Geo.pos(deviceLat, deviceLng);
     final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final c = NavColors.of(context);
 
     // Keep the AsyncValue around (not just valueOrNull) so a failed live-sync
     // fetch is surfaced instead of silently rendering as "0 teammates".
@@ -273,8 +306,9 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
       unawaited(_syncSelectedPlace(devicePixelRatio));
     }
 
-    return Scaffold(
-      body: Stack(
+    return FScaffold(
+      childPad: false,
+      child: Stack(
         children: [
           RanmapMapView(
             key: _mapKey,
@@ -302,87 +336,81 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
           Positioned(
             top: 16,
             right: 16,
-            child: Column(
-              children: [
-                FloatingActionButton.small(
-                  heroTag: 'recenter',
-                  onPressed: () => _mapKey.currentState?.flyTo(here, zoom: kFollowZoom),
-                  tooltip: 'Recenter on me',
-                  child: const Icon(Icons.my_location),
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton.small(
-                  heroTag: 'mapStyle',
-                  onPressed: _cycleStyle,
-                  tooltip: _style.label,
-                  child: Icon(_style.icon),
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton.small(
-                  heroTag: 'threeD',
-                  onPressed: _toggleThreeD,
-                  tooltip: _threeD ? 'Hide 3D buildings' : 'Show 3D buildings',
-                  child: Icon(_threeD ? Icons.apartment_rounded : Icons.location_city_outlined),
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton.small(
-                  heroTag: 'terrain',
-                  onPressed: _toggleTerrain,
-                  tooltip: _terrain ? 'Hide terrain' : 'Show terrain',
-                  child: Icon(_terrain ? Icons.landscape_rounded : Icons.landscape_outlined),
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton.small(
-                  heroTag: 'nearby',
-                  onPressed: () => _searchNearby(here),
-                  tooltip: 'Search nearby places',
-                  child: const Icon(Icons.search_rounded),
-                ),
-                if (activeTrip != null) ...[
-                  const SizedBox(height: 8),
-                  FloatingActionButton.small(
-                    heroTag: 'addPhoto',
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => AddMapPostScreen(
-                          tripId: activeTrip.id,
-                          lat: deviceLat,
-                          lng: deviceLng,
+            child: FloatingPanel(
+              padding: const EdgeInsets.all(6),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _MapControl(
+                    icon: Icons.my_location_rounded,
+                    tooltip: 'Recenter on me',
+                    onTap: () => _mapKey.currentState?.flyTo(here, zoom: kFollowZoom),
+                  ),
+                  _MapControl(
+                    icon: _style.icon,
+                    tooltip: _style.label,
+                    onTap: _cycleStyle,
+                  ),
+                  _MapControl(
+                    icon: _threeD ? Icons.apartment_rounded : Icons.location_city_outlined,
+                    tooltip: _threeD ? 'Hide 3D buildings' : 'Show 3D buildings',
+                    onTap: _toggleThreeD,
+                    active: _threeD,
+                  ),
+                  _MapControl(
+                    icon: _terrain ? Icons.landscape_rounded : Icons.landscape_outlined,
+                    tooltip: _terrain ? 'Hide terrain' : 'Show terrain',
+                    onTap: _toggleTerrain,
+                    active: _terrain,
+                  ),
+                  _MapControl(
+                    icon: Icons.search_rounded,
+                    tooltip: 'Search nearby places',
+                    onTap: () => _searchNearby(here),
+                  ),
+                  if (activeTrip != null)
+                    _MapControl(
+                      icon: Icons.add_a_photo_outlined,
+                      tooltip: 'Add a photo to the map',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => AddMapPostScreen(
+                            tripId: activeTrip.id,
+                            lat: deviceLat,
+                            lng: deviceLng,
+                          ),
                         ),
                       ),
                     ),
-                    tooltip: 'Add a photo to the map',
-                    child: const Icon(Icons.add_a_photo_outlined),
-                  ),
                 ],
-              ],
+              ),
             ),
           ),
           Positioned(
             left: 16,
             right: 16,
-            bottom: 56,
-            child: Card(
-              child: InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: teammates.isEmpty ? null : () => _showTeammates(teammates),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.directions_car_filled_rounded, color: AppTheme.primary),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          activeTrip == null
-                              ? 'No active trip'
-                              : '${activeTrip.title} · ${memberLocations.length} teammate${memberLocations.length == 1 ? '' : 's'} live',
-                        ),
-                      ),
-                      if (teammates.isNotEmpty) const Icon(Icons.chevron_right_rounded),
-                    ],
+            bottom: 16,
+            child: FloatingPanel(
+              onTap: teammates.isEmpty ? null : () => _showTeammates(teammates),
+              child: Row(
+                children: [
+                  Container(
+                    height: 38,
+                    width: 38,
+                    decoration: BoxDecoration(color: c.surfaceAlt, shape: BoxShape.circle),
+                    child: Icon(Icons.directions_car_filled_rounded, color: c.activeRoute, size: 20),
                   ),
-                ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      activeTrip == null
+                          ? 'No active trip'
+                          : '${activeTrip.title} · ${memberLocations.length} teammate${memberLocations.length == 1 ? '' : 's'} live',
+                      style: TextStyle(fontWeight: FontWeight.w600, color: c.foreground),
+                    ),
+                  ),
+                  if (teammates.isNotEmpty) Icon(Icons.chevron_right_rounded, color: c.mutedForeground),
+                ],
               ),
             ),
           ),
@@ -399,7 +427,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
 
     try {
       _photoPin ??= await MapMarkers.pin(
-        AppTheme.warning,
+        NavColors.of(context).highway,
         Icons.photo_camera_rounded,
         devicePixelRatio: devicePixelRatio,
       );
@@ -435,6 +463,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
     final manager = _routeLines;
     if (manager == null) return;
     if (_renderedRoutePolyline == encodedPolyline) return;
+    final lineColor = NavColors.of(context).activeRoute.toARGB32();
 
     try {
       await manager.deleteAll();
@@ -443,7 +472,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
         if (points.length >= 2) {
           await manager.create(PolylineAnnotationOptions(
             geometry: Geo.lineString(points),
-            lineColor: AppTheme.primary.toARGB32(),
+            lineColor: lineColor,
             lineWidth: 4,
             lineJoin: LineJoin.ROUND,
           ));
@@ -457,6 +486,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
     final place = _selectedPlace;
     if (_renderedPlaceId == place?.placeId) return;
     if (_mapKey.currentState?.map == null) return;
+    final pinColor = NavColors.of(context).activeRoute;
 
     try {
       // The place pin lives on its own manager so it isn't wiped out every time
@@ -466,7 +496,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
       if (placeManager == null) return;
 
       _placePin ??= await MapMarkers.pin(
-        AppTheme.photoPin,
+        pinColor,
         Icons.place_rounded,
         devicePixelRatio: devicePixelRatio,
       );
@@ -485,31 +515,34 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
   }
 
   Future<void> _showTeammates(List<_Teammate> teammates) async {
-    final selected = await showModalBottomSheet<_Teammate>(
+    final c = NavColors.of(context);
+    final selected = await showFSheet<_Teammate>(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text('Live teammates', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-            for (final teammate in teammates)
-              ListTile(
-                leading: const CircleAvatar(
-                  backgroundColor: AppTheme.primaryContainer,
-                  child: Icon(Icons.directions_car_filled_rounded, color: AppTheme.primary),
+      side: FLayout.btt,
+      builder: (context) => ListView(
+        shrinkWrap: true,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Text('Live teammates', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          FTileGroup(
+            children: [
+              for (final teammate in teammates)
+                FTile(
+                  prefix: Container(
+                    height: 40,
+                    width: 40,
+                    decoration: BoxDecoration(color: c.surfaceAlt, shape: BoxShape.circle),
+                    child: Icon(Icons.directions_car_filled_rounded, color: c.activeRoute, size: 20),
+                  ),
+                  title: Text(teammate.username != null ? '@${teammate.username}' : 'Teammate'),
+                  suffix: const Icon(Icons.navigation_rounded),
+                  onPress: () => Navigator.of(context).pop(teammate),
                 ),
-                title: Text(teammate.username != null ? '@${teammate.username}' : 'Teammate'),
-                trailing: const Icon(Icons.navigation_rounded),
-                onTap: () => Navigator.of(context).pop(teammate),
-              ),
-          ],
-        ),
+            ],
+          ),
+        ],
       ),
     );
     if (selected == null || !mounted) return;
@@ -527,30 +560,38 @@ class _LocationDeniedView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Scaffold(
-      body: Center(
+    final c = NavColors.of(context);
+    return FScaffold(
+      childPad: false,
+      child: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.location_off_rounded, size: 48, color: AppTheme.primary),
-              const SizedBox(height: 16),
-              const Text(
+              Icon(Icons.location_off_rounded, size: 56, color: c.activeRoute),
+              const SizedBox(height: 20),
+              Text(
                 'Ranmap needs your location to show you on the map and keep '
                 'your trip in sync with your group.',
                 textAlign: TextAlign.center,
+                style: TextStyle(color: c.foreground, fontSize: 16),
               ),
-              const SizedBox(height: 24),
-              // Re-request first: if permission was only denied once, this
-              // prompts again instead of sending the user to Settings.
-              FilledButton(
-                onPressed: () => ref.invalidate(locationPermissionProvider),
-                child: const Text('Allow location'),
+              const SizedBox(height: 28),
+              SizedBox(
+                width: double.infinity,
+                // Re-request first: if permission was only denied once, this
+                // prompts again instead of sending the user to Settings.
+                child: FButton(
+                  size: .lg,
+                  onPress: () => ref.invalidate(locationPermissionProvider),
+                  child: const Text('Allow location'),
+                ),
               ),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: () => Geolocator.openAppSettings(),
+              const SizedBox(height: 6),
+              FButton(
+                variant: .ghost,
+                onPress: () => Geolocator.openAppSettings(),
                 child: const Text('Open settings'),
               ),
             ],
@@ -569,24 +610,67 @@ class _LocationErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
+    final c = NavColors.of(context);
+    return FScaffold(
+      childPad: false,
+      child: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
+              Text(
                 'Could not get your location. Make sure location services and '
                 'permission are enabled.',
                 textAlign: TextAlign.center,
+                style: TextStyle(color: c.foreground, fontSize: 16),
               ),
               const SizedBox(height: 8),
-              Text(detail, textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-              const SizedBox(height: 16),
-              FilledButton(onPressed: onRetry, child: const Text('Try again')),
+              Text(detail, textAlign: TextAlign.center, style: TextStyle(color: c.mutedForeground)),
+              const SizedBox(height: 20),
+              FButton(onPress: onRetry, child: const Text('Try again')),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A single glanceable control in the map's floating control panel.
+class _MapControl extends StatelessWidget {
+  const _MapControl({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.active,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  /// Null for plain actions; true/false for toggles.
+  final bool? active;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = NavColors.of(context);
+    final color = switch (active) {
+      true => c.activeRoute,
+      false => c.mutedForeground,
+      null => c.foreground,
+    };
+
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: SizedBox(
+          width: 46,
+          height: 46,
+          child: Icon(icon, size: 23, color: color),
         ),
       ),
     );
@@ -604,31 +688,32 @@ class _LiveSyncErrorChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.errorContainer,
-      borderRadius: BorderRadius.circular(12),
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Tooltip(
-              message: detail,
-              child: Icon(Icons.cloud_off_rounded, size: 18, color: scheme.onErrorContainer),
+    final c = NavColors.of(context);
+    return FloatingPanel(
+      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Tooltip(
+            message: detail,
+            child: Icon(Icons.cloud_off_rounded, size: 18, color: c.destructive),
+          ),
+          const SizedBox(width: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 180),
+            child: Text(
+              "Live teammates aren't updating",
+              style: TextStyle(color: c.foreground, fontSize: 12),
             ),
-            const SizedBox(width: 8),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 180),
-              child: Text(
-                "Live teammates aren't updating",
-                style: TextStyle(color: scheme.onErrorContainer, fontSize: 12),
-              ),
-            ),
-            TextButton(onPressed: onRetry, child: const Text('Retry')),
-          ],
-        ),
+          ),
+          const SizedBox(width: 4),
+          FButton(
+            variant: .outline,
+            size: .xs,
+            onPress: onRetry,
+            child: const Text('Retry'),
+          ),
+        ],
       ),
     );
   }

@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:forui/forui.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/theme/nav_palette.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/app_dialog.dart';
+import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/error_retry.dart';
 import 'ai_assistant_screen.dart';
 import 'ai_providers.dart';
@@ -18,10 +22,11 @@ class AiConversationsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final c = NavColors.of(context);
     final conversations = ref.watch(aiConversationsProvider);
 
     final body = conversations.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
+      loading: () => const Center(child: FCircularProgress()),
       error: (e, _) => ErrorRetry(error: e, onRetry: () => ref.invalidate(aiConversationsProvider)),
       data: (items) {
         if (items.isEmpty) {
@@ -31,16 +36,16 @@ class AiConversationsScreen extends ConsumerWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
+                  Text(
                     'No conversations yet.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16),
+                    style: TextStyle(fontSize: 16, color: c.foreground),
                   ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: () => _openConversation(context, null),
-                    icon: const Icon(Icons.chat_bubble_outline),
-                    label: const Text('Start a conversation'),
+                  const SizedBox(height: 16),
+                  FButton(
+                    onPress: () => _openConversation(context, null),
+                    prefix: const Icon(Icons.chat_bubble_outline),
+                    child: const Text('Start a conversation'),
                   ),
                 ],
               ),
@@ -49,55 +54,41 @@ class AiConversationsScreen extends ConsumerWidget {
         }
 
         return ListView.separated(
+          padding: const EdgeInsets.all(16),
           itemCount: items.length,
-          separatorBuilder: (_, _) => const Divider(height: 1),
+          separatorBuilder: (_, _) => const SizedBox(height: 12),
           itemBuilder: (context, index) {
             final conversation = items[index];
             return Dismissible(
               key: ValueKey(conversation.id),
               direction: DismissDirection.endToStart,
               background: Container(
-                color: Theme.of(context).colorScheme.errorContainer,
+                color: c.destructive,
                 alignment: Alignment.centerRight,
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: const Icon(Icons.delete_outline),
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(18)),
+                child: const Icon(Icons.delete_outline, color: Colors.white),
               ),
-              confirmDismiss: (_) async {
-                return await showDialog<bool>(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Delete conversation?'),
-                    content: const Text('This conversation and its messages will be deleted.'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(false),
-                        child: const Text('Cancel'),
-                      ),
-                      ElevatedButton(
-                        onPressed: () => Navigator.of(context).pop(true),
-                        child: const Text('Delete'),
-                      ),
-                    ],
-                  ),
-                ) ??
-                    false;
-              },
+              confirmDismiss: (_) => showAppConfirmDialog(
+                context,
+                title: 'Delete conversation?',
+                message: 'This conversation and its messages will be deleted.',
+                confirmLabel: 'Delete',
+                destructive: true,
+              ),
               onDismissed: (_) async {
                 try {
                   await ref.read(aiRepositoryProvider).deleteConversation(conversation.id);
                   ref.invalidate(aiConversationsProvider);
                 } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context)
-                        .showSnackBar(SnackBar(content: Text(friendlyError(e))));
-                  }
+                  if (context.mounted) showAppToast(context, friendlyError(e), error: true);
                 }
               },
-              child: ListTile(
-                leading: const Icon(Icons.smart_toy_outlined),
+              child: FTile(
+                prefix: const Icon(Icons.smart_toy_outlined),
                 title: Text(conversation.title, maxLines: 1, overflow: TextOverflow.ellipsis),
                 subtitle: Text(DateFormat.yMMMd().add_jm().format(conversation.createdAt)),
-                onTap: () => _openConversation(context, conversation.id),
+                onPress: () => _openConversation(context, conversation.id),
               ),
             );
           },
@@ -106,27 +97,34 @@ class AiConversationsScreen extends ConsumerWidget {
     );
 
     if (!showAppBar) {
-      return Scaffold(
-        body: body,
-        floatingActionButton: FloatingActionButton(
-          onPressed: () => _openConversation(context, null),
-          child: const Icon(Icons.add_comment_outlined),
-        ),
+      return Stack(
+        children: [
+          body,
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: FButton(
+              onPress: () => _openConversation(context, null),
+              prefix: const Icon(Icons.add),
+              child: const Text('New'),
+            ),
+          ),
+        ],
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(
+    return FScaffold(
+      childPad: false,
+      header: FHeader(
         title: const Text('AI Assistant'),
-        actions: [
-          IconButton(
-            tooltip: 'New conversation',
+        suffixes: [
+          FHeaderAction(
             icon: const Icon(Icons.add_comment_outlined),
-            onPressed: () => _openConversation(context, null),
+            onPress: () => _openConversation(context, null),
           ),
         ],
       ),
-      body: body,
+      child: body,
     );
   }
 

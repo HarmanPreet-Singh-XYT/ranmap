@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:forui/forui.dart';
 import 'package:geolocator/geolocator.dart' hide Position;
-import 'package:intl/intl.dart';
 
 import '../../core/offline/outbox.dart';
 import '../../core/offline/outbox_providers.dart';
 import '../../core/providers/connectivity_provider.dart';
-import '../../core/theme/app_theme.dart';
+import '../../core/theme/nav_palette.dart';
+import '../../core/widgets/app_spinner.dart';
 import '../../core/util/error_text.dart';
+import '../../core/util/validation.dart';
+import '../../core/widgets/app_toast.dart';
 import '../../data/models/trip.dart';
 import '../../data/models/trip_stop.dart';
 import '../../data/services/supabase_service.dart';
@@ -53,6 +56,13 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
     _resolveCurrentLocation();
   }
 
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _resolveCurrentLocation() async {
     try {
       final position =
@@ -85,11 +95,7 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
       current = _point;
     }
     if (current == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Couldn\'t determine a starting point for the map.')),
-        );
-      }
+      if (mounted) showAppToast(context, "Couldn't determine a starting point for the map.", error: true);
       return;
     }
     if (!mounted) return;
@@ -103,31 +109,17 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
     }
   }
 
-  Future<void> _pickPlannedArrival() async {
-    final now = DateTime.now();
-    final date = await showDatePicker(
-      context: context,
-      initialDate: _plannedArrival ?? now,
-      firstDate: now.subtract(const Duration(days: 1)),
-      lastDate: now.add(const Duration(days: 365)),
-    );
-    if (date == null || !mounted) return;
-
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(_plannedArrival ?? now),
-    );
-    if (time == null) return;
-
-    setState(() {
-      _plannedArrival = DateTime(date.year, date.month, date.day, time.hour, time.minute);
-    });
-  }
-
   Future<void> _save() async {
     final name = _nameCtrl.text.trim();
-    if (name.isEmpty) {
-      setState(() => _error = 'Give the stop a name');
+    final nameValidationError = nameError(name, label: 'Stop name');
+    if (nameValidationError != null) {
+      setState(() => _error = nameValidationError);
+      return;
+    }
+    final notes = _notesCtrl.text.trim();
+    final notesValidationError = notesError(notes);
+    if (notesValidationError != null) {
+      setState(() => _error = notesValidationError);
       return;
     }
     if (_point == null) {
@@ -147,7 +139,7 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
       point: _point!,
       kind: _kind,
       plannedArrival: _plannedArrival,
-      notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+      notes: notes.isEmpty ? null : notes,
     );
 
     final id = generateUuidV4();
@@ -164,9 +156,7 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
               createdAt: DateTime.now(),
             ));
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("You're offline — this stop will sync when you reconnect.")),
-          );
+          showAppToast(context, "You're offline — this stop will sync when you reconnect.");
           Navigator.of(context).pop();
         }
       } else {
@@ -179,96 +169,128 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Add stop')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            TextField(
+    final c = NavColors.of(context);
+
+    return FScaffold(
+      childPad: false,
+      header: FHeader.nested(
+        title: const Text('Add stop'),
+        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+      ),
+      child: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          FTextField(
+            control: FTextFieldControl.managed(
               controller: _nameCtrl,
-              onChanged: (_) {
+              onChange: (_) {
                 if (_error != null) setState(() => _error = null);
               },
-              decoration: const InputDecoration(labelText: 'Stop name'),
             ),
-            const SizedBox(height: 16),
-            Text('Type', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              children: _kStopKinds.map((k) {
-                final (id, label, icon) = k;
-                return ChoiceChip(
-                  avatar: Icon(icon, size: 18),
-                  label: Text(label),
-                  selected: _kind == id,
-                  onSelected: (_) => setState(() => _kind = id),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _notesCtrl,
-              decoration: const InputDecoration(labelText: 'Notes (optional)'),
-              maxLines: 2,
-            ),
-            const SizedBox(height: 16),
-            Text('Location', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.place_outlined),
-              title: Text(
-                _resolvingLocation
-                    ? 'Finding your location…'
-                    : _point == null
-                        ? 'No location set'
-                        : '${_point!.lat.toStringAsFixed(5)}, ${_point!.lng.toStringAsFixed(5)}',
+            label: const Text('Stop name'),
+            maxLength: kNameMaxLength,
+          ),
+          const SizedBox(height: 20),
+          Text('Type', style: _section(c)),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _kStopKinds.map((entry) {
+              final (id, label, icon) = entry;
+              final selected = _kind == id;
+              return FButton(
+                variant: selected ? .primary : .outline,
+                size: .sm,
+                selected: selected,
+                onPress: () => setState(() => _kind = id),
+                prefix: Icon(icon),
+                child: Text(label),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
+          FTextField(
+            control: FTextFieldControl.managed(controller: _notesCtrl),
+            label: const Text('Notes (optional)'),
+            maxLines: 2,
+            maxLength: kNotesMaxLength,
+          ),
+          const SizedBox(height: 24),
+          Text('Location', style: _section(c)),
+          const SizedBox(height: 10),
+          FTileGroup(
+            children: [
+              FTile(
+                prefix: const Icon(Icons.place_outlined),
+                title: Text(
+                  _resolvingLocation
+                      ? 'Finding your location…'
+                      : _point == null
+                          ? 'No location set'
+                          : '${_point!.lat.toStringAsFixed(5)}, ${_point!.lng.toStringAsFixed(5)}',
+                ),
+                suffix: FButton(
+                  variant: .outline,
+                  size: .sm,
+                  onPress: _resolvingLocation ? null : _pickOnMap,
+                  child: const Text('Pick on map'),
+                ),
               ),
-              trailing: TextButton(
-                onPressed: _resolvingLocation ? null : _pickOnMap,
-                child: const Text('Pick on map'),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text('Planned arrival (optional)', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.schedule_outlined),
-              title: Text(
-                _plannedArrival == null
-                    ? 'No ETA set'
-                    : DateFormat.yMMMd().add_jm().format(_plannedArrival!),
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (_plannedArrival != null)
-                    IconButton(
-                      icon: const Icon(Icons.clear),
-                      onPressed: () => setState(() => _plannedArrival = null),
-                    ),
-                  TextButton(onPressed: _pickPlannedArrival, child: const Text('Set ETA')),
-                ],
-              ),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 16),
-              Text(_error!, style: const TextStyle(color: AppTheme.danger)),
             ],
-            const SizedBox(height: 32),
-            ElevatedButton(
-              onPressed: _saving ? null : _save,
-              child: _saving
-                  ? const SizedBox(
-                      height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Text('Add stop'),
+          ),
+          const SizedBox(height: 24),
+          Text('Planned arrival (optional)', style: _section(c)),
+          const SizedBox(height: 10),
+          FDateField.calendar(
+            label: const Text('Date'),
+            selectionControl: FDateSelectionControl.managedSingle(
+              initial: _plannedArrival,
+              onChange: (date) => setState(() {
+                if (date == null) {
+                  _plannedArrival = null;
+                  return;
+                }
+                final t = _plannedArrival ?? DateTime.now();
+                _plannedArrival = DateTime(date.year, date.month, date.day, t.hour, t.minute);
+              }),
             ),
+          ),
+          const SizedBox(height: 16),
+          FTimeField.picker(
+            label: const Text('Time'),
+            control: FTimeFieldControl.managed(
+              initial: _plannedArrival == null
+                  ? null
+                  : FTime(_plannedArrival!.hour, _plannedArrival!.minute),
+              onChange: (time) => setState(() {
+                if (time == null) return;
+                final d = _plannedArrival ?? DateTime.now();
+                _plannedArrival = DateTime(d.year, d.month, d.day, time.hour, time.minute);
+              }),
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 20),
+            FAlert(variant: .destructive, title: Text(_error!)),
           ],
-        ),
+          const SizedBox(height: 28),
+          FButton(
+            size: .lg,
+            onPress: _saving ? null : _save,
+            child: _saving
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: AppSpinner(color: Colors.white),
+                  )
+                : const Text('Add stop'),
+          ),
+        ],
       ),
     );
   }
+
+  TextStyle _section(NavColors c) =>
+      TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.foreground);
 }
