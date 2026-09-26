@@ -54,7 +54,10 @@ const _benefits = <({IconData icon, String title, String detail})>[
 
 /// Opens the Ranmap Pro paywall, e.g. after a 402 from the backend
 /// ([isPremiumRequired]).
-Future<void> showPaywall(BuildContext context, {required PremiumFeature feature}) {
+Future<void> showPaywall(
+  BuildContext context, {
+  required PremiumFeature feature,
+}) {
   return showFSheet(
     context: context,
     side: FLayout.btt,
@@ -94,10 +97,15 @@ class _PaywallSheetState extends ConsumerState<_PaywallSheet> {
   Future<void> _restore() async {
     setState(() => _busy = true);
     try {
-      await ref.read(premiumPurchaserProvider).restore();
+      final restored = await ref.read(premiumPurchaserProvider).restore();
       ref.invalidate(entitlementsProvider);
-      if (mounted) showAppToast(context, 'Purchases restored.');
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) {
+        showAppToast(
+          context,
+          restored ? 'Purchases restored.' : 'No purchases to restore.',
+        );
+      }
+      if (mounted && restored) Navigator.of(context).pop();
     } catch (e) {
       if (mounted) showAppToast(context, friendlyError(e), error: true);
     } finally {
@@ -110,7 +118,12 @@ class _PaywallSheetState extends ConsumerState<_PaywallSheet> {
     final c = NavColors.of(context);
     return SafeArea(
       child: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(24, 16, 24, 24 + MediaQuery.viewInsetsOf(context).bottom),
+        padding: EdgeInsets.fromLTRB(
+          24,
+          16,
+          24,
+          24 + MediaQuery.viewInsetsOf(context).bottom,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -138,7 +151,11 @@ class _PaywallSheetState extends ConsumerState<_PaywallSheet> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.workspace_premium_rounded, color: Colors.white, size: 30),
+                  const Icon(
+                    Icons.workspace_premium_rounded,
+                    color: Colors.white,
+                    size: 30,
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -146,12 +163,18 @@ class _PaywallSheetState extends ConsumerState<_PaywallSheet> {
                       children: [
                         const Text(
                           'Ranmap Pro',
-                          style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                         const SizedBox(height: 2),
                         Text(
                           'You reached a Pro limit for ${widget.feature.label}.',
-                          style: TextStyle(color: Colors.white.withValues(alpha: 0.9)),
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.9),
+                          ),
                         ),
                       ],
                     ),
@@ -174,9 +197,18 @@ class _PaywallSheetState extends ConsumerState<_PaywallSheet> {
                         children: [
                           Text(
                             benefit.title,
-                            style: TextStyle(fontWeight: FontWeight.w600, color: c.foreground),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: c.foreground,
+                            ),
                           ),
-                          Text(benefit.detail, style: TextStyle(color: c.mutedForeground, fontSize: 13)),
+                          Text(
+                            benefit.detail,
+                            style: TextStyle(
+                              color: c.mutedForeground,
+                              fontSize: 13,
+                            ),
+                          ),
                         ],
                       ),
                     ),

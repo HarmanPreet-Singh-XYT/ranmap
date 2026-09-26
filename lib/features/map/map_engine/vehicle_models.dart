@@ -46,11 +46,11 @@ abstract final class VehicleModels {
   /// The `asset://` URI of the model for a `vehicle_type`, defaulting to the
   /// car for anything unrecognised (matching the profile default).
   static String assetFor(String vehicleType) => switch (vehicleType) {
-        'bike' => _bike,
-        'scooter' => _scooter,
-        'suv' => _suv,
-        _ => _car,
-      };
+    'bike' => _bike,
+    'scooter' => _scooter,
+    'suv' => _suv,
+    _ => _car,
+  };
 
   /// The id a [ModelLayer] is given. Mapbox resolves the `asset://` URI to a
   /// platform asset path inside the layer encoder, so no explicit
@@ -117,19 +117,20 @@ class VehicleModelLayerManager {
 
   Future<void> _add(MapboxMap map, VehiclePose pose) async {
     try {
-      await map.style.addSource(GeoJsonSource(
-        id: _sourceId(pose.id),
-        data: _featureJson(pose),
-      ));
-      await map.style.addLayer(ModelLayer(
-        id: _layerId(pose.id),
-        sourceId: _sourceId(pose.id),
-        modelId: VehicleModels.modelIdFor(pose.vehicleType),
-        modelType: ModelType.COMMON_3D,
-        modelScale: const <double?>[1, 1, 1],
-        modelRotation: _rotation(pose),
-        modelCastShadows: true,
-      ));
+      await map.style.addSource(
+        GeoJsonSource(id: _sourceId(pose.id), data: _featureJson(pose)),
+      );
+      await map.style.addLayer(
+        ModelLayer(
+          id: _layerId(pose.id),
+          sourceId: _sourceId(pose.id),
+          modelId: VehicleModels.modelIdFor(pose.vehicleType),
+          modelType: ModelType.COMMON_3D,
+          modelScale: const <double?>[1, 1, 1],
+          modelRotation: _rotation(pose),
+          modelCastShadows: true,
+        ),
+      );
     } catch (_) {
       // A missing asset or a style that rejects the layer must not take the map
       // down — the rest of the trip UI still works without the 3D layer.
@@ -166,7 +167,11 @@ class VehicleModelLayerManager {
   /// +X, and — like the SDK's own default 3D location puck and its model-layer
   /// examples — they need a +90° yaw to line that forward axis up with north
   /// before the vehicle's heading is applied.
-  static List<double> _rotation(VehiclePose pose) => [0, 0, 90 + (pose.heading ?? 0)];
+  static List<double> _rotation(VehiclePose pose) => [
+    0,
+    0,
+    90 + (pose.heading ?? 0),
+  ];
 
   static String _featureJson(VehiclePose pose) =>
       jsonEncode(Geo.point(pose.lat, pose.lng).toJson());

@@ -3,18 +3,25 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:forui/forui.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/constants/avatars.dart';
+import '../../core/constants/vehicle_display.dart';
 import '../../core/router/auth_state_provider.dart';
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
+import '../../core/util/image_upload.dart';
 import '../../core/util/validation.dart';
 import '../../core/widgets/app_choice_sheet.dart';
-import '../../core/widgets/app_spinner.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/avatar_editor.dart';
+import '../../core/widgets/brand/brand_alert.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_list_row.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_text_field.dart';
 import '../../data/models/profile.dart';
 import '../../data/providers/repository_providers.dart';
 
@@ -45,7 +52,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   void initState() {
     super.initState();
     _usernameCtrl = TextEditingController(text: widget.profile.username);
-    _displayNameCtrl = TextEditingController(text: widget.profile.displayName ?? '');
+    _displayNameCtrl = TextEditingController(
+      text: widget.profile.displayName ?? '',
+    );
     _avatarSeed = widget.profile.avatarId;
     _avatarCandidates = avatarSeedCandidates(include: _avatarSeed);
     _vehicleType = widget.profile.vehicleType;
@@ -83,19 +92,20 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       );
       if (file == null) return;
       final bytes = await file.readAsBytes();
-      final extension = file.name.contains('.') ? file.name.split('.').last : 'jpg';
+      final extension = imageExtensionOf(file.name);
 
-      final path = await ref.read(avatarRepositoryProvider).upload(
-            bytes: bytes,
-            fileExtension: extension,
-          );
+      final path = await ref
+          .read(avatarRepositoryProvider)
+          .upload(bytes: bytes, fileExtension: extension);
       if (!mounted) return;
       setState(() {
         _pendingUpload = path;
         _avatarSeed = customAvatarId(path);
       });
       // Replacing a photo uploaded earlier in this session: drop the old file.
-      if (previous != null) unawaited(ref.read(avatarRepositoryProvider).remove(previous));
+      if (previous != null) {
+        unawaited(ref.read(avatarRepositoryProvider).remove(previous));
+      }
     } catch (e) {
       if (mounted) showAppToast(context, friendlyError(e), error: true);
     } finally {
@@ -103,18 +113,12 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     }
   }
 
-  /// Switches back to a generated avatar, deleting the uploaded photo. A photo
-  /// uploaded but not yet saved is simply dropped.
+  /// Switches back to a generated avatar. The photo currently referenced by the
+  /// profile is deleted only after the change is saved (see [_save]), so backing
+  /// out without saving doesn't leave the profile pointing at a deleted file.
   void _useGeneratedAvatar() {
-    final pending = _pendingUpload;
-    final current = _avatarSeed;
-    if (pending != null) {
-      unawaited(ref.read(avatarRepositoryProvider).remove(pending));
-    } else if (isCustomAvatar(current)) {
-      unawaited(ref.read(avatarRepositoryProvider).remove(customAvatarPath(current)));
-    }
+    _discardPendingUpload();
     setState(() {
-      _pendingUpload = null;
       _avatarSeed = randomAvatarSeed();
       _avatarCandidates = avatarSeedCandidates(include: _avatarSeed);
     });
@@ -131,6 +135,11 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
 
   @override
   void dispose() {
+    // Drop an unsaved upload so it doesn't linger in the avatars bucket.
+    final pending = _pendingUpload;
+    if (pending != null) {
+      unawaited(ref.read(avatarRepositoryProvider).remove(pending));
+    }
     _usernameCtrl.dispose();
     _displayNameCtrl.dispose();
     super.dispose();
@@ -145,7 +154,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     }
     final displayName = _displayNameCtrl.text.trim();
     if (displayName.length > kDisplayNameMaxLength) {
-      setState(() => _error = 'Display name must be $kDisplayNameMaxLength characters or fewer');
+      setState(
+        () => _error =
+            'Display name must be $kDisplayNameMaxLength characters or fewer',
+      );
       return;
     }
 
@@ -167,18 +179,36 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         }
       }
 
-      await repo.updateProfile(widget.profile.copyWith(
-        username: username,
-        displayName: displayName.isEmpty ? null : displayName,
-        avatarId: _avatarSeed,
-        vehicleType: _vehicleType,
-      ));
+      await repo.updateProfile(
+        widget.profile.copyWith(
+          username: username,
+          displayName: displayName.isEmpty ? null : displayName,
+          avatarId: _avatarSeed,
+          vehicleType: _vehicleType,
+        ),
+      );
+
+      // Now that the write succeeded, clean up a replaced photo. Deleting it
+      // before this point would break the profile if the user backed out.
+      final originalCustomPath = isCustomAvatar(widget.profile.avatarId)
+          ? customAvatarPath(widget.profile.avatarId)
+          : null;
+      final currentCustomPath = isCustomAvatar(_avatarSeed)
+          ? customAvatarPath(_avatarSeed)
+          : null;
+      if (originalCustomPath != null &&
+          originalCustomPath != currentCustomPath) {
+        unawaited(
+          ref.read(avatarRepositoryProvider).remove(originalCustomPath),
+        );
+      }
+
       ref.invalidate(myProfileProvider);
       // The uploaded photo is now referenced by the profile.
       _pendingUpload = null;
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
-      setState(() => _error = friendlyError(e));
+      if (mounted) setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -186,94 +216,111 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
-
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: const Text('Edit profile'),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+    return BrandScaffold(
+      header: BrandHeader(
+        title: 'Edit profile',
+        onBack: () => Navigator.of(context).maybePop(),
       ),
       child: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.only(
+          top: BrandSpace.md,
+          bottom: BrandSpace.xl,
+        ),
         children: [
-          FTextField(
-            control: FTextFieldControl.managed(
-              controller: _usernameCtrl,
-              onChange: (_) {
-                if (_error != null) setState(() => _error = null);
-              },
-            ),
-            label: const Text('Username'),
+          BrandTextField(
+            controller: _usernameCtrl,
+            hint: 'Username',
+            leadingIcon: Icons.alternate_email_rounded,
             maxLength: kUsernameMaxLength,
-            inputFormatters: [FilteringTextInputFormatter.allow(kUsernamePattern)],
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(kUsernameInputFormatter),
+            ],
+            onChanged: (_) {
+              if (_error != null) setState(() => _error = null);
+            },
           ),
-          const SizedBox(height: 16),
-          FTextField(
-            control: FTextFieldControl.managed(
-              controller: _displayNameCtrl,
-              onChange: (_) {
-                if (_error != null) setState(() => _error = null);
-              },
-            ),
-            label: const Text('Display name'),
-            hint: 'Your name',
-            description: const Text('Optional — shown where there’s room, beside your @username.'),
+          const SizedBox(height: BrandSpace.md),
+          BrandTextField(
+            controller: _displayNameCtrl,
+            hint: 'Display name',
+            leadingIcon: Icons.badge_outlined,
             maxLength: kDisplayNameMaxLength,
+            onChanged: (_) {
+              if (_error != null) setState(() => _error = null);
+            },
           ),
-          const SizedBox(height: 28),
-          Text('Avatar', style: _section(c)),
-          const SizedBox(height: 14),
+          const SizedBox(height: BrandSpace.sm),
+          Text(
+            'Optional — shown where there’s room, beside your @username.',
+            style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
+          ),
+          const SizedBox(height: BrandSpace.lg),
+          const BrandSectionHeader(icon: Icons.face_rounded, title: 'Avatar'),
+          const SizedBox(height: BrandSpace.md),
           AvatarEditor(
             avatarId: _avatarSeed,
             candidates: _avatarCandidates,
             uploading: _uploading,
             onUploadPhoto: _uploadPhoto,
-            onRemovePhoto: isCustomAvatar(_avatarSeed) ? _useGeneratedAvatar : null,
+            onRemovePhoto: isCustomAvatar(_avatarSeed)
+                ? _useGeneratedAvatar
+                : null,
             onSelectSeed: (seed) {
               _discardPendingUpload();
               setState(() => _avatarSeed = seed);
             },
             onShuffle: _shuffleAvatars,
           ),
-          const SizedBox(height: 28),
-          FSelectGroup<String>(
-            label: const Text('Vehicle'),
-            control: FMultiValueControl<String>.managedRadio(
-              initial: _vehicleType,
-              onChange: (values) {
-                if (values.isNotEmpty) setState(() => _vehicleType = values.first);
-              },
+          const SizedBox(height: BrandSpace.lg),
+          const BrandSectionHeader(
+            icon: Icons.directions_car_rounded,
+            title: 'Vehicle',
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          BrandCard(
+            padding: const EdgeInsets.symmetric(
+              horizontal: BrandSpace.md,
+              vertical: BrandSpace.xs,
             ),
-            children: [
-              for (final vehicle in kVehicleOptions)
-                FSelectGroupItemMixin.radio<String>(
-                  value: vehicle.id,
-                  label: Text(vehicle.label),
-                ),
-            ],
+            child: Column(
+              children: [
+                for (final (i, vehicle) in kVehicleOptions.indexed) ...[
+                  if (i > 0) const BrandRowDivider(),
+                  BrandListRow(
+                    icon: vehicleDisplay(vehicle.id).icon,
+                    title: vehicle.label,
+                    showChevron: false,
+                    onTap: () => setState(() => _vehicleType = vehicle.id),
+                    iconBackground: _vehicleType == vehicle.id
+                        ? BrandColors.accentMint.withValues(alpha: 0.45)
+                        : BrandColors.surfaceContainerLow,
+                    iconColor: _vehicleType == vehicle.id
+                        ? BrandColors.primary
+                        : BrandColors.textHeadline,
+                    trailing: _vehicleType == vehicle.id
+                        ? Icon(
+                            Icons.check_circle_rounded,
+                            size: 22,
+                            color: BrandColors.primaryContainer,
+                          )
+                        : null,
+                  ),
+                ],
+              ],
+            ),
           ),
           if (_error != null) ...[
-            const SizedBox(height: 20),
-            FAlert(variant: .destructive, title: Text(_error!)),
+            const SizedBox(height: BrandSpace.lg),
+            BrandAlert(message: _error!),
           ],
-          const SizedBox(height: 28),
-          FButton(
-            size: .lg,
-            onPress: _saving ? null : _save,
-            child: _saving
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: AppSpinner(color: Colors.white),
-                  )
-                : const Text('Save'),
+          const SizedBox(height: BrandSpace.lg),
+          BrandPrimaryButton(
+            label: 'Save',
+            loading: _saving,
+            onPressed: _saving ? null : _save,
           ),
         ],
       ),
     );
   }
-
-  TextStyle _section(NavColors c) =>
-      TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.foreground);
 }

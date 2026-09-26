@@ -9,7 +9,11 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 /// the 3D scene falls back to the explicit terrain layer only.
 enum RanmapMapStyle {
   standard('Standard', Icons.layers_rounded, MapboxStyles.STANDARD),
-  satellite('Satellite', Icons.satellite_alt_rounded, MapboxStyles.STANDARD_SATELLITE),
+  satellite(
+    'Satellite',
+    Icons.satellite_alt_rounded,
+    MapboxStyles.STANDARD_SATELLITE,
+  ),
   outdoors('Outdoors', Icons.terrain_rounded, MapboxStyles.OUTDOORS);
 
   const RanmapMapStyle(this.label, this.icon, this.uri);

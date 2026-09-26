@@ -2,12 +2,17 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:forui/forui.dart';
 import 'package:geolocator/geolocator.dart' hide Position;
 
 import '../../core/constants/defaults.dart';
+import '../../core/theme/brand_palette.dart';
 import '../../core/theme/nav_palette.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/brand/brand_alert.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_list_row.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../data/models/route_option.dart';
 import '../../data/models/trip.dart';
 import '../../data/services/google_maps_api_service.dart';
@@ -79,9 +84,11 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
     try {
       final position =
           await Geolocator.getLastKnownPosition() ??
-              await Geolocator.getCurrentPosition(
-                locationSettings: const LocationSettings(timeLimit: kLocationFixTimeout),
-              );
+          await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              timeLimit: kLocationFixTimeout,
+            ),
+          );
       if (!mounted) return;
       setState(() {
         _origin = Geo.pos(position.latitude, position.longitude);
@@ -99,10 +106,8 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
   Future<void> _pickOrigin() async {
     final picked = await Navigator.of(context).push<Position>(
       MaterialPageRoute(
-        builder: (_) => PickLocationScreen(
-          title: 'Pick origin',
-          initialCenter: _origin,
-        ),
+        builder: (_) =>
+            PickLocationScreen(title: 'Pick origin', initialCenter: _origin),
       ),
     );
     if (picked == null) return;
@@ -139,7 +144,10 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
       _routes = const [];
     });
     try {
-      final routes = await GoogleMapsApiService.directions(origin: origin, destination: destination);
+      final routes = await GoogleMapsApiService.directions(
+        origin: origin,
+        destination: destination,
+      );
       if (!mounted) return;
       setState(() {
         _routes = routes;
@@ -166,13 +174,18 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
     final destination = _destination;
     if (origin == null || destination == null || _routes.isEmpty) return;
     final chosen = _routes[_selectedRoute];
-    Navigator.of(context).pop(PlannedRoute(
-      originName: 'Origin',
-      originPoint: LatLngPoint(origin.lat.toDouble(), origin.lng.toDouble()),
-      destinationName: 'Destination',
-      destinationPoint: LatLngPoint(destination.lat.toDouble(), destination.lng.toDouble()),
-      routePolyline: chosen.encodedPolyline,
-    ));
+    Navigator.of(context).pop(
+      PlannedRoute(
+        originName: 'Origin',
+        originPoint: LatLngPoint(origin.lat.toDouble(), origin.lng.toDouble()),
+        destinationName: 'Destination',
+        destinationPoint: LatLngPoint(
+          destination.lat.toDouble(),
+          destination.lng.toDouble(),
+        ),
+        routePolyline: chosen.encodedPolyline,
+      ),
+    );
   }
 
   Future<void> _syncOverlays(double devicePixelRatio) async {
@@ -192,9 +205,15 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
     if (_renderedPinKey != pinKey) {
       _renderedPinKey = pinKey;
       _originPin ??= await MapMarkers.pin(
-        originColor, Icons.trip_origin, devicePixelRatio: devicePixelRatio);
+        originColor,
+        Icons.trip_origin,
+        devicePixelRatio: devicePixelRatio,
+      );
       _destinationPin ??= await MapMarkers.pin(
-        destinationColor, Icons.place_rounded, devicePixelRatio: devicePixelRatio);
+        destinationColor,
+        Icons.place_rounded,
+        devicePixelRatio: devicePixelRatio,
+      );
       await pins.deleteAll();
       final options = <PointAnnotationOptions>[
         if (origin != null)
@@ -224,78 +243,89 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
             if (_routes[i].points.length >= 2)
               PolylineAnnotationOptions(
                 geometry: Geo.lineString(_routes[i].points),
-                lineColor: i == _selectedRoute ? destinationColor.toARGB32() : altColor.toARGB32(),
+                lineColor: i == _selectedRoute
+                    ? destinationColor.toARGB32()
+                    : altColor.toARGB32(),
                 lineWidth: i == _selectedRoute ? 5 : 3,
                 lineJoin: LineJoin.ROUND,
               ),
         ]);
       } else if (_routes.length == 1 && _routes.first.points.length >= 2) {
-        await lines.create(PolylineAnnotationOptions(
-          geometry: Geo.lineString(_routes.first.points),
-          lineColor: destinationColor.toARGB32(),
-          lineWidth: 5,
-          lineJoin: LineJoin.ROUND,
-        ));
+        await lines.create(
+          PolylineAnnotationOptions(
+            geometry: Geo.lineString(_routes.first.points),
+            lineColor: destinationColor.toARGB32(),
+            lineWidth: 5,
+            lineJoin: LineJoin.ROUND,
+          ),
+        );
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
-
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: const Text('Plan route'),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+    return BrandScaffold(
+      header: BrandHeader(
+        title: 'Plan route',
+        onBack: () => Navigator.of(context).maybePop(),
       ),
       child: _loadingLocation
-          ? const Center(child: FCircularProgress())
+          ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
                 Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: FTileGroup(
-                    children: [
-                      FTile(
-                        prefix: Icon(Icons.trip_origin, color: c.foreground),
-                        title: Text(_origin == null ? 'Set origin' : 'Origin set'),
-                        suffix: FButton(
-                          variant: .outline,
-                          size: .sm,
-                          onPress: _pickOrigin,
-                          child: const Text('Pick'),
+                  padding: const EdgeInsets.symmetric(vertical: BrandSpace.md),
+                  child: BrandCard(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: BrandSpace.md,
+                      vertical: BrandSpace.xs,
+                    ),
+                    child: Column(
+                      children: [
+                        BrandListRow(
+                          icon: Icons.trip_origin,
+                          iconColor: BrandColors.primary,
+                          title: _origin == null ? 'Set origin' : 'Origin set',
+                          trailing: BrandSecondaryButton(
+                            label: 'Pick',
+                            expand: false,
+                            onPressed: _pickOrigin,
+                          ),
                         ),
-                      ),
-                      FTile(
-                        prefix: Icon(Icons.location_pin, color: c.activeRoute),
-                        title: Text(_destination == null ? 'Set destination' : 'Destination set'),
-                        suffix: FButton(
-                          variant: .outline,
-                          size: .sm,
-                          onPress: _pickDestination,
-                          child: const Text('Pick'),
+                        const BrandRowDivider(),
+                        BrandListRow(
+                          icon: Icons.location_pin,
+                          iconColor: BrandColors.primary,
+                          title: _destination == null
+                              ? 'Set destination'
+                              : 'Destination set',
+                          trailing: BrandSecondaryButton(
+                            label: 'Pick',
+                            expand: false,
+                            onPressed: _pickDestination,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
                 if (_origin != null && _destination != null)
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                    child: FButton(
-                      onPress: _fetchingRoutes ? null : _fetchRoutes,
-                      prefix: _fetchingRoutes
-                          ? const FCircularProgress(size: .sm)
-                          : const Icon(Icons.alt_route_rounded),
-                      child: Text(_fetchingRoutes ? 'Finding routes…' : 'Find routes'),
+                    padding: const EdgeInsets.only(bottom: BrandSpace.sm),
+                    child: BrandPrimaryButton(
+                      label: _fetchingRoutes
+                          ? 'Finding routes…'
+                          : 'Find routes',
+                      leadingIcon: Icons.alt_route_rounded,
+                      onPressed: _fetchingRoutes ? null : _fetchRoutes,
+                      loading: _fetchingRoutes,
                     ),
                   ),
                 if (_error != null)
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: FAlert(variant: .destructive, title: Text(_error!)),
+                    padding: const EdgeInsets.only(bottom: BrandSpace.sm),
+                    child: BrandAlert(message: _error!),
                   ),
                 if (_origin != null && _destination != null)
                   Expanded(
@@ -303,47 +333,43 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
                       mapKey: _mapKey,
                       center: _origin!,
                       onStyleReady: _onStyleReady,
-                      onMapBuilt: () => unawaited(_syncOverlays(
-                        MediaQuery.devicePixelRatioOf(context),
-                      )),
+                      onMapBuilt: () => unawaited(
+                        _syncOverlays(MediaQuery.devicePixelRatioOf(context)),
+                      ),
                     ),
                   ),
                 if (_routes.isNotEmpty) ...[
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: FTileGroup(
+                  const SizedBox(height: BrandSpace.sm),
+                  BrandCard(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: BrandSpace.md,
+                      vertical: BrandSpace.xs,
+                    ),
+                    child: Column(
                       children: [
-                        for (var i = 0; i < _routes.length; i++)
-                          FTile(
-                            selected: i == _selectedRoute,
-                            onPress: () => setState(() => _selectedRoute = i),
-                            prefix: Icon(
-                              i == _selectedRoute
-                                  ? Icons.radio_button_checked
-                                  : Icons.radio_button_unchecked,
-                              color: i == _selectedRoute ? c.activeRoute : c.mutedForeground,
-                            ),
-                            title: Text(
-                              _routes[i].summary,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            subtitle: Text('${_routes[i].distanceLabel} · ${_routes[i].durationLabel}'),
+                        for (var i = 0; i < _routes.length; i++) ...[
+                          if (i > 0) const BrandRowDivider(),
+                          BrandListRow(
+                            icon: i == _selectedRoute
+                                ? Icons.radio_button_checked
+                                : Icons.radio_button_unchecked,
+                            iconColor: i == _selectedRoute
+                                ? BrandColors.primary
+                                : BrandColors.textMuted,
+                            showChevron: false,
+                            title: _routes[i].summary,
+                            subtitle:
+                                '${_routes[i].distanceLabel} · ${_routes[i].durationLabel}',
+                            onTap: () => setState(() => _selectedRoute = i),
                           ),
+                        ],
                       ],
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  SafeArea(
-                    top: false,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                      child: FButton(
-                        size: .lg,
-                        onPress: _confirm,
-                        child: const Text('Use this route'),
-                      ),
-                    ),
+                  const SizedBox(height: BrandSpace.sm),
+                  BrandPrimaryButton(
+                    label: 'Use this route',
+                    onPressed: _confirm,
                   ),
                 ],
               ],

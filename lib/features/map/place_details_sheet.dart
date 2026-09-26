@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:forui/forui.dart';
 
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_card.dart';
 import '../../data/models/place_details.dart';
 import '../../data/models/route_option.dart';
 import '../../data/services/google_maps_api_service.dart';
@@ -39,11 +42,9 @@ class _PlaceDetailsSheetState extends State<_PlaceDetailsSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
-
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(BrandSpace.marginMobile),
         child: FutureBuilder<PlaceDetails>(
           future: _future,
           builder: (context, snapshot) {
@@ -53,16 +54,17 @@ class _PlaceDetailsSheetState extends State<_PlaceDetailsSheet> {
               children: [
                 Text(
                   snapshot.data?.name ?? widget.place.name,
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: c.foreground),
+                  style: BrandText.headlineMd.copyWith(
+                    color: BrandColors.textHeadline,
+                  ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: BrandSpace.sm),
                 _buildBody(context, snapshot),
-                const SizedBox(height: 20),
-                FButton(
-                  size: .lg,
-                  onPress: () => Navigator.of(context).pop(true),
-                  prefix: const Icon(Icons.place_rounded),
-                  child: const Text('Pin on map'),
+                const SizedBox(height: BrandSpace.lg),
+                BrandPrimaryButton(
+                  label: 'Pin on map',
+                  leadingIcon: Icons.place_rounded,
+                  onPressed: () => Navigator.of(context).pop(true),
                 ),
               ],
             );
@@ -72,20 +74,23 @@ class _PlaceDetailsSheetState extends State<_PlaceDetailsSheet> {
     );
   }
 
-  Widget _buildBody(BuildContext context, AsyncSnapshot<PlaceDetails> snapshot) {
-    final c = NavColors.of(context);
-
+  Widget _buildBody(
+    BuildContext context,
+    AsyncSnapshot<PlaceDetails> snapshot,
+  ) {
     if (snapshot.connectionState == ConnectionState.waiting) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 24),
-        child: Center(child: FCircularProgress()),
+      return Padding(
+        padding: EdgeInsets.symmetric(vertical: BrandSpace.lg),
+        child: Center(
+          child: CircularProgressIndicator(color: BrandColors.primaryContainer),
+        ),
       );
     }
     if (snapshot.hasError) {
       // The place is still pinnable even when the detail lookup fails.
       return Text(
         friendlyError(snapshot.error!),
-        style: TextStyle(color: c.destructive),
+        style: BrandText.bodyMd.copyWith(color: BrandColors.error),
       );
     }
 
@@ -96,32 +101,52 @@ class _PlaceDetailsSheetState extends State<_PlaceDetailsSheet> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (details.ratingLabel != null)
-          Row(
+          Wrap(
+            spacing: BrandSpace.sm,
+            runSpacing: BrandSpace.xs,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Text(details.ratingLabel!, style: TextStyle(fontWeight: FontWeight.w600, color: c.foreground)),
-              if (details.priceLabel != null) ...[
-                const SizedBox(width: 12),
-                Text(details.priceLabel!, style: TextStyle(color: c.mutedForeground)),
-              ],
-              if (details.openNow != null) ...[
-                const SizedBox(width: 12),
-                Text(
-                  details.openNow! ? 'Open now' : 'Closed',
-                  style: TextStyle(color: details.openNow! ? c.success : c.mutedForeground),
+              Text(
+                details.ratingLabel!,
+                style: BrandText.labelMd.copyWith(
+                  color: BrandColors.textHeadline,
                 ),
-              ],
+              ),
+              if (details.priceLabel != null)
+                Text(
+                  details.priceLabel!,
+                  style: BrandText.labelMd.copyWith(
+                    color: BrandColors.textMuted,
+                  ),
+                ),
+              if (details.openNow != null)
+                BrandPill(
+                  label: details.openNow! ? 'Open now' : 'Closed',
+                  background: details.openNow!
+                      ? BrandColors.secondaryContainer
+                      : BrandColors.surfaceContainer,
+                  foreground: details.openNow!
+                      ? BrandColors.onSecondaryFixedVariant
+                      : BrandColors.textMuted,
+                ),
             ],
           ),
         if (details.address != null) ...[
-          const SizedBox(height: 8),
-          Text(details.address!, style: TextStyle(color: c.mutedForeground)),
+          const SizedBox(height: BrandSpace.sm),
+          Text(
+            details.address!,
+            style: BrandText.bodyMd.copyWith(color: BrandColors.textBody),
+          ),
         ],
         if (details.weekdayHours.isNotEmpty) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: BrandSpace.sm),
           for (final line in details.weekdayHours)
             Padding(
               padding: const EdgeInsets.only(bottom: 2),
-              child: Text(line, style: TextStyle(color: c.mutedForeground, fontSize: 12)),
+              child: Text(
+                line,
+                style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
+              ),
             ),
         ],
       ],

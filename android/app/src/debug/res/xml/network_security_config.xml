@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only network security config: permits cleartext HTTP so the app can reach
+  ranmap-server over a LAN IP (or `adb reverse tcp:8787 tcp:8787`) while
+  developing. This file lives under src/debug/, so release builds keep Android's
+  default policy, which blocks cleartext. Production traffic should be HTTPS.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

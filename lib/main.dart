@@ -14,6 +14,8 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: '.env');
   final prefs = await SharedPreferences.getInstance();
+  // Clear any stale intro flags before the router reads them.
+  await migrateIntroFlags(prefs);
   await SupabaseService.initialize();
   // Billing must not block startup; failures are swallowed inside.
   await configureRevenueCat();

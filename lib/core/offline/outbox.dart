@@ -72,6 +72,15 @@ class OutboxEntry {
 /// not a copy of server data.
 class Outbox {
   static const _storageKey = 'outbox_v1';
+  static const _failedStorageKey = 'outbox_failed_v1';
+
+  /// Upper bound on queued writes. A long offline stretch must not grow the
+  /// persisted queue without limit; past this the oldest entry is dropped (and
+  /// surfaced as a failure so the user is told).
+  static const _maxEntries = 500;
+
+  /// Upper bound on retained failure notices.
+  static const _maxFailed = 50;
 
   /// Number of writes still waiting to sync; watch it to surface a badge.
   final ValueNotifier<int> pending = ValueNotifier<int>(0);
@@ -92,7 +101,20 @@ class Outbox {
   // other's snapshot of the list.
   Future<void> _writeQueue = Future.value();
 
-  Future<void> _ensureLoaded() => _loading ??= _load();
+  Future<void> _ensureLoaded() {
+    final pending = _loading;
+    if (pending != null) return pending;
+    final future = _load();
+    _loading = future;
+    // If loading fails, clear the cached future so a later call can retry
+    // instead of the queue being poisoned forever. The handler also marks the
+    // error as observed so it can't surface as an unhandled async error.
+    future.catchError((Object e) {
+      if (identical(_loading, future)) _loading = null;
+      debugPrint('outbox: load failed: $e');
+    });
+    return future;
+  }
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -118,9 +140,27 @@ class Outbox {
       }
     }
     pending.value = _entries.length;
+
+    // Restore surfaced failures so the "couldn't be saved" notice survives a
+    // restart instead of disappearing without the user ever seeing it.
+    final failedRaw = prefs.getStringList(_failedStorageKey) ?? const [];
+    final restored = <OutboxEntry>[];
+    for (final line in failedRaw) {
+      try {
+        final decoded = jsonDecode(line);
+        if (decoded is Map<String, dynamic>) {
+          final entry = OutboxEntry.fromJson(decoded);
+          if (entry != null) restored.add(entry);
+        }
+      } catch (_) {
+        // Skip corrupt failure lines.
+      }
+    }
+    failed.value = restored;
+
     if (dropped) {
       // Rewrite without the bad lines so they don't linger forever.
-      _writeQueue = _writeQueue.then((_) => _write(prefs));
+      _writeQueue = _writeQueue.then((_) => _write(prefs)).catchError((Object _) {});
     }
   }
 
@@ -129,16 +169,36 @@ class Outbox {
     pending.value = _entries.length;
   }
 
+  Future<void> _persistFailed(SharedPreferences prefs) async {
+    await prefs.setStringList(
+      _failedStorageKey,
+      [for (final e in failed.value) jsonEncode(e.toJson())],
+    );
+  }
+
   Future<void> _persist() async {
     await _ensureLoaded();
     final prefs = await SharedPreferences.getInstance();
-    // Chain onto the previous write so snapshots are applied in order.
-    _writeQueue = _writeQueue.then((_) => _write(prefs));
+    // Chain onto the previous write so snapshots are applied in order. The
+    // catchError keeps the chain alive after a failed write (otherwise a single
+    // error would permanently reject every later enqueue/remove).
+    _writeQueue = _writeQueue.then((_) => _write(prefs)).catchError((Object e) {
+      debugPrint('outbox: persist failed: $e');
+    });
     await _writeQueue;
   }
 
   Future<void> enqueue(OutboxEntry entry) async {
     await _ensureLoaded();
+    // Bound the queue: drop the oldest entry (recording it as lost so the user
+    // is told) rather than growing the persisted list without limit.
+    if (_entries.length >= _maxEntries) {
+      final dropped = _entries.removeAt(0);
+      failed.value = [
+        ...failed.value,
+        dropped,
+      ].take(_maxFailed).toList();
+    }
     _entries.add(entry);
     await _persist();
   }
@@ -157,12 +217,23 @@ class Outbox {
   /// Records that [entry] was permanently rejected and removed from the
   /// queue, so the UI can surface the loss instead of it vanishing silently.
   void recordFailed(OutboxEntry entry) {
-    failed.value = [...failed.value, entry];
+    failed.value = [...failed.value, entry].take(_maxFailed).toList();
+    unawaited(_persistFailures());
   }
 
   /// Dismisses all currently-surfaced failures once the user has seen them.
   void acknowledgeFailed() {
     failed.value = const [];
+    unawaited(_persistFailures());
+  }
+
+  Future<void> _persistFailures() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await _persistFailed(prefs);
+    } catch (e) {
+      debugPrint('outbox: persist failures failed: $e');
+    }
   }
 
   /// Drops every queued (not-yet-synced) write and clears surfaced failures.
@@ -173,6 +244,7 @@ class Outbox {
     _entries.clear();
     failed.value = const [];
     await _persist();
+    await _persistFailures();
   }
 }
 

@@ -61,7 +61,8 @@ final devicePositionProvider = StreamProvider.autoDispose<Position>((ref) {
         foregroundNotificationConfig: sharing
             ? const ForegroundNotificationConfig(
                 notificationTitle: 'Ranmap is sharing your trip',
-                notificationText: 'Your live location is being shared with your group.',
+                notificationText:
+                    'Your live location is being shared with your group.',
                 notificationChannelName: 'Live trip sharing',
                 enableWakeLock: true,
                 setOngoing: true,
@@ -83,14 +84,19 @@ final devicePositionProvider = StreamProvider.autoDispose<Position>((ref) {
     );
   }
   return Geolocator.getPositionStream(
-    locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 5),
+    locationSettings: const LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 5,
+    ),
   );
 });
 
 /// Resolves (and, if needed, requests) location permission. Screens should
 /// gate the map — and the GPS stream — on this so they never watch
 /// [devicePositionProvider] before permission is granted.
-final locationPermissionProvider = FutureProvider.autoDispose<bool>((ref) async {
+final locationPermissionProvider = FutureProvider.autoDispose<bool>((
+  ref,
+) async {
   if (!await Geolocator.isLocationServiceEnabled()) return false;
   var permission = await Geolocator.checkPermission();
   if (permission == LocationPermission.denied) {
@@ -150,72 +156,73 @@ final locationBroadcastProvider = Provider.autoDispose<void>((ref) {
 /// re-sends the whole set on each insert), this fetches the current
 /// latest-per-user snapshot via the `trip_member_locations` RPC and refreshes
 /// on Realtime inserts for the trip, debounced to avoid a fetch storm.
-final tripMemberLocationsProvider =
-    StreamProvider.autoDispose.family<Map<String, MemberLocation>, String>((ref, tripId) {
-  final myUid = SupabaseService.currentUser?.id;
-  final repo = ref.watch(tripRepositoryProvider);
-  final client = SupabaseService.client;
+final tripMemberLocationsProvider = StreamProvider.autoDispose
+    .family<Map<String, MemberLocation>, String>((ref, tripId) {
+      final myUid = SupabaseService.currentUser?.id;
+      final repo = ref.watch(tripRepositoryProvider);
+      final client = SupabaseService.client;
 
-  final controller = StreamController<Map<String, MemberLocation>>();
-  final latest = <String, MemberLocation>{};
-  Timer? debounce;
-  var disposed = false;
+      final controller = StreamController<Map<String, MemberLocation>>();
+      final latest = <String, MemberLocation>{};
+      Timer? debounce;
+      var disposed = false;
 
-  Future<void> refresh() async {
-    try {
-      final rows = await repo.memberLocations(tripId);
-      if (disposed) return;
-      latest.clear();
-      for (final row in rows) {
-        // One malformed row must not blank the whole teammate list.
+      Future<void> refresh() async {
         try {
-          final loc = MemberLocation.fromRow(row);
-          if (loc.userId == myUid) continue;
-          latest[loc.userId] = loc;
-        } catch (_) {
-          continue;
+          final rows = await repo.memberLocations(tripId);
+          if (disposed) return;
+          latest.clear();
+          for (final row in rows) {
+            // One malformed row must not blank the whole teammate list.
+            try {
+              final loc = MemberLocation.fromRow(row);
+              if (loc.userId == myUid) continue;
+              latest[loc.userId] = loc;
+            } catch (_) {
+              continue;
+            }
+          }
+          controller.add(Map.of(latest));
+        } catch (e, st) {
+          if (!disposed) controller.addError(e, st);
         }
       }
-      controller.add(Map.of(latest));
-    } catch (e, st) {
-      if (!disposed) controller.addError(e, st);
-    }
-  }
 
-  void scheduleRefresh() {
-    debounce?.cancel();
-    debounce = Timer(const Duration(milliseconds: 400), refresh);
-  }
+      void scheduleRefresh() {
+        debounce?.cancel();
+        debounce = Timer(const Duration(milliseconds: 400), refresh);
+      }
 
-  unawaited(refresh());
+      unawaited(refresh());
 
-  // Unique topic per provider instance: a rebuilt family provider must not race
-  // an in-flight removeChannel for a reused topic (which Realtime rejects,
-  // silently killing the new subscription).
-  final topic = 'trip-$tripId-locations-${DateTime.now().microsecondsSinceEpoch}';
-  final channel = client
-      .channel(topic)
-      .onPostgresChanges(
-        event: PostgresChangeEvent.insert,
-        schema: 'public',
-        table: 'location_pings',
-        filter: PostgresChangeFilter(
-          type: PostgresChangeFilterType.eq,
-          column: 'trip_id',
-          value: tripId,
-        ),
-        callback: (_) => scheduleRefresh(),
-      )
-      .subscribe((status, error) {
-    if (error != null && !disposed) controller.addError(error);
-  });
+      // Unique topic per provider instance: a rebuilt family provider must not race
+      // an in-flight removeChannel for a reused topic (which Realtime rejects,
+      // silently killing the new subscription).
+      final topic =
+          'trip-$tripId-locations-${DateTime.now().microsecondsSinceEpoch}';
+      final channel = client
+          .channel(topic)
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: 'public',
+            table: 'location_pings',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'trip_id',
+              value: tripId,
+            ),
+            callback: (_) => scheduleRefresh(),
+          )
+          .subscribe((status, error) {
+            if (error != null && !disposed) controller.addError(error);
+          });
 
-  ref.onDispose(() {
-    disposed = true;
-    debounce?.cancel();
-    controller.close();
-    unawaited(client.removeChannel(channel));
-  });
+      ref.onDispose(() {
+        disposed = true;
+        debounce?.cancel();
+        controller.close();
+        unawaited(client.removeChannel(channel));
+      });
 
-  return controller.stream;
-});
+      return controller.stream;
+    });

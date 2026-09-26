@@ -65,7 +65,9 @@ final revenueCatProProvider = StreamProvider<bool>((ref) {
   // The listener only fires on the *next* change, so seed the current value.
   unawaited(() async {
     try {
-      if (await Purchases.isConfigured) listener(await Purchases.getCustomerInfo());
+      if (await Purchases.isConfigured) {
+        listener(await Purchases.getCustomerInfo());
+      }
     } catch (_) {
       // Leave the stream unseeded — treated as not-Pro.
     }
@@ -83,25 +85,45 @@ class RevenueCatPremiumPurchaser implements PremiumPurchaser {
   const RevenueCatPremiumPurchaser();
 
   @override
-  Future<void> purchase() async {
-    final package = await _defaultPackage();
+  Future<void> purchase({PaywallPlan plan = PaywallPlan.annual}) async {
+    final package = await _packageFor(plan);
     if (package == null) throw const PremiumPurchaseUnavailable();
     await _guarded(() => Purchases.purchase(PurchaseParams.package(package)));
   }
 
   @override
-  Future<void> restore() async {
-    await _guarded(() => Purchases.restorePurchases());
+  Future<bool> restore() async {
+    try {
+      final info = await Purchases.restorePurchases();
+      return _isProCustomerInfo(info);
+    } on PlatformException catch (e) {
+      if (PurchasesErrorHelper.getErrorCode(e) ==
+          PurchasesErrorCode.purchaseCancelledError) {
+        throw const PremiumPurchaseCancelled();
+      }
+      rethrow;
+    }
   }
 
-  /// The package to buy: monthly first, then annual, then whatever exists.
-  Future<Package?> _defaultPackage() async {
-    if (!await Purchases.isConfigured) return null;
-    final offering = (await Purchases.getOfferings()).current;
+  /// The package matching [plan], falling back to whichever term exists so a
+  /// purchase can still complete if the offering only has one.
+  Future<Package?> _packageFor(PaywallPlan plan) async {
+    final offering = await _currentOffering();
     if (offering == null) return null;
-    return offering.monthly ??
+    final preferred = plan == PaywallPlan.annual
+        ? offering.annual
+        : offering.monthly;
+    return preferred ??
         offering.annual ??
-        (offering.availablePackages.isNotEmpty ? offering.availablePackages.first : null);
+        offering.monthly ??
+        (offering.availablePackages.isNotEmpty
+            ? offering.availablePackages.first
+            : null);
+  }
+
+  Future<Offering?> _currentOffering() async {
+    if (!await Purchases.isConfigured) return null;
+    return (await Purchases.getOfferings()).current;
   }
 
   /// Runs a store call, turning a user-dismissed sheet into
@@ -110,7 +132,8 @@ class RevenueCatPremiumPurchaser implements PremiumPurchaser {
     try {
       await call();
     } on PlatformException catch (e) {
-      if (PurchasesErrorHelper.getErrorCode(e) == PurchasesErrorCode.purchaseCancelledError) {
+      if (PurchasesErrorHelper.getErrorCode(e) ==
+          PurchasesErrorCode.purchaseCancelledError) {
         throw const PremiumPurchaseCancelled();
       }
       rethrow;
@@ -124,3 +147,17 @@ final premiumPurchaserProvider = Provider<PremiumPurchaser>(
       ? const RevenueCatPremiumPurchaser()
       : const UnavailablePremiumPurchaser(),
 );
+
+/// The current RevenueCat offering, used by the paywall to show real store
+/// prices. Emits null when billing isn't configured (or the fetch fails), so
+/// the UI falls back to static copy.
+final paywallOfferingProvider = FutureProvider<Offering?>((ref) async {
+  if (!isRevenueCatConfigured) return null;
+  try {
+    if (!await Purchases.isConfigured) return null;
+    return (await Purchases.getOfferings()).current;
+  } catch (e) {
+    debugPrint('RevenueCat offerings failed: $e');
+    return null;
+  }
+});

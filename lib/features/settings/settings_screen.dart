@@ -7,11 +7,16 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/offline/outbox_providers.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../core/router/auth_state_provider.dart';
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/app_choice_sheet.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_alert.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_list_row.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../data/providers/repository_providers.dart';
 import '../../data/repositories/notification_repository.dart';
 import '../../data/services/supabase_service.dart';
@@ -20,34 +25,39 @@ import '../profile/edit_profile_screen.dart';
 import 'change_credential_screen.dart';
 import 'settings_providers.dart';
 
-/// App settings: preferences, account, privacy, data and about.
+/// App settings: preferences, notifications, account, privacy, data and about —
+/// in the brand's card + icon-row language.
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final c = NavColors.of(context);
     final settings = ref.watch(appSettingsProvider);
     final notifier = ref.read(appSettingsProvider.notifier);
     final profile = ref.watch(myProfileProvider).valueOrNull;
 
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: const Text('Settings'),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+    return BrandScaffold(
+      header: BrandHeader(
+        title: 'Settings',
+        onBack: () => Navigator.of(context).maybePop(),
       ),
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+        padding: const EdgeInsets.only(
+          top: BrandSpace.md,
+          bottom: BrandSpace.xl,
+        ),
         children: [
-          _SectionLabel('Preferences', color: c),
-          FTileGroup(
+          const BrandSectionHeader(
+            icon: Icons.tune_rounded,
+            title: 'Preferences',
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          _Card(
             children: [
-              FTile(
-                prefix: const Icon(Icons.brightness_6_rounded),
-                title: const Text('Theme'),
-                details: Text(_themeLabel(settings.themeMode)),
-                onPress: () async {
+              BrandListRow(
+                icon: Icons.brightness_6_rounded,
+                title: 'Theme',
+                onTap: () async {
                   final choice = await showAppChoiceSheet<ThemeMode>(
                     context,
                     title: 'Theme',
@@ -60,12 +70,13 @@ class SettingsScreen extends ConsumerWidget {
                   );
                   if (choice != null) notifier.setThemeMode(choice);
                 },
+                trailing: BrandPill(label: _themeLabel(settings.themeMode)),
               ),
-              FTile(
-                prefix: const Icon(Icons.straighten_rounded),
-                title: const Text('Distance units'),
-                details: Text(settings.distanceUnit == DistanceUnit.miles ? 'Miles' : 'Kilometers'),
-                onPress: () async {
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: Icons.straighten_rounded,
+                title: 'Distance units',
+                onTap: () async {
                   final choice = await showAppChoiceSheet<DistanceUnit>(
                     context,
                     title: 'Distance units',
@@ -77,12 +88,17 @@ class SettingsScreen extends ConsumerWidget {
                   );
                   if (choice != null) notifier.setDistanceUnit(choice);
                 },
+                trailing: BrandPill(
+                  label: settings.distanceUnit == DistanceUnit.miles
+                      ? 'Miles'
+                      : 'Kilometers',
+                ),
               ),
-              FTile(
-                prefix: const Icon(Icons.layers_rounded),
-                title: const Text('Map style'),
-                details: Text(RanmapMapStyle.fromId(settings.mapStyleId).label),
-                onPress: () async {
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: Icons.layers_rounded,
+                title: 'Map style',
+                onTap: () async {
                   final choice = await showAppChoiceSheet<String>(
                     context,
                     title: 'Map style',
@@ -94,62 +110,90 @@ class SettingsScreen extends ConsumerWidget {
                   );
                   if (choice != null) notifier.setMapStyleId(choice);
                 },
+                trailing: BrandPill(
+                  label: RanmapMapStyle.fromId(settings.mapStyleId).label,
+                ),
               ),
-              FTile(
-                prefix: const Icon(Icons.apartment_rounded),
-                title: const Text('3D buildings'),
-                suffix: FSwitch(value: settings.mapThreeD, onChange: notifier.setMapThreeD),
-                onPress: () => notifier.setMapThreeD(!settings.mapThreeD),
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: Icons.apartment_rounded,
+                title: '3D buildings',
+                // Only the switch toggles: a row onTap plus the switch's own
+                // onChange could both fire for one tap and cancel out.
+                onTap: null,
+                trailing: FSwitch(
+                  value: settings.mapThreeD,
+                  onChange: notifier.setMapThreeD,
+                ),
               ),
-              FTile(
-                prefix: const Icon(Icons.landscape_rounded),
-                title: const Text('Terrain'),
-                suffix: FSwitch(value: settings.mapTerrain, onChange: notifier.setMapTerrain),
-                onPress: () => notifier.setMapTerrain(!settings.mapTerrain),
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: Icons.landscape_rounded,
+                title: 'Terrain',
+                onTap: null,
+                trailing: FSwitch(
+                  value: settings.mapTerrain,
+                  onChange: notifier.setMapTerrain,
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 22),
-          _SectionLabel('Notifications', color: c),
+          const SizedBox(height: BrandSpace.lg),
+          const BrandSectionHeader(
+            icon: Icons.notifications_rounded,
+            title: 'Notifications',
+          ),
+          const SizedBox(height: BrandSpace.sm),
           const _NotificationsSection(),
-          const SizedBox(height: 22),
-          _SectionLabel('Account', color: c),
-          FTileGroup(
+          const SizedBox(height: BrandSpace.lg),
+          const BrandSectionHeader(
+            icon: Icons.person_rounded,
+            title: 'Account',
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          _Card(
             children: [
-              FTile(
-                prefix: const Icon(Icons.person_rounded),
-                title: const Text('Edit profile'),
-                suffix: Icon(Icons.chevron_right_rounded, color: c.mutedForeground),
-                enabled: profile != null,
-                onPress: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => EditProfileScreen(profile: profile!)),
-                ),
+              BrandListRow(
+                icon: Icons.person_outline_rounded,
+                title: 'Edit profile',
+                onTap: profile == null
+                    ? null
+                    : () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => EditProfileScreen(profile: profile),
+                        ),
+                      ),
               ),
-              FTile(
-                prefix: const Icon(Icons.lock_outline_rounded),
-                title: const Text('Change password'),
-                suffix: Icon(Icons.chevron_right_rounded, color: c.mutedForeground),
-                onPress: () => Navigator.of(context).push(
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: Icons.lock_outline_rounded,
+                title: 'Change password',
+                onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => const ChangeCredentialScreen(kind: CredentialKind.password),
+                    builder: (_) => const ChangeCredentialScreen(
+                      kind: CredentialKind.password,
+                    ),
                   ),
                 ),
               ),
-              FTile(
-                prefix: const Icon(Icons.mail_outline_rounded),
-                title: const Text('Change email'),
-                suffix: Icon(Icons.chevron_right_rounded, color: c.mutedForeground),
-                onPress: () => Navigator.of(context).push(
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: Icons.mail_outline_rounded,
+                title: 'Change email',
+                onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => const ChangeCredentialScreen(kind: CredentialKind.email),
+                    builder: (_) => const ChangeCredentialScreen(
+                      kind: CredentialKind.email,
+                    ),
                   ),
                 ),
               ),
-              FTile(
-                prefix: const Icon(Icons.devices_rounded),
-                title: const Text('Sign out other devices'),
-                subtitle: const Text('Keep this device signed in'),
-                onPress: () async {
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: Icons.devices_rounded,
+                title: 'Sign out other devices',
+                subtitle: 'Keep this device signed in',
+                onTap: () async {
                   final confirmed = await showAppConfirmDialog(
                     context,
                     title: 'Sign out other devices?',
@@ -158,25 +202,32 @@ class SettingsScreen extends ConsumerWidget {
                   );
                   if (!confirmed) return;
                   try {
-                    await SupabaseService.auth.signOut(scope: SignOutScope.others);
-                    if (context.mounted) showAppToast(context, 'Signed out of other devices.');
+                    await SupabaseService.auth.signOut(
+                      scope: SignOutScope.others,
+                    );
+                    if (context.mounted) {
+                      showAppToast(context, 'Signed out of other devices.');
+                    }
                   } catch (e) {
-                    if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+                    if (context.mounted) {
+                      showAppToast(context, friendlyError(e), error: true);
+                    }
                   }
                 },
               ),
-              FTile(
-                variant: .destructive,
-                prefix: const Icon(Icons.delete_forever_outlined),
-                title: const Text('Delete account'),
-                subtitle: const Text('Permanently deletes your account and data'),
-                onPress: () async {
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: Icons.delete_forever_outlined,
+                title: 'Delete account',
+                subtitle: 'Permanently deletes your account and data',
+                titleColor: BrandColors.error,
+                iconColor: BrandColors.error,
+                onTap: () async {
                   // Two confirmations: this is irreversible.
                   final first = await showAppConfirmDialog(
                     context,
                     title: 'Delete your account?',
-                    message:
-                        'This permanently deletes your profile, trips, photos, chats and messages. It cannot be undone.',
+                    message: 'This permanently deletes your profile, trips, photos, chats and messages. It cannot be undone.',
                     confirmLabel: 'Continue',
                     destructive: true,
                   );
@@ -195,22 +246,27 @@ class SettingsScreen extends ConsumerWidget {
                     // sends the user back to the auth screens.
                     await SupabaseService.auth.signOut();
                   } catch (e) {
-                    if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+                    if (context.mounted) {
+                      showAppToast(context, friendlyError(e), error: true);
+                    }
                   }
                 },
               ),
             ],
           ),
-          const SizedBox(height: 22),
-          _SectionLabel('Privacy', color: c),
-          FTileGroup(
+          const SizedBox(height: BrandSpace.lg),
+          const BrandSectionHeader(
+            icon: Icons.privacy_tip_rounded,
+            title: 'Privacy',
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          _Card(
             children: [
-              FTile(
-                prefix: const Icon(Icons.photo_library_outlined),
-                title: const Text('Default photo visibility'),
-                subtitle: const Text('For new photos pinned to the map'),
-                details: Text(_visibilityLabel(settings.photoVisibility)),
-                onPress: () async {
+              BrandListRow(
+                icon: Icons.photo_library_outlined,
+                title: 'Default photo visibility',
+                subtitle: 'For new photos pinned to the map',
+                onTap: () async {
                   final choice = await showAppChoiceSheet<String>(
                     context,
                     title: 'Default photo visibility',
@@ -223,33 +279,30 @@ class SettingsScreen extends ConsumerWidget {
                   );
                   if (choice != null) notifier.setPhotoVisibility(choice);
                 },
+                trailing: BrandPill(
+                  label: _visibilityLabel(settings.photoVisibility),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          FAlert(
-            icon: const Icon(Icons.location_on_outlined),
-            title: const Text('Location sharing'),
-            subtitle: const Text(
-              'While a trip is active, your position is shared with that trip’s members so they can see you on the map. It stops when the trip ends or you leave it.',
-            ),
+          const SizedBox(height: BrandSpace.sm),
+          const _LocationSharingNote(),
+          const SizedBox(height: BrandSpace.lg),
+          const BrandSectionHeader(
+            icon: Icons.cloud_done_rounded,
+            title: 'Data',
           ),
-          const SizedBox(height: 22),
-          _SectionLabel('Data', color: c),
+          const SizedBox(height: BrandSpace.sm),
           Builder(
             builder: (context) {
               final outbox = ref.watch(outboxProvider);
-              return FTileGroup(
+              return _Card(
                 children: [
-                  FTile(
-                    prefix: const Icon(Icons.cloud_upload_outlined),
-                    title: const Text('Clear offline queue'),
-                    subtitle: const Text('Discard writes waiting to sync'),
-                    details: ValueListenableBuilder<int>(
-                      valueListenable: outbox.pending,
-                      builder: (context, count, _) => Text('$count'),
-                    ),
-                    onPress: () async {
+                  BrandListRow(
+                    icon: Icons.cloud_upload_outlined,
+                    title: 'Clear offline queue',
+                    subtitle: 'Discard writes waiting to sync',
+                    onTap: () async {
                       final confirmed = await showAppConfirmDialog(
                         context,
                         title: 'Clear offline queue?',
@@ -259,33 +312,52 @@ class SettingsScreen extends ConsumerWidget {
                       );
                       if (!confirmed) return;
                       await outbox.clear();
-                      if (context.mounted) showAppToast(context, 'Offline queue cleared.');
+                      if (context.mounted) {
+                        showAppToast(context, 'Offline queue cleared.');
+                      }
                     },
+                    trailing: ValueListenableBuilder<int>(
+                      valueListenable: outbox.pending,
+                      builder: (context, count, _) =>
+                          BrandPill(label: '$count'),
+                    ),
                   ),
                 ],
               );
             },
           ),
-          const SizedBox(height: 22),
-          _SectionLabel('About', color: c),
-          FTileGroup(
+          const SizedBox(height: BrandSpace.lg),
+          const BrandSectionHeader(
+            icon: Icons.info_outline_rounded,
+            title: 'About',
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          _Card(
             children: [
-              FTile(
-                prefix: const Icon(Icons.info_outline_rounded),
-                title: const Text('Version'),
-                details: FutureBuilder<PackageInfo>(
+              BrandListRow(
+                icon: Icons.description_outlined,
+                title: 'Open-source licenses',
+                onTap: () => showLicensePage(
+                  context: context,
+                  applicationName: 'Ranmap',
+                ),
+              ),
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: Icons.tag_rounded,
+                title: 'Version',
+                showChevron: false,
+                trailing: FutureBuilder<PackageInfo>(
                   future: PackageInfo.fromPlatform(),
                   builder: (context, snapshot) {
                     final info = snapshot.data;
-                    return Text(info == null ? '—' : '${info.version} (${info.buildNumber})');
+                    return BrandPill(
+                      label: info == null
+                          ? '—'
+                          : '${info.version} (${info.buildNumber})',
+                    );
                   },
                 ),
-              ),
-              FTile(
-                prefix: const Icon(Icons.description_outlined),
-                title: const Text('Open-source licenses'),
-                suffix: Icon(Icons.chevron_right_rounded, color: c.mutedForeground),
-                onPress: () => showLicensePage(context: context, applicationName: 'Ranmap'),
               ),
             ],
           ),
@@ -295,23 +367,49 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   static String _themeLabel(ThemeMode mode) => switch (mode) {
-        ThemeMode.system => 'System',
-        ThemeMode.light => 'Light',
-        ThemeMode.dark => 'Dark',
-      };
+    ThemeMode.system => 'System',
+    ThemeMode.light => 'Light',
+    ThemeMode.dark => 'Dark',
+  };
 
   static String _visibilityLabel(String visibility) => switch (visibility) {
-        'private' => 'Only me',
-        'public' => 'Public',
-        _ => 'Trip members',
-      };
+    'private' => 'Only me',
+    'public' => 'Public',
+    _ => 'Trip members',
+  };
+}
+
+/// A white card holding a stack of rows.
+class _Card extends StatelessWidget {
+  const _Card({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => BrandCard(
+    padding: const EdgeInsets.symmetric(horizontal: BrandSpace.md, vertical: 4),
+    child: Column(children: children),
+  );
+}
+
+class _LocationSharingNote extends StatelessWidget {
+  const _LocationSharingNote();
+
+  @override
+  Widget build(BuildContext context) {
+    return const BrandAlert(
+      variant: BrandAlertVariant.info,
+      message: 'While a trip is active, your position is shared with that trip’s members so they can see you on the map. It stops when the trip ends or you leave it.',
+    );
+  }
 }
 
 class _NotificationsSection extends ConsumerStatefulWidget {
   const _NotificationsSection();
 
   @override
-  ConsumerState<_NotificationsSection> createState() => _NotificationsSectionState();
+  ConsumerState<_NotificationsSection> createState() =>
+      _NotificationsSectionState();
 }
 
 class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
@@ -334,84 +432,75 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
-    return ref.watch(notificationPreferencesProvider).when(
+    return ref
+        .watch(notificationPreferencesProvider)
+        .when(
           loading: () => const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
             child: Center(child: FCircularProgress(size: .sm)),
           ),
-          error: (e, _) => const FAlert(
-            variant: .destructive,
-            title: Text("Couldn't load notification settings."),
-          ),
+          error: (e, _) =>
+              const BrandAlert(message: "Couldn't load notification settings."),
           data: (server) {
             final prefs = _local ?? server;
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                FTileGroup(
+                _Card(
                   children: [
-                    FTile(
-                      prefix: const Icon(Icons.mail_outline_rounded),
-                      title: const Text('Trip invites'),
-                      subtitle: const Text('When someone invites you to a trip'),
-                      suffix: FSwitch(
+                    BrandListRow(
+                      icon: Icons.mail_outline_rounded,
+                      title: 'Trip invites',
+                      subtitle: 'When someone invites you to a trip',
+                      onTap: () => _update(
+                        prefs.copyWith(tripInvites: !prefs.tripInvites),
+                      ),
+                      trailing: FSwitch(
                         value: prefs.tripInvites,
-                        onChange: (v) => _update(prefs.copyWith(tripInvites: v)),
+                        onChange: (v) =>
+                            _update(prefs.copyWith(tripInvites: v)),
                       ),
-                      onPress: () => _update(prefs.copyWith(tripInvites: !prefs.tripInvites)),
                     ),
-                    FTile(
-                      prefix: const Icon(Icons.forum_outlined),
-                      title: const Text('Chat messages'),
-                      subtitle: const Text('New messages in your trip and group channels'),
-                      suffix: FSwitch(
+                    const BrandRowDivider(),
+                    BrandListRow(
+                      icon: Icons.forum_outlined,
+                      title: 'Chat messages',
+                      subtitle: 'New messages in your trip and group channels',
+                      onTap: () => _update(
+                        prefs.copyWith(chatMessages: !prefs.chatMessages),
+                      ),
+                      trailing: FSwitch(
                         value: prefs.chatMessages,
-                        onChange: (v) => _update(prefs.copyWith(chatMessages: v)),
+                        onChange: (v) =>
+                            _update(prefs.copyWith(chatMessages: v)),
                       ),
-                      onPress: () => _update(prefs.copyWith(chatMessages: !prefs.chatMessages)),
                     ),
-                    FTile(
-                      prefix: const Icon(Icons.route_outlined),
-                      title: const Text('Trip updates'),
-                      subtitle: const Text('When a scheduled trip starts'),
-                      suffix: FSwitch(
-                        value: prefs.tripUpdates,
-                        onChange: (v) => _update(prefs.copyWith(tripUpdates: v)),
+                    const BrandRowDivider(),
+                    BrandListRow(
+                      icon: Icons.route_outlined,
+                      title: 'Trip updates',
+                      subtitle: 'When a scheduled trip starts',
+                      onTap: () => _update(
+                        prefs.copyWith(tripUpdates: !prefs.tripUpdates),
                       ),
-                      onPress: () => _update(prefs.copyWith(tripUpdates: !prefs.tripUpdates)),
+                      trailing: FSwitch(
+                        value: prefs.tripUpdates,
+                        onChange: (v) =>
+                            _update(prefs.copyWith(tripUpdates: v)),
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 10),
                 Text(
                   'Push delivery turns on once this build registers a device token with the server.',
-                  style: TextStyle(fontSize: 12, color: c.mutedForeground),
+                  style: BrandText.bodySm.copyWith(
+                    color: BrandColors.textMuted,
+                  ),
                 ),
               ],
             );
           },
         );
   }
-}
-
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel(this.text, {required this.color});
-
-  final String text;
-  final NavColors color;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
-        child: Text(
-          text,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.4,
-            color: color.activeRoute,
-          ),
-        ),
-      );
 }

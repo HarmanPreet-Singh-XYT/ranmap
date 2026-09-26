@@ -55,10 +55,14 @@ class ProfileRepository {
 
   Future<List<Profile>> searchByUsername(String query) async {
     if (query.trim().length < 2) return const [];
+    final myUid = SupabaseService.currentUser?.id;
     final rows = await _client
         .from('profiles')
         .select(kProfilePublicColumns)
         .ilike('username', '%${_escapeLike(query.trim())}%')
+        // Exclude yourself: adding yourself would be rejected anyway, and the
+        // "Add" button on your own row is confusing.
+        .neq('id', myUid ?? '')
         .limit(20);
     return (rows as List).map((r) => Profile.fromJson(r as Map<String, dynamic>)).toList();
   }

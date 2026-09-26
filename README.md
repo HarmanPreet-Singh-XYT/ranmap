@@ -94,7 +94,7 @@ server/           # ranmap-server: Node/TS backend for secret-holding operations
    `0004_stop_ordering.sql`, `0005_phone_verification.sql`,
    `0006_trip_route_planning.sql`, `0007_security_fixes.sql`,
    `0008_hardening_followups.sql`, `0009_plans.sql`, `0010_plan_limits.sql`,
-   then `0011_notifications.sql` (either paste
+   then `0011_notifications.sql` and `0012_text_length_limits.sql` (either paste
    them into the SQL editor in that order, or `supabase db push`). `0011`
    adds `device_tokens` (written only by ranmap-server; no client access) and
    `notification_prefs` (owner-managed) for push notifications. `0001`
@@ -146,6 +146,14 @@ SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_PUBLISHABLE_KEY=sb_publishable_your-key
 BACKEND_URL=http://localhost:8787
 ```
+
+`BACKEND_URL` is where the app reaches **ranmap-server**. On a simulator/emulator
+`localhost` is fine; on a **physical phone** `localhost` is the phone itself, so
+either forward the port (`adb reverse tcp:8787 tcp:8787` on Android) or point it
+at your Mac over Wi-Fi (`http://192.168.x.x:8787` or `http://your-mac.local:8787`).
+Cleartext HTTP to that host is allowed only in debug builds (Android
+`android/app/src/debug/res/xml/network_security_config.xml`, iOS
+`NSAllowsLocalNetworking`); release builds should use an `https://` backend.
 
 ### 3. Mapbox (rendering + routing)
 

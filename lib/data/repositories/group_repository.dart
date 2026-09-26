@@ -53,4 +53,10 @@ class GroupRepository {
   Future<void> removeMember({required String groupId, required String userId}) async {
     await _client.from('group_members').delete().eq('group_id', groupId).eq('user_id', userId);
   }
+
+  /// Delete a group you own. RLS restricts this to the owner; members and
+  /// their memberships cascade (see 0001_init.sql).
+  Future<void> deleteGroup(String groupId) async {
+    await _client.from('groups').delete().eq('id', groupId);
+  }
 }

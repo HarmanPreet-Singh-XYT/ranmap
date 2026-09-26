@@ -2,11 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 
-import '../../core/theme/nav_palette.dart';
-import '../../core/widgets/app_spinner.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/validation.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_alert.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_list_row.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_text_field.dart';
 import '../../data/models/trip.dart';
 import '../../data/services/supabase_service.dart';
 import '../premium/paywall.dart';
@@ -61,15 +67,22 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
   Future<void> _pickFromFriends() async {
     final friendRows = await ref.read(friendsProvider.future);
     final myUid = SupabaseService.currentUser?.id;
-    final friends = friendRows.map((row) {
-      final isRequester = row['requester_id'] == myUid;
-      return (isRequester ? row['addressee'] : row['requester']) as Map<String, dynamic>?;
-    }).whereType<Map<String, dynamic>>().toList();
+    final friends = friendRows
+        .map((row) {
+          final isRequester = row['requester_id'] == myUid;
+          return (isRequester ? row['addressee'] : row['requester'])
+              as Map<String, dynamic>?;
+        })
+        .whereType<Map<String, dynamic>>()
+        .toList();
 
     if (!mounted) return;
 
     if (friends.isEmpty) {
-      showAppToast(context, 'No friends yet — add some from Profile > Friends.');
+      showAppToast(
+        context,
+        'No friends yet — add some from Profile > Friends.',
+      );
       return;
     }
 
@@ -78,25 +91,32 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
       side: FLayout.btt,
       builder: (context) => ListView(
         shrinkWrap: true,
+        padding: const EdgeInsets.all(BrandSpace.md),
         children: [
-          FTileGroup(
-            children: [
-              for (final profile in friends)
-                FTile(
-                  enabled: !_invitees.contains(profile['username'] as String),
-                  prefix: Container(
-                    height: 40,
-                    width: 40,
-                    decoration: BoxDecoration(
-                      color: NavColors.of(context).surfaceAlt,
-                      shape: BoxShape.circle,
+          BrandCard(
+            padding: const EdgeInsets.symmetric(
+              horizontal: BrandSpace.md,
+              vertical: BrandSpace.xs,
+            ),
+            child: Column(
+              children: [
+                for (final profile in friends)
+                  BrandListRow(
+                    icon: Icons.person,
+                    iconBackground: BrandColors.surfaceContainerLow,
+                    iconColor: BrandColors.primary,
+                    title: '@${profile['username']}',
+                    showChevron: !_invitees.contains(
+                      profile['username'] as String,
                     ),
-                    child: Icon(Icons.person, color: NavColors.of(context).activeRoute, size: 20),
+                    onTap: _invitees.contains(profile['username'] as String)
+                        ? null
+                        : () =>
+                              Navigator.of(context)
+                                  .pop(profile['username'] as String),
                   ),
-                  title: Text('@${profile['username']}'),
-                  onPress: () => Navigator.of(context).pop(profile['username'] as String),
-                ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -124,15 +144,17 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
     try {
       final uid = SupabaseService.currentUserId;
       final route = _plannedRoute;
-      final trip = await repo.createTrip(Trip.draft(
-        createdBy: uid,
-        title: title,
-        originName: route?.originName,
-        originPoint: route?.originPoint,
-        destinationName: route?.destinationName,
-        destinationPoint: route?.destinationPoint,
-        routePolyline: route?.routePolyline,
-      ));
+      final trip = await repo.createTrip(
+        Trip.draft(
+          createdBy: uid,
+          title: title,
+          originName: route?.originName,
+          originPoint: route?.originPoint,
+          destinationName: route?.destinationName,
+          destinationPoint: route?.destinationPoint,
+          routePolyline: route?.routePolyline,
+        ),
+      );
 
       final failedInvites = <String>[];
       for (final username in _invitees) {
@@ -147,7 +169,10 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
 
       if (!mounted) return;
       if (failedInvites.isNotEmpty) {
-        showAppToast(context, 'Trip created. Could not find: ${failedInvites.join(', ')}');
+        showAppToast(
+          context,
+          'Trip created. Could not find: ${failedInvites.join(', ')}',
+        );
       }
       Navigator.of(context).pop(trip);
     } catch (e) {
@@ -165,136 +190,182 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
-
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: const Text('New trip'),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+    return BrandScaffold(
+      header: BrandHeader(
+        title: 'New trip',
+        onBack: () => Navigator.of(context).maybePop(),
       ),
       child: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.only(
+          top: BrandSpace.md,
+          bottom: BrandSpace.xl,
+        ),
         children: [
-          FTextField(
-            control: FTextFieldControl.managed(
-              controller: _titleCtrl,
-              onChange: (_) {
-                if (_error != null) setState(() => _error = null);
-              },
-            ),
-            label: const Text('Trip name'),
+          const _FieldLabel('Trip name'),
+          BrandTextField(
+            controller: _titleCtrl,
             hint: 'Weekend to the coast',
             maxLength: kNameMaxLength,
+            onChanged: (_) {
+              if (_error != null) setState(() => _error = null);
+            },
           ),
-          const SizedBox(height: 20),
-          FCard(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Row(
-                children: [
-                  Icon(Icons.alt_route_rounded, color: c.activeRoute),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
+          const SizedBox(height: BrandSpace.lg),
+          BrandCard(
+            padding: const EdgeInsets.all(BrandSpace.md),
+            child: Row(
+              children: [
+                Icon(Icons.alt_route_rounded, color: BrandColors.primary),
+                const SizedBox(width: BrandSpace.gutterSm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _plannedRoute == null
+                            ? 'No route planned'
+                            : 'Route planned',
+                        style: BrandText.weight(
+                          BrandText.titleSm,
+                          700,
+                        ).copyWith(color: BrandColors.textHeadline),
+                      ),
+                      if (_plannedRoute == null) ...[
+                        const SizedBox(height: 2),
                         Text(
-                          _plannedRoute == null ? 'No route planned' : 'Route planned',
-                          style: TextStyle(fontWeight: FontWeight.w600, color: c.foreground),
-                        ),
-                        if (_plannedRoute == null) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            'Optional — pick an origin, destination, and route',
-                            style: TextStyle(color: c.mutedForeground, fontSize: 13),
+                          'Optional — pick an origin, destination, and route',
+                          style: BrandText.bodySm.copyWith(
+                            color: BrandColors.textMuted,
                           ),
-                        ],
+                        ),
                       ],
-                    ),
+                    ],
                   ),
-                  FButton(
-                    variant: .outline,
-                    size: .sm,
-                    onPress: _planRoute,
-                    child: Text(_plannedRoute == null ? 'Plan route' : 'Change'),
-                  ),
-                ],
-              ),
+                ),
+                BrandSecondaryButton(
+                  label: _plannedRoute == null ? 'Plan route' : 'Change',
+                  expand: false,
+                  onPressed: _planRoute,
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: BrandSpace.lg),
           Row(
             children: [
               Expanded(
                 child: Text(
                   'Invite group members',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.foreground),
+                  style: BrandText.weight(
+                    BrandText.titleSm,
+                    700,
+                  ).copyWith(color: BrandColors.textHeadline),
                 ),
               ),
-              FButton(
-                variant: .ghost,
-                size: .sm,
-                onPress: _pickFromFriends,
-                prefix: const Icon(Icons.group_add),
-                child: const Text('From friends'),
+              BrandSecondaryButton(
+                label: 'From friends',
+                leading: Icon(
+                  Icons.group_add_rounded,
+                  size: 18,
+                  color: BrandColors.textHeadlineAlt,
+                ),
+                expand: false,
+                onPressed: _pickFromFriends,
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: BrandSpace.sm),
+          const _FieldLabel('Username'),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
-                child: FTextField(
-                  control: FTextFieldControl.managed(controller: _inviteCtrl),
-                  label: const Text('Username'),
+                child: BrandTextField(
+                  controller: _inviteCtrl,
                   hint: 'theirname',
-                  onSubmit: (_) => _addInvitee(),
+                  onSubmitted: (_) => _addInvitee(),
                 ),
               ),
-              const SizedBox(width: 8),
-              FButton.icon(
-                onPress: _addInvitee,
-                child: const Icon(Icons.add),
+              const SizedBox(width: BrandSpace.sm),
+              BrandPrimaryButton(
+                label: 'Add',
+                trailingIcon: null,
+                glow: false,
+                expand: false,
+                onPressed: _addInvitee,
               ),
             ],
           ),
           if (_invitees.isNotEmpty) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: BrandSpace.gutterSm),
             Wrap(
-              spacing: 8,
-              runSpacing: 8,
+              spacing: BrandSpace.sm,
+              runSpacing: BrandSpace.sm,
               children: _invitees
-                  .map((u) => FButton(
-                        variant: .outline,
-                        size: .xs,
-                        semanticsLabel: 'Remove @$u',
-                        onPress: () => setState(() => _invitees.remove(u)),
-                        suffix: const Icon(Icons.close),
-                        child: Text('@$u'),
-                      ))
+                  .map(
+                    (u) => GestureDetector(
+                      onTap: () => setState(() => _invitees.remove(u)),
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: BrandSpace.gutterSm,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: BrandColors.surfaceContainerLow,
+                          borderRadius: BrandRadii.pill,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '@$u',
+                              style: BrandText.labelMd.copyWith(
+                                color: BrandColors.textHeadline,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Icon(
+                              Icons.close_rounded,
+                              size: 14,
+                              color: BrandColors.textMuted,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  )
                   .toList(),
             ),
           ],
           if (_error != null) ...[
-            const SizedBox(height: 16),
-            FAlert(variant: .destructive, title: Text(_error!)),
+            const SizedBox(height: BrandSpace.md),
+            BrandAlert(message: _error!),
           ],
-          const SizedBox(height: 28),
-          FButton(
-            size: .lg,
-            onPress: _saving ? null : _createTrip,
-            child: _saving
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: AppSpinner(color: Colors.white),
-                  )
-                : const Text('Create trip'),
+          const SizedBox(height: BrandSpace.lg),
+          BrandPrimaryButton(
+            label: 'Create trip',
+            onPressed: _saving ? null : _createTrip,
+            loading: _saving,
           ),
         ],
       ),
     );
   }
+}
+
+/// A small muted field caption sitting above a [BrandTextField].
+class _FieldLabel extends StatelessWidget {
+  const _FieldLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Text(
+      text,
+      style: BrandText.labelMd.copyWith(color: BrandColors.textBody),
+    ),
+  );
 }

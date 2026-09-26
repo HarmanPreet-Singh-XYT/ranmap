@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:forui/forui.dart';
 
 import '../../core/offline/outbox.dart';
 import '../../core/offline/outbox_providers.dart';
 import '../../core/providers/connectivity_provider.dart';
-import '../../core/theme/nav_palette.dart';
-import '../../core/widgets/app_spinner.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/validation.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_alert.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_text_field.dart';
 import '../../data/models/trip_expense.dart';
 import '../../data/services/supabase_service.dart';
 import 'trip_providers.dart';
@@ -87,14 +90,21 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (isNetworkError(e) || ref.read(isOfflineProvider)) {
-        await ref.read(outboxProvider).enqueue(OutboxEntry(
-              id: id,
-              type: OutboxType.tripExpense,
-              payload: expense.toInsertJson(),
-              createdAt: DateTime.now(),
-            ));
+        await ref
+            .read(outboxProvider)
+            .enqueue(
+              OutboxEntry(
+                id: id,
+                type: OutboxType.tripExpense,
+                payload: expense.toInsertJson(),
+                createdAt: DateTime.now(),
+              ),
+            );
         if (mounted) {
-          showAppToast(context, "You're offline — this expense will sync when you reconnect.");
+          showAppToast(
+            context,
+            "You're offline — this expense will sync when you reconnect.",
+          );
           Navigator.of(context).pop();
         }
       } else {
@@ -107,89 +117,113 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
     final isFuel = _category == 'fuel';
 
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: const Text('Log expense'),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+    return BrandScaffold(
+      header: BrandHeader(
+        title: 'Log expense',
+        onBack: () => Navigator.of(context).maybePop(),
       ),
       child: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.only(
+          top: BrandSpace.md,
+          bottom: BrandSpace.xl,
+        ),
         children: [
-          Text('Category', style: _section(c)),
-          const SizedBox(height: 10),
+          Text(
+            'Category',
+            style: BrandText.weight(
+              BrandText.titleSm,
+              700,
+            ).copyWith(color: BrandColors.textHeadline),
+          ),
+          const SizedBox(height: BrandSpace.sm),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: BrandSpace.sm,
+            runSpacing: BrandSpace.sm,
             children: _kExpenseCategories.map((entry) {
               final (id, label, icon) = entry;
               final selected = _category == id;
-              return FButton(
-                variant: selected ? .primary : .outline,
-                size: .sm,
-                selected: selected,
-                onPress: () => setState(() => _category = id),
-                prefix: Icon(icon),
-                child: Text(label),
-              );
+              return selected
+                  ? BrandPrimaryButton(
+                      label: label,
+                      leadingIcon: icon,
+                      trailingIcon: null,
+                      glow: false,
+                      expand: false,
+                      onPressed: () => setState(() => _category = id),
+                    )
+                  : BrandSecondaryButton(
+                      label: label,
+                      leading: Icon(
+                        icon,
+                        size: 18,
+                        color: BrandColors.textHeadlineAlt,
+                      ),
+                      expand: false,
+                      onPressed: () => setState(() => _category = id),
+                    );
             }).toList(),
           ),
-          const SizedBox(height: 20),
-          FTextField(
-            control: FTextFieldControl.managed(
-              controller: _amountCtrl,
-              onChange: (_) {
-                if (_error != null) setState(() => _error = null);
-              },
-            ),
-            label: const Text('Amount'),
+          const SizedBox(height: BrandSpace.lg),
+          const _FieldLabel('Amount'),
+          BrandTextField(
+            controller: _amountCtrl,
             hint: '0.00',
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            onChanged: (_) {
+              if (_error != null) setState(() => _error = null);
+            },
           ),
           if (isFuel) ...[
-            const SizedBox(height: 16),
-            FTextField(
-              control: FTextFieldControl.managed(controller: _fuelLitersCtrl),
-              label: const Text('Fuel (liters, optional)'),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            const SizedBox(height: BrandSpace.md),
+            const _FieldLabel('Fuel (liters, optional)'),
+            BrandTextField(
+              controller: _fuelLitersCtrl,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
             ),
-            const SizedBox(height: 16),
-            FTextField(
-              control: FTextFieldControl.managed(controller: _odometerCtrl),
-              label: const Text('Odometer (km, optional)'),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            const SizedBox(height: BrandSpace.md),
+            const _FieldLabel('Odometer (km, optional)'),
+            BrandTextField(
+              controller: _odometerCtrl,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
             ),
           ],
-          const SizedBox(height: 16),
-          FTextField(
-            control: FTextFieldControl.managed(controller: _noteCtrl),
-            label: const Text('Note (optional)'),
-            maxLength: kNotesMaxLength,
-          ),
+          const SizedBox(height: BrandSpace.md),
+          const _FieldLabel('Note (optional)'),
+          BrandTextField(controller: _noteCtrl, maxLength: kNotesMaxLength),
           if (_error != null) ...[
-            const SizedBox(height: 16),
-            FAlert(variant: .destructive, title: Text(_error!)),
+            const SizedBox(height: BrandSpace.md),
+            BrandAlert(message: _error!),
           ],
-          const SizedBox(height: 28),
-          FButton(
-            size: .lg,
-            onPress: _saving ? null : _save,
-            child: _saving
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: AppSpinner(color: Colors.white),
-                  )
-                : const Text('Log expense'),
+          const SizedBox(height: BrandSpace.lg),
+          BrandPrimaryButton(
+            label: 'Log expense',
+            onPressed: _saving ? null : _save,
+            loading: _saving,
           ),
         ],
       ),
     );
   }
+}
 
-  TextStyle _section(NavColors c) =>
-      TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.foreground);
+/// A small muted field caption sitting above a [BrandTextField].
+class _FieldLabel extends StatelessWidget {
+  const _FieldLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Text(
+      text,
+      style: BrandText.labelMd.copyWith(color: BrandColors.textBody),
+    ),
+  );
 }

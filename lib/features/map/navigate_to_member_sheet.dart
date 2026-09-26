@@ -8,8 +8,10 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants/defaults.dart';
 import '../../core/providers/settings_provider.dart';
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/units.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
 // `LocationSettings` collides with mapbox's; hide it so geolocator's is used.
 import 'map_engine/map_engine.dart' hide LocationSettings;
 
@@ -34,7 +36,11 @@ Future<void> showNavigateToMemberSheet(
 }
 
 class _NavigateToMemberSheet extends ConsumerStatefulWidget {
-  const _NavigateToMemberSheet({required this.destination, this.username, this.vehicleType});
+  const _NavigateToMemberSheet({
+    required this.destination,
+    this.username,
+    this.vehicleType,
+  });
 
   final Position destination;
   final String? username;
@@ -43,10 +49,12 @@ class _NavigateToMemberSheet extends ConsumerStatefulWidget {
   final String? vehicleType;
 
   @override
-  ConsumerState<_NavigateToMemberSheet> createState() => _NavigateToMemberSheetState();
+  ConsumerState<_NavigateToMemberSheet> createState() =>
+      _NavigateToMemberSheetState();
 }
 
-class _NavigateToMemberSheetState extends ConsumerState<_NavigateToMemberSheet> {
+class _NavigateToMemberSheetState
+    extends ConsumerState<_NavigateToMemberSheet> {
   double? _distanceMeters;
   double? _bearingDegrees;
 
@@ -60,9 +68,11 @@ class _NavigateToMemberSheetState extends ConsumerState<_NavigateToMemberSheet> 
     try {
       final position =
           await Geolocator.getLastKnownPosition() ??
-              await Geolocator.getCurrentPosition(
-                locationSettings: const LocationSettings(timeLimit: kLocationFixTimeout),
-              );
+          await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              timeLimit: kLocationFixTimeout,
+            ),
+          );
       if (!mounted) return;
       setState(() {
         _distanceMeters = Geolocator.distanceBetween(
@@ -89,9 +99,9 @@ class _NavigateToMemberSheetState extends ConsumerState<_NavigateToMemberSheet> 
   /// directions that respect it; every other vehicle (including scooters, which
   /// Google has no mode for) hands off as driving.
   String get _travelMode => switch (widget.vehicleType) {
-        'bike' => 'bicycling',
-        _ => 'driving',
-      };
+    'bike' => 'bicycling',
+    _ => 'driving',
+  };
 
   Future<void> _openTurnByTurn() async {
     final uri = Uri.parse(
@@ -119,12 +129,11 @@ class _NavigateToMemberSheetState extends ConsumerState<_NavigateToMemberSheet> 
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
     final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
 
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(BrandSpace.lg),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -135,38 +144,46 @@ class _NavigateToMemberSheetState extends ConsumerState<_NavigateToMemberSheet> 
                   height: 52,
                   width: 52,
                   decoration: BoxDecoration(
-                    color: c.surfaceAlt,
+                    color: BrandColors.accentMint,
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(Icons.directions_car_filled_rounded, color: c.activeRoute),
+                  child: Icon(
+                    Icons.directions_car_filled_rounded,
+                    color: BrandColors.primary,
+                  ),
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: BrandSpace.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.username != null ? '@${widget.username}' : 'Teammate',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: c.foreground),
+                        widget.username != null
+                            ? '@${widget.username}'
+                            : 'Teammate',
+                        style: BrandText.titleMd.copyWith(
+                          color: BrandColors.textHeadline,
+                        ),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         _bearingDegrees == null
                             ? _distanceLabel(unit)
                             : '${_distanceLabel(unit)} · $_directionLabel',
-                        style: TextStyle(fontSize: 15, color: c.mutedForeground),
+                        style: BrandText.bodyMd.copyWith(
+                          color: BrandColors.textMuted,
+                        ),
                       ),
                     ],
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 24),
-            FButton(
-              size: .lg,
-              onPress: _openTurnByTurn,
-              prefix: const Icon(Icons.navigation_rounded),
-              child: const Text('Navigate to them'),
+            const SizedBox(height: BrandSpace.lg),
+            BrandPrimaryButton(
+              label: 'Navigate to them',
+              leadingIcon: Icons.navigation_rounded,
+              onPressed: _openTurnByTurn,
             ),
           ],
         ),

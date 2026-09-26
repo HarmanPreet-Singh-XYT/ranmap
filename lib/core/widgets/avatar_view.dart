@@ -17,6 +17,7 @@ class AvatarView extends StatelessWidget {
     this.size = 64,
     this.selected = false,
     this.background,
+    this.accentColor,
   });
 
   final String seed;
@@ -24,20 +25,37 @@ class AvatarView extends StatelessWidget {
   final bool selected;
   final Color? background;
 
+  /// Selection ring / glow colour. Defaults to the navigation palette's active
+  /// route; brand surfaces pass the grass-green accent.
+  final Color? accentColor;
+
+  /// Bounded LRU of generated SVG markup, keyed by seed. Avatar grids shuffle
+  /// and reroll repeatedly, so an unbounded map would grow for the whole
+  /// process lifetime; this caps it at [_svgCacheMax] entries.
+  static const int _svgCacheMax = 256;
   static final Map<String, String> _svgCache = {};
 
   /// The memoized SVG markup for [seed].
   static String svgFor(String seed) {
     final key = seed.isEmpty ? kDefaultAvatarSeed : seed;
-    return _svgCache.putIfAbsent(
-      key,
-      () => multiavatar(key, transparentBackground: true),
-    );
+    final cached = _svgCache.remove(key);
+    if (cached != null) {
+      // Re-insert to mark it most-recently-used.
+      _svgCache[key] = cached;
+      return cached;
+    }
+    final svg = multiavatar(key, transparentBackground: true);
+    _svgCache[key] = svg;
+    if (_svgCache.length > _svgCacheMax) {
+      _svgCache.remove(_svgCache.keys.first);
+    }
+    return svg;
   }
 
   @override
   Widget build(BuildContext context) {
     final c = NavColors.of(context);
+    final accent = accentColor ?? c.activeRoute;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       height: size,
@@ -47,13 +65,13 @@ class AvatarView extends StatelessWidget {
         shape: BoxShape.circle,
         color: background ?? c.surfaceAlt,
         border: Border.all(
-          color: selected ? c.activeRoute : c.border,
+          color: selected ? accent : c.border,
           width: selected ? 3 : 1.5,
         ),
         boxShadow: selected
             ? [
                 BoxShadow(
-                  color: c.activeRoute.withValues(alpha: 0.30),
+                  color: accent.withValues(alpha: 0.30),
                   offset: const Offset(0, 6),
                   blurRadius: 14,
                 ),

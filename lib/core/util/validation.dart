@@ -9,6 +9,12 @@ const int kUsernameMinLength = 3;
 const int kUsernameMaxLength = 24;
 final RegExp kUsernamePattern = RegExp(r'^[a-zA-Z0-9_]+$');
 
+/// The character class for the *input formatter* on username fields. It must be
+/// unanchored: `FilteringTextInputFormatter.allow` keeps only the matched spans,
+/// so feeding it the anchored [kUsernamePattern] would wipe the whole field the
+/// moment a single disallowed character (space, emoji) is typed.
+final RegExp kUsernameInputFormatter = RegExp(r'[A-Za-z0-9_]');
+
 /// Trip / group / stop names: short, free-text labels shown in list rows.
 const int kNameMaxLength = 60;
 
@@ -23,13 +29,23 @@ const int kChatMessageMaxLength = 4000;
 const int kDisplayNameMaxLength = 60;
 const int kSocialHandleMaxLength = 60;
 
+/// Password bounds. Supabase/bcrypt silently truncates at 72 bytes, so cap the
+/// accepted length client-side to keep "what you typed" == "what's checked".
+const int kPasswordMinLength = 8;
+const int kPasswordMaxLength = 72;
+
 /// A trip expense in dollars. Zero/negative are rejected separately; this
 /// just keeps a typo like an extra digit from creating an absurd expense.
 const double kExpenseMaxAmount = 1000000;
 
-/// A phone verification OTP code: digits only, the length Twilio Verify
-/// actually issues (its default is 6, but codes can be 4-10 digits).
-final RegExp kOtpPattern = RegExp(r'^\d{4,10}$');
+/// A phone verification OTP code: exactly the length the Twilio Verify service
+/// is configured for (its default is 6). Keep this in sync with the digit-box
+/// count on the verification screen and the service's setting.
+const int kOtpLength = 6;
+final RegExp kOtpPattern = RegExp('^\\d{$kOtpLength}\$');
+
+/// A phone number in E.164 international format, e.g. +15551234567.
+final RegExp kPhonePattern = RegExp(r'^\+[1-9]\d{6,14}$');
 
 /// A pragmatic email format check — not fully RFC 5322, just enough to catch
 /// obvious typos before a round-trip to Supabase Auth.
@@ -83,6 +99,31 @@ String? emailError(String value) {
   final trimmed = value.trim();
   if (trimmed.isEmpty) return 'Enter your email address';
   if (!kEmailPattern.hasMatch(trimmed)) return 'Enter a valid email address';
+  return null;
+}
+
+/// Validates a phone number in E.164 international format.
+String? phoneError(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) return 'Enter your phone number';
+  if (!kPhonePattern.hasMatch(trimmed)) {
+    return 'Enter your number in international format, e.g. +15551234567';
+  }
+  return null;
+}
+
+/// Validates a new password. [requireDigit] mirrors the sign-up screen's
+/// strength rule; the change-password flow only enforces the length.
+String? passwordError(String value, {bool requireDigit = true}) {
+  if (value.length < kPasswordMinLength) {
+    return 'Password must be at least $kPasswordMinLength characters';
+  }
+  if (value.length > kPasswordMaxLength) {
+    return 'Password must be $kPasswordMaxLength characters or fewer';
+  }
+  if (requireDigit && !RegExp(r'\d').hasMatch(value)) {
+    return 'Password must contain at least one number';
+  }
   return null;
 }
 

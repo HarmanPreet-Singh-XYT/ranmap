@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:forui/forui.dart';
 
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/validation.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_list_row.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/error_retry.dart';
-import '../../data/models/group.dart';
 import 'group_detail_screen.dart';
 import 'social_providers.dart';
 
@@ -39,14 +41,12 @@ class GroupsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final c = NavColors.of(context);
     final groupsAsync = ref.watch(myGroupsProvider);
 
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: const Text('Groups'),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+    return BrandScaffold(
+      header: BrandHeader(
+        title: 'Groups',
+        onBack: () => Navigator.of(context).maybePop(),
       ),
       child: Stack(
         children: [
@@ -54,53 +54,61 @@ class GroupsScreen extends ConsumerWidget {
             data: (groups) {
               if (groups.isEmpty) {
                 return Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Text(
-                      'No groups yet. Create one to start planning trips together.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: c.mutedForeground),
-                    ),
+                  child: BrandEmptyState(
+                    icon: Icons.groups_rounded,
+                    title: 'No groups yet',
+                    message: 'Create one to start planning trips together.',
+                    tint: BrandColors.accentSky,
                   ),
                 );
               }
               return ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+                padding: const EdgeInsets.only(top: BrandSpace.sm, bottom: 96),
                 children: [
-                  FTileGroup(
-                    children: [
-                      for (final Group group in groups)
-                        FTile(
-                          prefix: Container(
-                            height: 40,
-                            width: 40,
-                            decoration: BoxDecoration(color: c.surfaceAlt, shape: BoxShape.circle),
-                            child: Icon(Icons.groups_rounded, color: c.activeRoute, size: 20),
+                  BrandCard(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: BrandSpace.md,
+                      vertical: BrandSpace.xs,
+                    ),
+                    child: Column(
+                      children: [
+                        for (final (i, group) in groups.indexed) ...[
+                          if (i > 0) const BrandRowDivider(),
+                          BrandListRow(
+                            icon: Icons.groups_rounded,
+                            iconBackground: BrandColors.accentSky.withValues(
+                              alpha: 0.35,
+                            ),
+                            iconColor: BrandColors.primary,
+                            title: group.name,
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => GroupDetailScreen(group: group),
+                              ),
+                            ),
                           ),
-                          title: Text(
-                            group.name,
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          suffix: Icon(Icons.chevron_right_rounded, color: c.mutedForeground),
-                          onPress: () => Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => GroupDetailScreen(group: group)),
-                          ),
-                        ),
-                    ],
+                        ],
+                      ],
+                    ),
                   ),
                 ],
               );
             },
-            loading: () => const Center(child: FCircularProgress()),
-            error: (e, _) => ErrorRetry(error: e, onRetry: () => ref.invalidate(myGroupsProvider)),
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => ErrorRetry(
+              error: e,
+              onRetry: () => ref.invalidate(myGroupsProvider),
+            ),
           ),
           Positioned(
-            right: 16,
-            bottom: 16,
-            child: FButton(
-              onPress: () => _createGroup(context, ref),
-              prefix: const Icon(Icons.add),
-              child: const Text('New group'),
+            right: BrandSpace.md,
+            bottom: BrandSpace.md,
+            child: BrandPrimaryButton(
+              label: 'New group',
+              leadingIcon: Icons.add_rounded,
+              trailingIcon: null,
+              expand: false,
+              onPressed: () => _createGroup(context, ref),
             ),
           ),
         ],

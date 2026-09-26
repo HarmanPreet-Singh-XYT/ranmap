@@ -20,7 +20,11 @@ abstract final class MapMarkers {
 
   /// A teardrop pin with a glyph, anchored at the *bottom* tip (use
   /// [IconAnchor.BOTTOM] on the annotation).
-  static Future<Uint8List> pin(Color color, IconData icon, {double devicePixelRatio = 3}) {
+  static Future<Uint8List> pin(
+    Color color,
+    IconData icon, {
+    double devicePixelRatio = 3,
+  }) {
     return _cached(
       'pin-${color.toARGB32()}-${icon.codePoint}-$devicePixelRatio',
       () => _renderPin(color, icon, devicePixelRatio),
@@ -28,7 +32,11 @@ abstract final class MapMarkers {
   }
 
   /// A circular colored badge with a glyph, anchored at its center.
-  static Future<Uint8List> badge(Color color, IconData icon, {double devicePixelRatio = 3}) {
+  static Future<Uint8List> badge(
+    Color color,
+    IconData icon, {
+    double devicePixelRatio = 3,
+  }) {
     return _cached(
       'badge-${color.toARGB32()}-${icon.codePoint}-$devicePixelRatio',
       () => _renderBadge(color, icon, devicePixelRatio),
@@ -37,7 +45,10 @@ abstract final class MapMarkers {
 
   /// Caches a render, but evicts the entry if it fails so a transient render
   /// error isn't cached as a permanent failure for that pin.
-  static Future<Uint8List> _cached(String key, Future<Uint8List> Function() render) {
+  static Future<Uint8List> _cached(
+    String key,
+    Future<Uint8List> Function() render,
+  ) {
     final existing = _cache[key];
     if (existing != null) return existing;
     final future = render();
@@ -48,7 +59,11 @@ abstract final class MapMarkers {
     });
   }
 
-  static Future<Uint8List> _renderPin(Color color, IconData icon, double dpr) async {
+  static Future<Uint8List> _renderPin(
+    Color color,
+    IconData icon,
+    double dpr,
+  ) async {
     final width = _pinWidth * dpr;
     final height = _pinHeight * dpr;
     final recorder = ui.PictureRecorder();
@@ -57,7 +72,8 @@ abstract final class MapMarkers {
     final radius = width * 0.36;
     final center = Offset(width / 2, radius + width * 0.04);
 
-    final circle = Path()..addOval(Rect.fromCircle(center: center, radius: radius));
+    final circle = Path()
+      ..addOval(Rect.fromCircle(center: center, radius: radius));
     final tail = Path()
       ..moveTo(center.dx - radius * 0.55, center.dy + radius * 0.72)
       ..lineTo(width / 2, height - dpr * 1.5)
@@ -80,7 +96,11 @@ abstract final class MapMarkers {
     return _encode(recorder, width, height);
   }
 
-  static Future<Uint8List> _renderBadge(Color color, IconData icon, double dpr) async {
+  static Future<Uint8List> _renderBadge(
+    Color color,
+    IconData icon,
+    double dpr,
+  ) async {
     final size = _badgeSize * dpr;
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, size, size));
@@ -102,7 +122,13 @@ abstract final class MapMarkers {
     return _encode(recorder, size, size);
   }
 
-  static void _paintGlyph(Canvas canvas, IconData icon, Offset center, double fontSize, Color color) {
+  static void _paintGlyph(
+    Canvas canvas,
+    IconData icon,
+    Offset center,
+    double fontSize,
+    Color color,
+  ) {
     final painter = TextPainter(textDirection: TextDirection.ltr)
       ..text = TextSpan(
         text: String.fromCharCode(icon.codePoint),
@@ -114,17 +140,27 @@ abstract final class MapMarkers {
         ),
       )
       ..layout();
-    painter.paint(canvas, Offset(center.dx - painter.width / 2, center.dy - painter.height / 2));
+    painter.paint(
+      canvas,
+      Offset(center.dx - painter.width / 2, center.dy - painter.height / 2),
+    );
     painter.dispose();
   }
 
-  static Future<Uint8List> _encode(ui.PictureRecorder recorder, double width, double height) async {
-    final image = await recorder
-        .endRecording()
-        .toImage(width.round(), height.round());
+  static Future<Uint8List> _encode(
+    ui.PictureRecorder recorder,
+    double width,
+    double height,
+  ) async {
+    final image = await recorder.endRecording().toImage(
+      width.round(),
+      height.round(),
+    );
     try {
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (bytes == null) throw StateError('Marker image encoding returned no bytes');
+      if (bytes == null) {
+        throw StateError('Marker image encoding returned no bytes');
+      }
       return bytes.buffer.asUint8List();
     } finally {
       image.dispose();

@@ -4,4 +4,8 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Debug-only cleartext exception so the app can reach the local
+         ranmap-server over HTTP during development (LAN IP / adb reverse).
+         Release builds use the main manifest, which has no such exception. -->
+    <application android:networkSecurityConfig="@xml/network_security_config" />
 </manifest>

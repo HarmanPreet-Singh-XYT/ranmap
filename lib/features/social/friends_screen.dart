@@ -1,11 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_list_row.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_text_field.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/profile.dart';
 import '../../data/services/supabase_service.dart';
@@ -16,11 +23,10 @@ class FriendsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: const Text('Friends'),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+    return BrandScaffold(
+      header: BrandHeader(
+        title: 'Friends',
+        onBack: () => Navigator.of(context).maybePop(),
       ),
       child: FTabs(
         expands: true,
@@ -39,69 +45,77 @@ class _FriendsTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final c = NavColors.of(context);
     final friendsAsync = ref.watch(friendsProvider);
 
     return friendsAsync.when(
       data: (rows) {
         if (rows.isEmpty) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Text(
-                'No friends yet. Find people in the next tab.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: c.mutedForeground),
-              ),
+          return const Center(
+            child: BrandEmptyState(
+              icon: Icons.person_add_alt_1_rounded,
+              title: 'No friends yet',
+              message: 'Find people in the next tab.',
             ),
           );
         }
 
-        Widget avatar() => Container(
-              height: 40,
-              width: 40,
-              decoration: BoxDecoration(color: c.surfaceAlt, shape: BoxShape.circle),
-              child: Icon(Icons.person, color: c.activeRoute, size: 20),
-            );
-
-        FTile friendTile(Map<String, dynamic> row) {
+        Widget friendRow(Map<String, dynamic> row) {
           final other = _otherProfile(row);
-          return FTile(
-            prefix: avatar(),
-            title: Text('@${other?['username'] ?? 'unknown'}'),
-            suffix: FButton.icon(
-              variant: .ghost,
-              size: .sm,
-              onPress: () async {
+          return BrandListRow(
+            icon: Icons.person_rounded,
+            title: '@${other?['username'] ?? 'unknown'}',
+            showChevron: false,
+            trailing: BrandFieldAction(
+              icon: Icons.person_remove_outlined,
+              color: BrandColors.error,
+              onTap: () async {
                 final confirmed = await showAppConfirmDialog(
                   context,
                   title: 'Remove friend?',
-                  message: 'Remove @${other?['username'] ?? 'this user'} from your friends?',
+                  message:
+                      'Remove @${other?['username'] ?? 'this user'} from your friends?',
                   confirmLabel: 'Remove',
                   destructive: true,
                 );
                 if (!confirmed) return;
                 try {
-                  await ref.read(friendRepositoryProvider).remove(row['id'] as String);
+                  await ref
+                      .read(friendRepositoryProvider)
+                      .remove(row['id'] as String);
                   ref.invalidate(friendsProvider);
                 } catch (e) {
-                  if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+                  if (context.mounted) {
+                    showAppToast(context, friendlyError(e), error: true);
+                  }
                 }
               },
-              child: Icon(Icons.person_remove_outlined, color: c.destructive),
             ),
           );
         }
 
         return ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
           children: [
-            FTileGroup(children: [for (final row in rows) friendTile(row)]),
+            BrandCard(
+              padding: const EdgeInsets.symmetric(
+                horizontal: BrandSpace.md,
+                vertical: BrandSpace.xs,
+              ),
+              child: Column(
+                children: [
+                  for (final (i, row) in rows.indexed) ...[
+                    if (i > 0) const BrandRowDivider(),
+                    friendRow(row),
+                  ],
+                ],
+              ),
+            ),
           ],
         );
       },
-      loading: () => const Center(child: FCircularProgress()),
-      error: (e, _) => ErrorRetry(error: e, onRetry: () => ref.invalidate(friendsProvider)),
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) =>
+          ErrorRetry(error: e, onRetry: () => ref.invalidate(friendsProvider)),
     );
   }
 
@@ -119,105 +133,161 @@ class _RequestsTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final c = NavColors.of(context);
     final incomingAsync = ref.watch(incomingRequestsProvider);
     final outgoingAsync = ref.watch(outgoingRequestsProvider);
 
-    Widget avatar() => Container(
-          height: 40,
-          width: 40,
-          decoration: BoxDecoration(color: c.surfaceAlt, shape: BoxShape.circle),
-          child: Icon(Icons.person, color: c.activeRoute, size: 20),
-        );
-
-    FTile incomingTile(Map<String, dynamic> row) {
+    Widget incomingCard(Map<String, dynamic> row) {
       final requester = row['requester'] as Map<String, dynamic>?;
-      return FTile(
-        prefix: avatar(),
-        title: Text('@${requester?['username'] ?? 'unknown'}'),
-        suffix: Row(
-          mainAxisSize: MainAxisSize.min,
+      return BrandCard(
+        padding: const EdgeInsets.all(BrandSpace.md),
+        child: Column(
           children: [
-            FButton(
-              size: .sm,
-              onPress: () async {
-                try {
-                  await ref
-                      .read(friendRepositoryProvider)
-                      .respond(friendshipId: row['id'] as String, accept: true);
-                  ref.invalidate(incomingRequestsProvider);
-                  ref.invalidate(friendsProvider);
-                } catch (e) {
-                  if (context.mounted) showAppToast(context, friendlyError(e), error: true);
-                }
-              },
-              child: const Text('Accept'),
+            BrandListRow(
+              icon: Icons.person_rounded,
+              title: '@${requester?['username'] ?? 'unknown'}',
+              showChevron: false,
             ),
-            const SizedBox(width: 8),
-            FButton(
-              variant: .outline,
-              size: .sm,
-              onPress: () async {
-                try {
-                  await ref
-                      .read(friendRepositoryProvider)
-                      .respond(friendshipId: row['id'] as String, accept: false);
-                  ref.invalidate(incomingRequestsProvider);
-                } catch (e) {
-                  if (context.mounted) showAppToast(context, friendlyError(e), error: true);
-                }
-              },
-              child: const Text('Decline'),
+            const SizedBox(height: BrandSpace.xs),
+            Row(
+              children: [
+                Expanded(
+                  child: BrandPrimaryButton(
+                    label: 'Accept',
+                    trailingIcon: null,
+                    glow: false,
+                    onPressed: () async {
+                      try {
+                        await ref
+                            .read(friendRepositoryProvider)
+                            .respond(
+                              friendshipId: row['id'] as String,
+                              accept: true,
+                            );
+                        ref.invalidate(incomingRequestsProvider);
+                        ref.invalidate(friendsProvider);
+                      } catch (e) {
+                        if (context.mounted) {
+                          showAppToast(context, friendlyError(e), error: true);
+                        }
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: BrandSpace.sm),
+                Expanded(
+                  child: BrandSecondaryButton(
+                    label: 'Decline',
+                    onPressed: () async {
+                      try {
+                        await ref
+                            .read(friendRepositoryProvider)
+                            .respond(
+                              friendshipId: row['id'] as String,
+                              accept: false,
+                            );
+                        ref.invalidate(incomingRequestsProvider);
+                      } catch (e) {
+                        if (context.mounted) {
+                          showAppToast(context, friendlyError(e), error: true);
+                        }
+                      }
+                    },
+                  ),
+                ),
+              ],
             ),
           ],
         ),
       );
     }
 
-    FTile outgoingTile(Map<String, dynamic> row) {
+    Widget outgoingRow(Map<String, dynamic> row) {
       final addressee = row['addressee'] as Map<String, dynamic>?;
-      return FTile(
-        prefix: avatar(),
-        title: Text('@${addressee?['username'] ?? 'unknown'}'),
-        suffix: FButton(
-          variant: .ghost,
-          size: .sm,
-          onPress: () async {
+      return BrandListRow(
+        icon: Icons.person_rounded,
+        title: '@${addressee?['username'] ?? 'unknown'}',
+        showChevron: false,
+        trailing: BrandSecondaryButton(
+          label: 'Cancel',
+          expand: false,
+          onPressed: () async {
             try {
-              await ref.read(friendRepositoryProvider).remove(row['id'] as String);
+              await ref
+                  .read(friendRepositoryProvider)
+                  .remove(row['id'] as String);
               ref.invalidate(outgoingRequestsProvider);
             } catch (e) {
-              if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+              if (context.mounted) {
+                showAppToast(context, friendlyError(e), error: true);
+              }
             }
           },
-          child: const Text('Cancel'),
         ),
       );
     }
 
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
       children: [
-        Text('Incoming', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.foreground)),
-        const SizedBox(height: 10),
+        const BrandSectionHeader(
+          icon: Icons.mark_email_unread_rounded,
+          title: 'Incoming',
+        ),
+        const SizedBox(height: BrandSpace.sm),
         incomingAsync.when(
           data: (rows) {
-            if (rows.isEmpty) return Text('No pending requests.', style: TextStyle(color: c.mutedForeground));
-            return FTileGroup(children: [for (final row in rows) incomingTile(row)]);
+            if (rows.isEmpty) {
+              return const BrandEmptyState(
+                icon: Icons.inbox_rounded,
+                title: 'No pending requests',
+              );
+            }
+            return Column(
+              children: [
+                for (final (i, row) in rows.indexed) ...[
+                  if (i > 0) const SizedBox(height: BrandSpace.sm),
+                  incomingCard(row),
+                ],
+              ],
+            );
           },
-          loading: () => const Center(child: FCircularProgress()),
-          error: (e, _) => ErrorRetry(error: e, onRetry: () => ref.invalidate(incomingRequestsProvider)),
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => ErrorRetry(
+            error: e,
+            onRetry: () => ref.invalidate(incomingRequestsProvider),
+          ),
         ),
-        const SizedBox(height: 24),
-        Text('Sent', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.foreground)),
-        const SizedBox(height: 10),
+        const SizedBox(height: BrandSpace.lg),
+        const BrandSectionHeader(icon: Icons.outbox_rounded, title: 'Sent'),
+        const SizedBox(height: BrandSpace.sm),
         outgoingAsync.when(
           data: (rows) {
-            if (rows.isEmpty) return Text('No outgoing requests.', style: TextStyle(color: c.mutedForeground));
-            return FTileGroup(children: [for (final row in rows) outgoingTile(row)]);
+            if (rows.isEmpty) {
+              return const BrandEmptyState(
+                icon: Icons.outbox_rounded,
+                title: 'No outgoing requests',
+              );
+            }
+            return BrandCard(
+              padding: const EdgeInsets.symmetric(
+                horizontal: BrandSpace.md,
+                vertical: BrandSpace.xs,
+              ),
+              child: Column(
+                children: [
+                  for (final (i, row) in rows.indexed) ...[
+                    if (i > 0) const BrandRowDivider(),
+                    outgoingRow(row),
+                  ],
+                ],
+              ),
+            );
           },
-          loading: () => const Center(child: FCircularProgress()),
-          error: (e, _) => ErrorRetry(error: e, onRetry: () => ref.invalidate(outgoingRequestsProvider)),
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => ErrorRetry(
+            error: e,
+            onRetry: () => ref.invalidate(outgoingRequestsProvider),
+          ),
         ),
       ],
     );
@@ -233,44 +303,63 @@ class _FindPeopleTab extends ConsumerStatefulWidget {
 
 class _FindPeopleTabState extends ConsumerState<_FindPeopleTab> {
   final _controller = TextEditingController();
+  Timer? _debounce;
   String _query = '';
   final Set<String> _requested = {};
+  final Set<String> _submitting = {};
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
     super.dispose();
   }
 
+  /// Debounce the search so each keystroke doesn't fire its own request (the
+  /// query is the provider's family key, so every character would otherwise
+  /// create a new provider instance and round-trip).
+  void _onQueryChanged(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      if (mounted && value != _query) setState(() => _query = value);
+    });
+  }
+
+  Future<void> _add(Profile profile) async {
+    if (_submitting.contains(profile.id)) return;
+    setState(() => _submitting.add(profile.id));
+    try {
+      await ref.read(friendRepositoryProvider).sendRequest(profile.id);
+      if (!mounted) return;
+      setState(() => _requested.add(profile.id));
+      ref.invalidate(outgoingRequestsProvider);
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _submitting.remove(profile.id));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
     final resultsAsync = ref.watch(usernameSearchProvider(_query));
 
-    FTile resultTile(Profile profile) {
+    Widget resultRow(Profile profile) {
       final alreadyRequested = _requested.contains(profile.id);
-      return FTile(
-        prefix: Container(
-          height: 40,
-          width: 40,
-          decoration: BoxDecoration(color: c.surfaceAlt, shape: BoxShape.circle),
-          child: Icon(Icons.person, color: c.activeRoute, size: 20),
-        ),
-        title: Text('@${profile.username}'),
-        suffix: alreadyRequested
-            ? Text('Requested', style: TextStyle(color: c.mutedForeground))
-            : FButton(
-                size: .sm,
-                onPress: () async {
-                  try {
-                    await ref.read(friendRepositoryProvider).sendRequest(profile.id);
-                    setState(() => _requested.add(profile.id));
-                    ref.invalidate(outgoingRequestsProvider);
-                  } catch (e) {
-                    if (context.mounted) showAppToast(context, friendlyError(e), error: true);
-                  }
-                },
-                child: const Text('Add'),
+      final busy = _submitting.contains(profile.id);
+      return BrandListRow(
+        icon: Icons.person_rounded,
+        title: '@${profile.username}',
+        showChevron: false,
+        trailing: alreadyRequested
+            ? const BrandPill(label: 'Requested')
+            : BrandPrimaryButton(
+                label: 'Add',
+                expand: false,
+                trailingIcon: null,
+                glow: false,
+                loading: busy,
+                onPressed: busy ? null : () => _add(profile),
               ),
       );
     }
@@ -278,39 +367,59 @@ class _FindPeopleTabState extends ConsumerState<_FindPeopleTab> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(16),
-          child: FTextField(
-            control: FTextFieldControl.managed(
-              controller: _controller,
-              onChange: (value) => setState(() => _query = value.text),
-            ),
-            label: const Text('Search by username'),
+          padding: const EdgeInsets.symmetric(vertical: BrandSpace.md),
+          child: BrandTextField(
+            controller: _controller,
+            hint: 'Search by username',
+            leadingIcon: Icons.search_rounded,
+            onChanged: _onQueryChanged,
           ),
         ),
         Expanded(
           child: resultsAsync.when(
             data: (results) {
               if (_query.trim().length < 2) {
-                return Center(
-                  child: Text(
-                    'Type at least 2 characters to search.',
-                    style: TextStyle(color: c.mutedForeground),
+                return const Center(
+                  child: BrandEmptyState(
+                    icon: Icons.person_search_rounded,
+                    title: 'Find your crew',
+                    message: 'Type at least 2 characters to search.',
                   ),
                 );
               }
               if (results.isEmpty) {
-                return Center(child: Text('No matches.', style: TextStyle(color: c.mutedForeground)));
+                return const Center(
+                  child: BrandEmptyState(
+                    icon: Icons.search_off_rounded,
+                    title: 'No matches',
+                  ),
+                );
               }
               return ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.only(bottom: BrandSpace.lg),
                 children: [
-                  FTileGroup(children: [for (final profile in results) resultTile(profile)]),
+                  BrandCard(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: BrandSpace.md,
+                      vertical: BrandSpace.xs,
+                    ),
+                    child: Column(
+                      children: [
+                        for (final (i, profile) in results.indexed) ...[
+                          if (i > 0) const BrandRowDivider(),
+                          resultRow(profile),
+                        ],
+                      ],
+                    ),
+                  ),
                 ],
               );
             },
-            loading: () => const Center(child: FCircularProgress()),
-            error: (e, _) =>
-                ErrorRetry(error: e, onRetry: () => ref.invalidate(usernameSearchProvider(_query))),
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => ErrorRetry(
+              error: e,
+              onRetry: () => ref.invalidate(usernameSearchProvider(_query)),
+            ),
           ),
         ),
       ],

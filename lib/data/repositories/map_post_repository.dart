@@ -1,6 +1,9 @@
 import 'dart:typed_data';
 
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../../core/constants/defaults.dart';
+import '../../core/util/image_upload.dart';
 import '../models/map_post.dart';
 import '../services/supabase_service.dart';
 
@@ -21,27 +24,45 @@ class MapPostRepository {
     String visibility = kDefaultMapPostVisibility,
   }) async {
     final uid = SupabaseService.currentUserId;
+    final extension = fileExtension.toLowerCase();
+    final validationError = imageUploadError(
+      byteLength: imageBytes.length,
+      extension: extension,
+    );
+    if (validationError != null) throw ImageUploadException(validationError);
+
     final storagePath =
-        '$uid/${DateTime.now().microsecondsSinceEpoch}.$fileExtension';
+        '$uid/${DateTime.now().microsecondsSinceEpoch}.$extension';
 
-    await _client.storage.from('map-media').uploadBinary(storagePath, imageBytes);
+    await _client.storage.from('map-media').uploadBinary(
+          storagePath,
+          imageBytes,
+          fileOptions: FileOptions(contentType: imageContentType(extension)),
+        );
 
-    final row = await _client
-        .from('map_posts')
-        .insert({
-          'trip_id': tripId,
-          'user_id': uid,
-          'point': {
-            'type': 'Point',
-            'coordinates': [lng, lat],
-          },
-          'storage_path': storagePath,
-          'caption': caption,
-          'visibility': visibility,
-        })
-        .select('*, profiles(username)')
-        .single();
-    return MapPost.fromJson(row);
+    try {
+      final row = await _client
+          .from('map_posts')
+          .insert({
+            'trip_id': tripId,
+            'user_id': uid,
+            'point': {
+              'type': 'Point',
+              'coordinates': [lng, lat],
+            },
+            'storage_path': storagePath,
+            'caption': caption,
+            'visibility': visibility,
+          })
+          .select('*, profiles(username)')
+          .single();
+      return MapPost.fromJson(row);
+    } catch (e) {
+      // Don't orphan the uploaded object when the row is rejected (the free
+      // photo cap trigger, an RLS denial, …).
+      await _client.storage.from('map-media').remove([storagePath]);
+      rethrow;
+    }
   }
 
   /// Posts visible to the current user for a trip (RLS already restricts
@@ -76,7 +97,24 @@ class MapPostRepository {
     });
   }
 
+  /// Deletes the post and its backing storage object, so the private bucket
+  /// doesn't accumulate files nothing references.
   Future<void> deletePost(String postId) async {
-    await _client.from('map_posts').delete().eq('id', postId);
+    final removed = await _client
+        .from('map_posts')
+        .delete()
+        .eq('id', postId)
+        .select('storage_path');
+    final paths = (removed as List)
+        .map((row) => (row as Map<String, dynamic>)['storage_path'])
+        .whereType<String>()
+        .toList();
+    if (paths.isNotEmpty) {
+      try {
+        await _client.storage.from('map-media').remove(paths);
+      } catch (_) {
+        // The row is gone either way; a leftover file is best-effort cleanup.
+      }
+    }
   }
 }

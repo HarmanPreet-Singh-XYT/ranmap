@@ -4,13 +4,18 @@ import 'package:forui/forui.dart';
 
 import 'package:intl/intl.dart';
 
-import '../../core/theme/nav_palette.dart';
 import '../../core/providers/settings_provider.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/geo_distance.dart';
 import '../../core/util/units.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_list_row.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/trip.dart';
 import '../../data/models/trip_expense.dart';
@@ -90,40 +95,45 @@ class TripDetailScreen extends ConsumerWidget {
     required String body,
     required String confirmLabel,
     bool destructive = false,
-  }) =>
-      showAppConfirmDialog(
-        context,
-        title: title,
-        message: body,
-        confirmLabel: confirmLabel,
-        destructive: destructive,
-      );
+  }) => showAppConfirmDialog(
+    context,
+    title: title,
+    message: body,
+    confirmLabel: confirmLabel,
+    destructive: destructive,
+  );
 
-  Future<void> _showActions(BuildContext context, WidgetRef ref, bool isCreator) async {
+  Future<void> _showActions(
+    BuildContext context,
+    WidgetRef ref,
+    bool isCreator,
+  ) async {
     await showFSheet<void>(
       context: context,
       side: FLayout.btt,
-      builder: (sheetContext) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          FTileGroup(
-            children: [
-              FTile(
-                variant: .destructive,
-                prefix: Icon(isCreator ? Icons.delete_outline : Icons.logout),
-                title: Text(isCreator ? 'Delete trip' : 'Leave trip'),
-                onPress: () {
-                  Navigator.of(sheetContext).pop();
-                  if (isCreator) {
-                    _cancelTrip(context, ref);
-                  } else {
-                    _leaveTrip(context, ref);
-                  }
-                },
-              ),
-            ],
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.all(BrandSpace.md),
+        child: BrandCard(
+          padding: const EdgeInsets.symmetric(
+            horizontal: BrandSpace.md,
+            vertical: BrandSpace.xs,
           ),
-        ],
+          child: BrandListRow(
+            icon: isCreator ? Icons.delete_outline : Icons.logout,
+            titleColor: BrandColors.error,
+            iconColor: BrandColors.error,
+            iconBackground: BrandColors.errorContainer,
+            title: isCreator ? 'Delete trip' : 'Leave trip',
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              if (isCreator) {
+                _cancelTrip(context, ref);
+              } else {
+                _leaveTrip(context, ref);
+              }
+            },
+          ),
+        ),
       ),
     );
   }
@@ -132,42 +142,96 @@ class TripDetailScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isCreator = SupabaseService.currentUser?.id == trip.createdBy;
 
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: Text(trip.title),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
-        suffixes: [
-          FHeaderAction(
-            icon: const Icon(Icons.photo_library_outlined),
-            onPress: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => TripPhotosScreen(tripId: trip.id, tripTitle: trip.title),
+    return BrandScaffold(
+      header: BrandHeader(
+        title: trip.title,
+        onBack: () => Navigator.of(context).maybePop(),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: BrandSpace.sm),
+          Row(
+            children: [
+              _HeaderIconButton(
+                icon: Icons.photo_library_outlined,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => TripPhotosScreen(
+                      tripId: trip.id,
+                      tripTitle: trip.title,
+                    ),
+                  ),
+                ),
               ),
-            ),
+              const Spacer(),
+              if (trip.status == TripStatus.active) ...[
+                BrandPrimaryButton(
+                  label: 'Complete',
+                  trailingIcon: null,
+                  glow: false,
+                  expand: false,
+                  onPressed: () => _completeTrip(context, ref),
+                ),
+                const SizedBox(width: BrandSpace.sm),
+              ],
+              _HeaderIconButton(
+                icon: Icons.more_vert,
+                onTap: () => _showActions(context, ref, isCreator),
+              ),
+            ],
           ),
-          if (trip.status == TripStatus.active)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: FButton(
-                size: .sm,
-                onPress: () => _completeTrip(context, ref),
-                child: const Text('Complete'),
-              ),
+          const SizedBox(height: BrandSpace.sm),
+          Expanded(
+            child: FTabs(
+              expands: true,
+              children: [
+                FTabEntry(
+                  label: const Text('Stats'),
+                  child: _StatsTab(
+                    tripId: trip.id,
+                    routePolyline: trip.routePolyline,
+                  ),
+                ),
+                FTabEntry(
+                  label: const Text('Stops'),
+                  child: _StopsTab(tripId: trip.id),
+                ),
+                FTabEntry(
+                  label: const Text('Expenses'),
+                  child: _ExpensesTab(tripId: trip.id),
+                ),
+              ],
             ),
-          FHeaderAction(
-            icon: const Icon(Icons.more_vert),
-            onPress: () => _showActions(context, ref, isCreator),
           ),
         ],
       ),
-      child: FTabs(
-        expands: true,
-        children: [
-          FTabEntry(label: const Text('Stats'), child: _StatsTab(tripId: trip.id, routePolyline: trip.routePolyline)),
-          FTabEntry(label: const Text('Stops'), child: _StopsTab(tripId: trip.id)),
-          FTabEntry(label: const Text('Expenses'), child: _ExpensesTab(tripId: trip.id)),
-        ],
+    );
+  }
+}
+
+/// A circular header action used for the trip-level affordances that used to
+/// live in the ForUI header's suffix slot.
+class _HeaderIconButton extends StatelessWidget {
+  const _HeaderIconButton({required this.icon, required this.onTap});
+
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        height: 44,
+        width: 44,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: BrandColors.surfaceContainerLow,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, size: 20, color: BrandColors.textHeadline),
       ),
     );
   }
@@ -181,7 +245,6 @@ class _StatsTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final c = NavColors.of(context);
     final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
     final statsAsync = ref.watch(tripStatsProvider(tripId));
     final expensesAsync = ref.watch(tripExpensesProvider(tripId));
@@ -207,54 +270,77 @@ class _StatsTab extends ConsumerWidget {
               : _projectedFuelCost(fuelCostPerKm, routePolyline);
 
           return ListView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.only(
+              top: BrandSpace.md,
+              bottom: BrandSpace.xl,
+            ),
             physics: const AlwaysScrollableScrollPhysics(),
             children: [
               GridView.count(
                 crossAxisCount: 2,
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
+                mainAxisSpacing: BrandSpace.gutterSm,
+                crossAxisSpacing: BrandSpace.gutterSm,
                 childAspectRatio: 1.5,
                 children: [
-                  _StatTile(label: 'Distance', value: formatDistance(s.totalDistanceKm, unit)),
-                  _StatTile(label: 'Max speed', value: formatSpeed(s.maxSpeedKmh, unit)),
-                  _StatTile(label: 'Avg speed', value: formatSpeed(s.avgSpeedKmh, unit)),
-                  _StatTile(label: 'Duration', value: _formatDuration(s.durationSeconds)),
+                  _StatTile(
+                    label: 'Distance',
+                    value: formatDistance(s.totalDistanceKm, unit),
+                  ),
+                  _StatTile(
+                    label: 'Max speed',
+                    value: formatSpeed(s.maxSpeedKmh, unit),
+                  ),
+                  _StatTile(
+                    label: 'Avg speed',
+                    value: formatSpeed(s.avgSpeedKmh, unit),
+                  ),
+                  _StatTile(
+                    label: 'Duration',
+                    value: _formatDuration(s.durationSeconds),
+                  ),
                 ],
               ),
               if (fuelAvg != null) ...[
-                const SizedBox(height: 12),
-                _StatTile(label: 'Avg fuel cost', value: '\$${fuelAvg.toStringAsFixed(2)}', wide: true),
+                const SizedBox(height: BrandSpace.gutterSm),
+                _StatTile(
+                  label: 'Avg fuel cost',
+                  value: '\$${fuelAvg.toStringAsFixed(2)}',
+                  wide: true,
+                ),
               ],
               if (fuelCostPerKm != null) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: BrandSpace.gutterSm),
                 _StatTile(
                   label: 'Fuel cost / ${distanceUnitSymbol(unit)}',
-                  value: '\$${costPerDistance(fuelCostPerKm, unit).toStringAsFixed(2)}',
+                  value:
+                      '\$${costPerDistance(fuelCostPerKm, unit).toStringAsFixed(2)}',
                   wide: true,
                 ),
               ],
               if (projectedFuel != null) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: BrandSpace.gutterSm),
                 _StatTile(
                   label: 'Est. fuel for route',
                   value: '\$${projectedFuel.toStringAsFixed(2)}',
                   wide: true,
                 ),
               ],
-              const SizedBox(height: 16),
+              const SizedBox(height: BrandSpace.md),
               Text(
                 'Stats update automatically while the trip is active, or pull to refresh.',
-                style: TextStyle(color: c.mutedForeground),
+                style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
                 textAlign: TextAlign.center,
               ),
             ],
           );
         },
-        loading: () => const Center(child: FCircularProgress()),
-        error: (e, _) => ErrorRetry(error: e, onRetry: () => ref.invalidate(tripStatsProvider(tripId))),
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => ErrorRetry(
+          error: e,
+          onRetry: () => ref.invalidate(tripStatsProvider(tripId)),
+        ),
       ),
     );
   }
@@ -306,7 +392,11 @@ class _StatsTab extends ConsumerWidget {
 }
 
 class _StatTile extends StatelessWidget {
-  const _StatTile({required this.label, required this.value, this.wide = false});
+  const _StatTile({
+    required this.label,
+    required this.value,
+    this.wide = false,
+  });
 
   final String label;
   final String value;
@@ -314,27 +404,26 @@ class _StatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: c.border),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(label, style: TextStyle(color: c.mutedForeground, fontSize: 13)),
-            const SizedBox(height: 4),
-            Text(
-              value,
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: c.foreground),
-            ),
-          ],
-        ),
+    return BrandCard(
+      radius: BrandRadii.cardRadius,
+      padding: const EdgeInsets.all(BrandSpace.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            label,
+            style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
+          ),
+          const SizedBox(height: BrandSpace.xs),
+          Text(
+            value,
+            style: BrandText.weight(
+              BrandText.headlineMd,
+              800,
+            ).copyWith(color: BrandColors.textHeadline),
+          ),
+        ],
       ),
     );
   }
@@ -354,7 +443,11 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
   /// so the list doesn't snap back before the server round-trip completes.
   List<TripStop>? _optimisticOrder;
 
-  Future<void> _onReorder(List<TripStop> stops, int oldIndex, int newIndex) async {
+  Future<void> _onReorder(
+    List<TripStop> stops,
+    int oldIndex,
+    int newIndex,
+  ) async {
     final reordered = List<TripStop>.of(stops);
     final moved = reordered.removeAt(oldIndex);
     reordered.insert(newIndex, moved);
@@ -362,7 +455,9 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
     setState(() => _optimisticOrder = reordered);
 
     try {
-      await ref.read(tripRepositoryProvider).reorderStops(
+      await ref
+          .read(tripRepositoryProvider)
+          .reorderStops(
             tripId: widget.tripId,
             orderedStopIds: reordered.map((s) => s.id).toList(),
           );
@@ -376,86 +471,94 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
     final stopsAsync = ref.watch(tripStopsProvider(widget.tripId));
 
     return Stack(
       children: [
         stopsAsync.when(
-        data: (fetched) {
-          if (fetched.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Text(
-                  'No stops planned yet.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: c.mutedForeground),
+          data: (fetched) {
+            if (fetched.isEmpty) {
+              return const Center(
+                child: BrandEmptyState(
+                  icon: Icons.place_outlined,
+                  title: 'No stops planned yet.',
                 ),
-              ),
-            );
-          }
-          final stops = _optimisticOrder ?? fetched;
-          TripStop? nextStop;
-          for (final s in stops) {
-            if (s.actualArrival == null) {
-              nextStop = s;
-              break;
+              );
             }
-          }
-          return Column(
-            children: [
-              if (nextStop != null)
-                _NextStopEta(tripId: widget.tripId, stop: nextStop),
-              Expanded(
-                child: ReorderableListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: stops.length,
-                  onReorderItem: (oldIndex, newIndex) => _onReorder(stops, oldIndex, newIndex),
-                  itemBuilder: (context, i) {
-                    final stop = stops[i];
-                    return Padding(
-                      key: ValueKey(stop.id),
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Dismissible(
-                        key: ValueKey('dismiss-${stop.id}'),
-                        direction: DismissDirection.endToStart,
-                        confirmDismiss: (_) => _confirmDeleteDialog(context, 'Delete stop?'),
-                        onDismissed: (_) async {
-                          try {
-                            await ref.read(tripRepositoryProvider).deleteStop(stop.id);
-                            ref.invalidate(tripStopsProvider(widget.tripId));
-                          } catch (_) {
-                            ref.invalidate(tripStopsProvider(widget.tripId));
-                          }
-                        },
-                        background: _dismissBackground(c),
-                        child: _StopCard(stop: stop),
-                      ),
-                    );
-                  },
+            final stops = _optimisticOrder ?? fetched;
+            TripStop? nextStop;
+            for (final s in stops) {
+              if (s.actualArrival == null) {
+                nextStop = s;
+                break;
+              }
+            }
+            return Column(
+              children: [
+                if (nextStop != null)
+                  _NextStopEta(tripId: widget.tripId, stop: nextStop),
+                Expanded(
+                  child: ReorderableListView.builder(
+                    padding: const EdgeInsets.only(
+                      top: BrandSpace.md,
+                      bottom: BrandSpace.xl,
+                    ),
+                    itemCount: stops.length,
+                    onReorderItem: (oldIndex, newIndex) =>
+                        _onReorder(stops, oldIndex, newIndex),
+                    itemBuilder: (context, i) {
+                      final stop = stops[i];
+                      return Padding(
+                        key: ValueKey(stop.id),
+                        padding: const EdgeInsets.only(
+                          bottom: BrandSpace.gutterSm,
+                        ),
+                        child: Dismissible(
+                          key: ValueKey('dismiss-${stop.id}'),
+                          direction: DismissDirection.endToStart,
+                          confirmDismiss: (_) =>
+                              _confirmDeleteDialog(context, 'Delete stop?'),
+                          onDismissed: (_) async {
+                            try {
+                              await ref
+                                  .read(tripRepositoryProvider)
+                                  .deleteStop(stop.id);
+                              ref.invalidate(tripStopsProvider(widget.tripId));
+                            } catch (_) {
+                              ref.invalidate(tripStopsProvider(widget.tripId));
+                            }
+                          },
+                          background: _dismissBackground(),
+                          child: _StopCard(stop: stop),
+                        ),
+                      );
+                    },
+                  ),
                 ),
-              ),
-            ],
-          );
-        },
-        loading: () => const Center(child: FCircularProgress()),
-        error: (e, _) => ErrorRetry(
-          error: e,
-          onRetry: () => ref.invalidate(tripStopsProvider(widget.tripId)),
+              ],
+            );
+          },
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => ErrorRetry(
+            error: e,
+            onRetry: () => ref.invalidate(tripStopsProvider(widget.tripId)),
+          ),
         ),
-      ),
         Positioned(
-          right: 16,
-          bottom: 16,
-          child: FButton(
-            onPress: () async {
+          right: BrandSpace.md,
+          bottom: BrandSpace.md,
+          child: BrandPrimaryButton(
+            label: 'Add stop',
+            leadingIcon: Icons.add_location_alt_rounded,
+            trailingIcon: null,
+            expand: false,
+            onPressed: () async {
               await Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => AddStopScreen(tripId: widget.tripId)),
+                MaterialPageRoute(
+                  builder: (_) => AddStopScreen(tripId: widget.tripId),
+                ),
               );
             },
-            prefix: const Icon(Icons.add_location_alt_rounded),
-            child: const Text('Add stop'),
           ),
         ),
       ],
@@ -474,40 +577,49 @@ class _NextStopEta extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final c = NavColors.of(context);
     final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
     final position = ref.watch(devicePositionProvider).valueOrNull;
     if (position == null) return const SizedBox.shrink();
 
-    final km = haversineMeters(
+    final km =
+        haversineMeters(
           position.latitude,
           position.longitude,
           stop.point.lat,
           stop.point.lng,
         ) /
         1000;
-    final avgKmh = ref.watch(tripStatsProvider(tripId)).valueOrNull?.avgSpeedKmh ?? 0;
+    final avgKmh =
+        ref.watch(tripStatsProvider(tripId)).valueOrNull?.avgSpeedKmh ?? 0;
 
     final eta = avgKmh > 1 ? '~${((km / avgKmh) * 60).round()} min' : '—';
 
     return Material(
-      color: c.surfaceAlt,
+      color: BrandColors.surfaceContainerLow,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        padding: const EdgeInsets.fromLTRB(
+          BrandSpace.md,
+          BrandSpace.gutterSm,
+          BrandSpace.md,
+          BrandSpace.gutterSm,
+        ),
         child: Row(
           children: [
-            Icon(Icons.flag_rounded, color: c.activeRoute),
-            const SizedBox(width: 12),
+            Icon(Icons.flag_rounded, color: BrandColors.primary),
+            const SizedBox(width: BrandSpace.gutterSm),
             Expanded(
               child: Text(
                 'Next: ${stop.name}',
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontWeight: FontWeight.w600, color: c.foreground),
+                style: BrandText.weight(
+                  BrandText.titleSm,
+                  700,
+                ).copyWith(color: BrandColors.textHeadline),
               ),
             ),
             Text(
               '${formatDistance(km, unit)} · $eta',
-              style: TextStyle(color: c.mutedForeground),
+              style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
             ),
           ],
         ),
@@ -538,29 +650,55 @@ class _StopCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
-    return FTile(
-      prefix: Container(
-        height: 40,
-        width: 40,
-        decoration: BoxDecoration(color: c.surfaceAlt, shape: BoxShape.circle),
-        child: Icon(_icon, color: c.activeRoute, size: 20),
+    return BrandCard(
+      radius: BrandRadii.cardRadius,
+      padding: const EdgeInsets.symmetric(
+        horizontal: BrandSpace.md,
+        vertical: BrandSpace.gutterSm,
       ),
-      title: Text(stop.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-      subtitle: (stop.plannedArrival != null || stop.notes != null)
-          ? Column(
+      child: Row(
+        children: [
+          Container(
+            height: 40,
+            width: 40,
+            decoration: BoxDecoration(
+              color: BrandColors.surfaceContainerLow,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(_icon, color: BrandColors.primary, size: 20),
+          ),
+          const SizedBox(width: BrandSpace.gutterSm),
+          Expanded(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text(
+                  stop.name,
+                  style: BrandText.weight(
+                    BrandText.titleSm,
+                    700,
+                  ).copyWith(color: BrandColors.textHeadline),
+                ),
                 if (stop.plannedArrival != null)
                   Text(
                     'ETA ${DateFormat.yMMMd().add_jm().format(stop.plannedArrival!)}',
-                    style: const TextStyle(fontSize: 12),
+                    style: BrandText.bodySm.copyWith(
+                      color: BrandColors.textMuted,
+                    ),
                   ),
-                if (stop.notes != null) Text(stop.notes!),
+                if (stop.notes != null)
+                  Text(
+                    stop.notes!,
+                    style: BrandText.bodySm.copyWith(
+                      color: BrandColors.textBody,
+                    ),
+                  ),
               ],
-            )
-          : null,
-      suffix: Icon(Icons.drag_handle_rounded, color: c.mutedForeground),
+            ),
+          ),
+          Icon(Icons.drag_handle_rounded, color: BrandColors.textMuted),
+        ],
+      ),
     );
   }
 }
@@ -572,101 +710,110 @@ class _ExpensesTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final c = NavColors.of(context);
     final expensesAsync = ref.watch(tripExpensesProvider(tripId));
 
     return Stack(
       children: [
         expensesAsync.when(
-        data: (expenses) {
-          if (expenses.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Text(
-                  'No expenses logged yet.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: c.mutedForeground),
+          data: (expenses) {
+            if (expenses.isEmpty) {
+              return const Center(
+                child: BrandEmptyState(
+                  icon: Icons.receipt_long_outlined,
+                  title: 'No expenses logged yet.',
                 ),
+              );
+            }
+
+            final total = expenses.fold<double>(0, (sum, e) => sum + e.amount);
+            final byCategory = <String, double>{};
+            for (final e in expenses) {
+              byCategory[e.category] = (byCategory[e.category] ?? 0) + e.amount;
+            }
+
+            return ListView(
+              padding: const EdgeInsets.only(
+                top: BrandSpace.md,
+                bottom: BrandSpace.xl,
               ),
-            );
-          }
-
-          final total = expenses.fold<double>(0, (sum, e) => sum + e.amount);
-          final byCategory = <String, double>{};
-          for (final e in expenses) {
-            byCategory[e.category] = (byCategory[e.category] ?? 0) + e.amount;
-          }
-
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: c.surfaceAlt,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: c.border),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
+              children: [
+                BrandCard(
+                  color: BrandColors.surfaceContainerLow,
+                  radius: BrandRadii.cardRadius,
+                  padding: const EdgeInsets.all(BrandSpace.md),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         'Total: \$${total.toStringAsFixed(2)}',
-                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.foreground),
+                        style: BrandText.weight(
+                          BrandText.titleMd,
+                          800,
+                        ).copyWith(color: BrandColors.textHeadline),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: BrandSpace.sm),
                       Wrap(
-                        spacing: 12,
-                        runSpacing: 4,
+                        spacing: BrandSpace.gutterSm,
+                        runSpacing: BrandSpace.xs,
                         children: byCategory.entries
-                            .map((e) => Text(
-                                  '${e.key}: \$${e.value.toStringAsFixed(2)}',
-                                  style: TextStyle(color: c.mutedForeground),
-                                ))
+                            .map(
+                              (e) => Text(
+                                '${e.key}: \$${e.value.toStringAsFixed(2)}',
+                                style: BrandText.bodySm.copyWith(
+                                  color: BrandColors.textMuted,
+                                ),
+                              ),
+                            )
                             .toList(),
                       ),
                     ],
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              ...expenses.map((e) => Dismissible(
+                const SizedBox(height: BrandSpace.md),
+                ...expenses.map(
+                  (e) => Dismissible(
                     key: ValueKey(e.id),
                     direction: DismissDirection.endToStart,
-                    confirmDismiss: (_) => _confirmDeleteDialog(context, 'Delete expense?'),
+                    confirmDismiss: (_) =>
+                        _confirmDeleteDialog(context, 'Delete expense?'),
                     onDismissed: (_) async {
                       try {
-                        await ref.read(tripRepositoryProvider).deleteExpense(e.id);
+                        await ref
+                            .read(tripRepositoryProvider)
+                            .deleteExpense(e.id);
                         ref.invalidate(tripExpensesProvider(tripId));
                       } catch (_) {
                         ref.invalidate(tripExpensesProvider(tripId));
                       }
                     },
-                    background: _dismissBackground(c),
+                    background: _dismissBackground(),
                     child: _ExpenseCard(expense: e),
-                  )),
-            ],
-          );
-        },
-        loading: () => const Center(child: FCircularProgress()),
-        error: (e, _) => ErrorRetry(
-          error: e,
-          onRetry: () => ref.invalidate(tripExpensesProvider(tripId)),
+                  ),
+                ),
+              ],
+            );
+          },
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => ErrorRetry(
+            error: e,
+            onRetry: () => ref.invalidate(tripExpensesProvider(tripId)),
+          ),
         ),
-      ),
         Positioned(
-          right: 16,
-          bottom: 16,
-          child: FButton(
-            onPress: () async {
+          right: BrandSpace.md,
+          bottom: BrandSpace.md,
+          child: BrandPrimaryButton(
+            label: 'Log expense',
+            leadingIcon: Icons.add_rounded,
+            trailingIcon: null,
+            expand: false,
+            onPressed: () async {
               await Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => AddExpenseScreen(tripId: tripId)),
+                MaterialPageRoute(
+                  builder: (_) => AddExpenseScreen(tripId: tripId),
+                ),
               );
             },
-            prefix: const Icon(Icons.add),
-            child: const Text('Log expense'),
           ),
         ),
       ],
@@ -681,18 +828,53 @@ class _ExpenseCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: FTile(
-        prefix: Container(
-          height: 40,
-          width: 40,
-          decoration: BoxDecoration(color: c.surfaceAlt, shape: BoxShape.circle),
-          child: Icon(Icons.receipt_long_rounded, color: c.activeRoute, size: 20),
+      padding: const EdgeInsets.only(bottom: BrandSpace.gutterSm),
+      child: BrandCard(
+        radius: BrandRadii.cardRadius,
+        padding: const EdgeInsets.symmetric(
+          horizontal: BrandSpace.md,
+          vertical: BrandSpace.gutterSm,
         ),
-        title: Text('\$${expense.amount.toStringAsFixed(2)} · ${expense.category}'),
-        subtitle: expense.note != null ? Text(expense.note!) : null,
+        child: Row(
+          children: [
+            Container(
+              height: 40,
+              width: 40,
+              decoration: BoxDecoration(
+                color: BrandColors.surfaceContainerLow,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.receipt_long_rounded,
+                color: BrandColors.primary,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: BrandSpace.gutterSm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '\$${expense.amount.toStringAsFixed(2)} · ${expense.category}',
+                    style: BrandText.weight(
+                      BrandText.titleSm,
+                      700,
+                    ).copyWith(color: BrandColors.textHeadline),
+                  ),
+                  if (expense.note != null)
+                    Text(
+                      expense.note!,
+                      style: BrandText.bodySm.copyWith(
+                        color: BrandColors.textMuted,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -706,13 +888,13 @@ Future<bool> _confirmDeleteDialog(BuildContext context, String title) =>
       destructive: true,
     );
 
-Widget _dismissBackground(NavColors c) {
+Widget _dismissBackground() {
   return Container(
     alignment: Alignment.centerRight,
-    padding: const EdgeInsets.only(right: 24),
+    padding: const EdgeInsets.only(right: BrandSpace.lg),
     decoration: BoxDecoration(
-      color: c.destructive,
-      borderRadius: BorderRadius.circular(18),
+      color: BrandColors.error,
+      borderRadius: BrandRadii.cardRadius,
     ),
     child: const Icon(Icons.delete_outline, color: Colors.white),
   );

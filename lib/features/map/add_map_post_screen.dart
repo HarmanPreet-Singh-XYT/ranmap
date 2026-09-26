@@ -2,14 +2,17 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:forui/forui.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/providers/settings_provider.dart';
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
 import '../../core/util/error_text.dart';
-import '../../core/widgets/app_spinner.dart';
+import '../../core/util/image_upload.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_text_field.dart';
 import '../premium/paywall.dart';
 import '../premium/premium_providers.dart';
 import 'map_post_providers.dart';
@@ -22,7 +25,12 @@ class AddMapPostScreen extends ConsumerStatefulWidget {
   final double lat;
   final double lng;
 
-  const AddMapPostScreen({super.key, required this.tripId, required this.lat, required this.lng});
+  const AddMapPostScreen({
+    super.key,
+    required this.tripId,
+    required this.lat,
+    required this.lng,
+  });
 
   @override
   ConsumerState<AddMapPostScreen> createState() => _AddMapPostScreenState();
@@ -41,7 +49,11 @@ class _AddMapPostScreenState extends ConsumerState<AddMapPostScreen> {
 
   Future<void> _pick(ImageSource source) async {
     try {
-      final file = await ImagePicker().pickImage(source: source, imageQuality: 85, maxWidth: 1920);
+      final file = await ImagePicker().pickImage(
+        source: source,
+        imageQuality: 85,
+        maxWidth: 1920,
+      );
       if (file != null && mounted) setState(() => _picked = file);
     } catch (e) {
       if (!mounted) return;
@@ -56,13 +68,17 @@ class _AddMapPostScreenState extends ConsumerState<AddMapPostScreen> {
     setState(() => _saving = true);
     try {
       final bytes = await picked.readAsBytes();
-      final extension = picked.name.contains('.') ? picked.name.split('.').last : 'jpg';
-      await ref.read(mapPostRepositoryProvider).createPost(
+      final extension = imageExtensionOf(picked.name);
+      await ref
+          .read(mapPostRepositoryProvider)
+          .createPost(
             imageBytes: bytes,
             fileExtension: extension,
             lat: widget.lat,
             lng: widget.lng,
-            caption: _captionController.text.trim().isEmpty ? null : _captionController.text.trim(),
+            caption: _captionController.text.trim().isEmpty
+                ? null
+                : _captionController.text.trim(),
             tripId: widget.tripId,
             visibility: ref.read(appSettingsProvider).photoVisibility,
           );
@@ -83,71 +99,76 @@ class _AddMapPostScreenState extends ConsumerState<AddMapPostScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
-
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: const Text('Pin a photo'),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+    return BrandScaffold(
+      header: BrandHeader(
+        title: 'Pin a photo',
+        onBack: () => Navigator.of(context).maybePop(),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.only(
+          top: BrandSpace.md,
+          bottom: BrandSpace.md,
+        ),
         child: Column(
           children: [
             Expanded(
               child: _picked == null
                   ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.add_a_photo_outlined, size: 56, color: c.mutedForeground),
-                          const SizedBox(height: 20),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              FButton(
-                                variant: .outline,
-                                onPress: () => _pick(ImageSource.camera),
-                                prefix: const Icon(Icons.camera_alt_outlined),
-                                child: const Text('Camera'),
+                      child: BrandEmptyState(
+                        icon: Icons.add_a_photo_outlined,
+                        title: 'Add a photo',
+                        message: 'Shoot a new photo or pick one from your library to pin to this spot.',
+                        action: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            BrandSecondaryButton(
+                              label: 'Camera',
+                              expand: false,
+                              leading: Icon(
+                                Icons.camera_alt_outlined,
+                                size: 20,
+                                color: BrandColors.textHeadline,
                               ),
-                              const SizedBox(width: 12),
-                              FButton(
-                                variant: .outline,
-                                onPress: () => _pick(ImageSource.gallery),
-                                prefix: const Icon(Icons.photo_library_outlined),
-                                child: const Text('Gallery'),
+                              onPressed: () => _pick(ImageSource.camera),
+                            ),
+                            const SizedBox(width: BrandSpace.sm),
+                            BrandSecondaryButton(
+                              label: 'Gallery',
+                              expand: false,
+                              leading: Icon(
+                                Icons.photo_library_outlined,
+                                size: 20,
+                                color: BrandColors.textHeadline,
                               ),
-                            ],
-                          ),
-                        ],
+                              onPressed: () => _pick(ImageSource.gallery),
+                            ),
+                          ],
+                        ),
                       ),
                     )
                   : ClipRRect(
-                      borderRadius: BorderRadius.circular(18),
-                      child: Image.file(File(_picked!.path), fit: BoxFit.cover, width: double.infinity),
+                      borderRadius: BrandRadii.podRadius,
+                      child: Image.file(
+                        File(_picked!.path),
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                      ),
                     ),
             ),
-            const SizedBox(height: 14),
-            FTextField(
-              control: FTextFieldControl.managed(controller: _captionController),
-              label: const Text('Caption (optional)'),
-              hint: 'Say something about this spot',
-              maxLines: 3,
+            const SizedBox(height: BrandSpace.md),
+            BrandTextField(
+              controller: _captionController,
+              hint: 'Caption (optional)',
+              leadingIcon: Icons.chat_bubble_outline_rounded,
               maxLength: 200,
+              maxLines: 3,
             ),
-            const SizedBox(height: 8),
-            FButton(
-              size: .lg,
-              onPress: _picked == null || _saving ? null : _save,
-              child: _saving
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: AppSpinner(color: Colors.white),
-                    )
-                  : const Text('Pin to map'),
+            const SizedBox(height: BrandSpace.sm),
+            BrandPrimaryButton(
+              label: 'Pin to map',
+              leadingIcon: Icons.push_pin_rounded,
+              loading: _saving,
+              onPressed: _picked == null || _saving ? null : _save,
             ),
           ],
         ),

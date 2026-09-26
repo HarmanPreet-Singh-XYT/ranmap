@@ -11,9 +11,9 @@ class MapboxToken {
   final DateTime expiresAt;
 
   factory MapboxToken.fromJson(Map<String, dynamic> json) => MapboxToken(
-        token: json['token'] as String,
-        expiresAt: DateTime.parse(json['expiresAt'] as String),
-      );
+    token: json['token'] as String,
+    expiresAt: DateTime.parse(json['expiresAt'] as String),
+  );
 }
 
 /// Fetches a short-lived Mapbox rendering token from ranmap-server and installs

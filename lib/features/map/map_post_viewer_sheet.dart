@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 import 'package:intl/intl.dart';
 
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
 import '../../data/models/map_post.dart';
 import '../../data/services/supabase_service.dart';
 import 'map_post_providers.dart';
@@ -27,63 +29,90 @@ class _MapPostViewerSheet extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final c = NavColors.of(context);
-    final signedUrlAsync = ref.watch(mapPostSignedUrlProvider(post.storagePath));
+    final signedUrlAsync = ref.watch(
+      mapPostSignedUrlProvider(post.storagePath),
+    );
     final isMine = post.userId == SupabaseService.currentUser?.id;
 
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(BrandSpace.md),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BrandRadii.cardRadius,
               child: signedUrlAsync.when(
-                loading: () => const SizedBox(
+                loading: () => SizedBox(
                   height: 240,
-                  child: Center(child: FCircularProgress()),
+                  child: Center(
+                    child: CircularProgressIndicator(
+                      color: BrandColors.primaryContainer,
+                    ),
+                  ),
                 ),
                 error: (e, _) => SizedBox(
                   height: 120,
-                  child: Center(child: Text(friendlyError(e))),
+                  child: Center(
+                    child: Text(
+                      friendlyError(e),
+                      style: BrandText.bodyMd.copyWith(
+                        color: BrandColors.error,
+                      ),
+                    ),
+                  ),
                 ),
                 data: (url) => Image.network(
                   url,
                   fit: BoxFit.cover,
                   width: double.infinity,
-                  errorBuilder: (_, _, _) => const SizedBox(
+                  errorBuilder: (_, _, _) => SizedBox(
                     height: 160,
-                    child: Center(child: Text('Could not load this photo.')),
+                    child: Center(
+                      child: Text(
+                        'Could not load this photo.',
+                        style: BrandText.bodySm.copyWith(
+                          color: BrandColors.textMuted,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: BrandSpace.md),
             Row(
               children: [
                 Expanded(
                   child: Text(
-                    post.posterUsername != null ? '@${post.posterUsername}' : 'Someone',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: c.foreground),
+                    post.posterUsername != null
+                        ? '@${post.posterUsername}'
+                        : 'Someone',
+                    style: BrandText.titleSm.copyWith(
+                      color: BrandColors.textHeadline,
+                    ),
                   ),
                 ),
                 Text(
                   DateFormat.yMMMd().add_jm().format(post.createdAt),
-                  style: TextStyle(color: c.mutedForeground, fontSize: 12),
+                  style: BrandText.bodySm.copyWith(
+                    color: BrandColors.textMuted,
+                  ),
                 ),
               ],
             ),
             if (post.caption != null && post.caption!.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(post.caption!, style: TextStyle(color: c.foreground)),
+              const SizedBox(height: BrandSpace.sm),
+              Text(
+                post.caption!,
+                style: BrandText.bodyMd.copyWith(color: BrandColors.textBody),
+              ),
             ],
             if (isMine) ...[
-              const SizedBox(height: 16),
-              FButton(
-                variant: .destructive,
-                onPress: () async {
+              const SizedBox(height: BrandSpace.md),
+              BrandPressable(
+                onTap: () async {
                   final confirmed = await showAppConfirmDialog(
                     context,
                     title: 'Delete photo?',
@@ -93,18 +122,46 @@ class _MapPostViewerSheet extends ConsumerWidget {
                   );
                   if (!confirmed) return;
                   try {
-                    await ref.read(mapPostRepositoryProvider).deletePost(post.id);
+                    await ref
+                        .read(mapPostRepositoryProvider)
+                        .deletePost(post.id);
                     if (post.tripId != null) {
                       ref.invalidate(tripMapPostsProvider(post.tripId!));
                     }
                   } catch (e) {
-                    if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+                    if (context.mounted) {
+                      showAppToast(context, friendlyError(e), error: true);
+                    }
                     return;
                   }
                   if (context.mounted) Navigator.of(context).pop();
                 },
-                prefix: const Icon(Icons.delete_outline),
-                child: const Text('Delete photo'),
+                child: Container(
+                  height: 56,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: BrandColors.errorContainer,
+                    borderRadius: BrandRadii.pill,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.delete_outline_rounded,
+                        size: 20,
+                        color: BrandColors.onErrorContainer,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Delete photo',
+                        style: BrandText.weight(
+                          BrandText.labelLg,
+                          700,
+                        ).copyWith(color: BrandColors.onErrorContainer),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
           ],

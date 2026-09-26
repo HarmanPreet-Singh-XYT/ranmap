@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:forui/forui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
-import '../../core/widgets/app_spinner.dart';
+import '../../core/util/validation.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_alert.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_text_field.dart';
 import '../../data/services/supabase_service.dart';
 
 /// Which account credential is being changed.
@@ -14,7 +18,8 @@ enum CredentialKind {
   password,
   email;
 
-  String get title => this == CredentialKind.password ? 'Change password' : 'Change email';
+  String get title =>
+      this == CredentialKind.password ? 'Change password' : 'Change email';
 }
 
 /// Updates the signed-in user's password or email via Supabase auth.
@@ -24,10 +29,12 @@ class ChangeCredentialScreen extends ConsumerStatefulWidget {
   final CredentialKind kind;
 
   @override
-  ConsumerState<ChangeCredentialScreen> createState() => _ChangeCredentialScreenState();
+  ConsumerState<ChangeCredentialScreen> createState() =>
+      _ChangeCredentialScreenState();
 }
 
-class _ChangeCredentialScreenState extends ConsumerState<ChangeCredentialScreen> {
+class _ChangeCredentialScreenState
+    extends ConsumerState<ChangeCredentialScreen> {
   final _valueCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
   bool _saving = false;
@@ -45,15 +52,16 @@ class _ChangeCredentialScreenState extends ConsumerState<ChangeCredentialScreen>
   Future<void> _save() async {
     final value = _valueCtrl.text.trim();
     if (_isPassword) {
-      if (value.length < 6) {
-        setState(() => _error = 'Password must be at least 6 characters');
+      final passwordValidationError = passwordError(value, requireDigit: false);
+      if (passwordValidationError != null) {
+        setState(() => _error = passwordValidationError);
         return;
       }
       if (value != _confirmCtrl.text) {
         setState(() => _error = 'Passwords do not match');
         return;
       }
-    } else if (!value.contains('@')) {
+    } else if (emailError(value) != null) {
       setState(() => _error = 'Enter a valid email address');
       return;
     }
@@ -64,7 +72,9 @@ class _ChangeCredentialScreenState extends ConsumerState<ChangeCredentialScreen>
     });
     try {
       await SupabaseService.auth.updateUser(
-        _isPassword ? UserAttributes(password: value) : UserAttributes(email: value),
+        _isPassword
+            ? UserAttributes(password: value)
+            : UserAttributes(email: value),
       );
       if (!mounted) return;
       showAppToast(
@@ -83,52 +93,59 @@ class _ChangeCredentialScreenState extends ConsumerState<ChangeCredentialScreen>
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
-
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: Text(widget.kind.title),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+    return BrandScaffold(
+      header: BrandHeader(
+        title: widget.kind.title,
+        onBack: () => Navigator.of(context).maybePop(),
       ),
       child: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.only(
+          top: BrandSpace.lg,
+          bottom: BrandSpace.xl,
+        ),
         children: [
           Text(
             _isPassword
                 ? 'Choose a new password for your account.'
                 : 'We’ll send a confirmation link to the new address.',
-            style: TextStyle(color: c.mutedForeground),
+            style: BrandText.bodyMd.copyWith(color: BrandColors.textMuted),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: BrandSpace.lg),
           if (_isPassword) ...[
-            FTextField.password(
-              control: FTextFieldControl.managed(controller: _valueCtrl),
-              label: const Text('New password'),
+            BrandTextField(
+              controller: _valueCtrl,
+              hint: 'New password',
+              leadingIcon: Icons.lock_outline_rounded,
+              obscureText: true,
               autofillHints: const [AutofillHints.newPassword],
             ),
-            const SizedBox(height: 16),
-            FTextField.password(
-              control: FTextFieldControl.managed(controller: _confirmCtrl),
-              label: const Text('Confirm new password'),
+            const SizedBox(height: BrandSpace.md),
+            BrandTextField(
+              controller: _confirmCtrl,
+              hint: 'Confirm new password',
+              leadingIcon: Icons.lock_outline_rounded,
+              obscureText: true,
               autofillHints: const [AutofillHints.newPassword],
-              onSubmit: (_) => _save(),
+              onSubmitted: (_) => _save(),
             ),
           ] else
-            FTextField.email(
-              control: FTextFieldControl.managed(controller: _valueCtrl),
-              label: const Text('New email'),
-              onSubmit: (_) => _save(),
+            BrandTextField(
+              controller: _valueCtrl,
+              hint: 'New email',
+              leadingIcon: Icons.mail_outline_rounded,
+              keyboardType: TextInputType.emailAddress,
+              autofillHints: const [AutofillHints.email],
+              onSubmitted: (_) => _save(),
             ),
           if (_error != null) ...[
-            const SizedBox(height: 16),
-            FAlert(variant: .destructive, title: Text(_error!)),
+            const SizedBox(height: BrandSpace.md),
+            BrandAlert(message: _error!),
           ],
-          const SizedBox(height: 28),
-          FButton(
-            size: .lg,
-            onPress: _saving ? null : _save,
-            child: _saving ? const AppSpinner(color: Colors.white) : const Text('Save'),
+          const SizedBox(height: BrandSpace.lg),
+          BrandPrimaryButton(
+            label: 'Save',
+            loading: _saving,
+            onPressed: _saving ? null : _save,
           ),
         ],
       ),

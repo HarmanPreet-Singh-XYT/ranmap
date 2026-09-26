@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:forui/forui.dart';
 
 import '../../core/offline/outbox.dart';
 import '../../core/offline/outbox_providers.dart';
 import '../../core/providers/connectivity_provider.dart';
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/validation.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_text_field.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/chat_message.dart';
 import '../../data/services/supabase_service.dart';
@@ -35,8 +39,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// row arrives over Realtime.
   final List<ChatMessage> _pending = [];
 
+  late final Outbox _outbox;
+
+  @override
+  void initState() {
+    super.initState();
+    // If a queued message is permanently rejected, the outbox drops it from the
+    // queue — remove its optimistic bubble too, or it would sit on screen
+    // forever with no way to delete it.
+    _outbox = ref.read(outboxProvider);
+    _outbox.failed.addListener(_onFailedChanged);
+  }
+
+  void _onFailedChanged() {
+    if (!mounted) return;
+    final failedIds = {for (final e in _outbox.failed.value) e.id};
+    if (_pending.any((p) => failedIds.contains(p.id))) {
+      setState(() => _pending.removeWhere((p) => failedIds.contains(p.id)));
+    }
+  }
+
   @override
   void dispose() {
+    _outbox.failed.removeListener(_onFailedChanged);
     _inputController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -55,7 +80,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     setState(() => _sending = true);
     _inputController.clear();
     try {
-      await ref.read(chatRepositoryProvider).sendMessage(
+      await ref
+          .read(chatRepositoryProvider)
+          .sendMessage(
             id: id,
             tripId: widget.channel.tripId,
             groupId: widget.channel.groupId,
@@ -66,26 +93,37 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       if (isNetworkError(e) || ref.read(isOfflineProvider)) {
         // Queue it (same id as the online attempt, so replay is idempotent) and
         // show it optimistically.
-        await ref.read(outboxProvider).enqueue(OutboxEntry(
-              id: id,
-              type: OutboxType.chatMessage,
-              payload: {
-                'trip_id': widget.channel.tripId,
-                'group_id': widget.channel.groupId,
-                'body': text,
-              },
-              createdAt: DateTime.now(),
-            ));
+        await ref
+            .read(outboxProvider)
+            .enqueue(
+              OutboxEntry(
+                id: id,
+                type: OutboxType.chatMessage,
+                payload: {
+                  'trip_id': widget.channel.tripId,
+                  'group_id': widget.channel.groupId,
+                  'body': text,
+                },
+                createdAt: DateTime.now(),
+              ),
+            );
         if (mounted) {
-          setState(() => _pending.add(ChatMessage(
+          setState(
+            () => _pending.add(
+              ChatMessage(
                 id: id,
                 tripId: widget.channel.tripId,
                 groupId: widget.channel.groupId,
                 senderId: SupabaseService.currentUserId,
                 body: text,
                 createdAt: DateTime.now(),
-              )));
-          showAppToast(context, "You're offline — your message will send when you reconnect.");
+              ),
+            ),
+          );
+          showAppToast(
+            context,
+            "You're offline — your message will send when you reconnect.",
+          );
         }
       } else {
         // Put the text back so a failed send doesn't lose what the user typed.
@@ -107,6 +145,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       destructive: true,
     );
     if (!confirmed) return;
+
+    // An offline-queued message has no server row yet, so deleting it means
+    // dropping it from the outbox (and its optimistic bubble) — otherwise it
+    // would still be delivered on reconnect.
+    if (_pending.any((p) => p.id == message.id)) {
+      await ref.read(outboxProvider).remove(message.id);
+      if (mounted) {
+        setState(() => _pending.removeWhere((p) => p.id == message.id));
+      }
+      return;
+    }
+
     try {
       await ref.read(chatRepositoryProvider).deleteMessage(message.id);
     } catch (e) {
@@ -128,7 +178,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
     final messagesAsync = ref.watch(chatMessagesProvider(widget.channel));
     final myUid = SupabaseService.currentUser?.id;
 
@@ -142,30 +191,44 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       _scrollToBottom();
     });
 
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: Text(widget.title),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
-        suffixes: [
-          FHeaderAction(
-            icon: const Icon(Icons.call_rounded),
-            onPress: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => VoiceChannelScreen(channel: widget.channel, title: widget.title),
-              ),
-            ),
-          ),
-        ],
+    return BrandScaffold(
+      header: BrandHeader(
+        title: widget.title,
+        onBack: () => Navigator.of(context).maybePop(),
       ),
       child: Column(
         children: [
+          // The voice action formerly lived in the header's trailing slot.
+          Padding(
+            padding: const EdgeInsets.only(top: BrandSpace.sm),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: BrandSecondaryButton(
+                label: 'Voice',
+                expand: false,
+                leading: Icon(
+                  Icons.call_rounded,
+                  size: 18,
+                  color: BrandColors.textHeadlineAlt,
+                ),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => VoiceChannelScreen(
+                      channel: widget.channel,
+                      title: widget.title,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
           Expanded(
             child: messagesAsync.when(
-              loading: () => const Center(child: FCircularProgress()),
+              loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => ErrorRetry(
                 error: e,
-                onRetry: () => ref.invalidate(chatMessagesProvider(widget.channel)),
+                onRetry: () =>
+                    ref.invalidate(chatMessagesProvider(widget.channel)),
               ),
               data: (messages) {
                 final remoteIds = {for (final m in messages) m.id};
@@ -174,20 +237,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   ..._pending.where((p) => !remoteIds.contains(p.id)),
                 ]..sort((a, b) => a.createdAt.compareTo(b.createdAt));
                 if (merged.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Text(
-                        'No messages yet — say hi!',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: c.mutedForeground),
-                      ),
+                  return const Center(
+                    child: BrandEmptyState(
+                      icon: Icons.chat_bubble_outline_rounded,
+                      title: 'No messages yet',
+                      message: 'Say hi to get the conversation started.',
                     ),
                   );
                 }
                 return ListView.builder(
                   controller: _scrollController,
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
                   itemCount: merged.length,
                   itemBuilder: (context, index) {
                     final message = merged[index];
@@ -203,35 +263,64 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               },
             ),
           ),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: FTextField(
-                      control: FTextFieldControl.managed(controller: _inputController),
-                      hint: 'Message…',
-                      maxLines: 4,
-                      minLines: 1,
-                      maxLength: kChatMessageMaxLength,
-                      textInputAction: TextInputAction.send,
-                      onSubmit: (_) => _send(),
-                      enabled: !_sending,
-                    ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              BrandSpace.md,
+              BrandSpace.sm,
+              BrandSpace.md,
+              BrandSpace.md,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: BrandTextField(
+                    controller: _inputController,
+                    hint: 'Message…',
+                    maxLength: kChatMessageMaxLength,
+                    maxLines: 4,
+                    minLines: 1,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _send(),
+                    enabled: !_sending,
                   ),
-                  const SizedBox(width: 8),
-                  FButton.icon(
-                    onPress: _sending ? null : _send,
-                    child: const Icon(Icons.send_rounded),
-                  ),
-                ],
-              ),
+                ),
+                const SizedBox(width: BrandSpace.sm),
+                _SendButton(onTap: _sending ? null : _send, enabled: !_sending),
+              ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The circular grass-green send action that pairs with the composer field.
+class _SendButton extends StatelessWidget {
+  const _SendButton({required this.onTap, required this.enabled});
+
+  final VoidCallback? onTap;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return BrandPressable(
+      onTap: onTap,
+      enabled: enabled,
+      child: Container(
+        height: 56,
+        width: 56,
+        decoration: BoxDecoration(
+          color: BrandColors.primaryContainer,
+          shape: BoxShape.circle,
+          boxShadow: BrandShadows.primaryGlow,
+        ),
+        child: Icon(
+          Icons.send_rounded,
+          size: 22,
+          color: BrandColors.onPrimary,
+        ),
       ),
     );
   }
@@ -246,19 +335,24 @@ class _ChatBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
+    final bg = isMe
+        ? BrandColors.primaryContainer
+        : BrandColors.surfaceContainerLow;
+    final fg = isMe ? BrandColors.onPrimary : BrandColors.textHeadline;
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: GestureDetector(
         onLongPress: onDelete,
         child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 4),
+          margin: const EdgeInsets.symmetric(vertical: BrandSpace.xs),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.75,
+          ),
           decoration: BoxDecoration(
-            color: isMe ? c.activeRoute : c.surfaceAlt,
-            borderRadius: BorderRadius.circular(16),
+            color: bg,
+            borderRadius: BrandRadii.cardRadius,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -268,16 +362,15 @@ class _ChatBubble extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 2),
                   child: Text(
                     '@${message.senderUsername}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: c.activeRoute,
-                    ),
+                    style: BrandText.weight(
+                      BrandText.labelSm,
+                      700,
+                    ).copyWith(color: BrandColors.primary),
                   ),
                 ),
               Text(
                 message.body ?? '',
-                style: TextStyle(color: isMe ? Colors.white : c.foreground),
+                style: BrandText.bodyMd.copyWith(color: fg),
               ),
             ],
           ),

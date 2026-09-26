@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:forui/forui.dart';
 
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/map_post.dart';
 import 'map_post_providers.dart';
@@ -12,43 +13,44 @@ import 'map_post_viewer_sheet.dart';
 /// pins on the map. Tapping a tile opens the same viewer sheet the map uses
 /// (so the poster can still delete their own photo from here).
 class TripPhotosScreen extends ConsumerWidget {
-  const TripPhotosScreen({super.key, required this.tripId, required this.tripTitle});
+  const TripPhotosScreen({
+    super.key,
+    required this.tripId,
+    required this.tripTitle,
+  });
 
   final String tripId;
   final String tripTitle;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final c = NavColors.of(context);
     final postsAsync = ref.watch(tripMapPostsProvider(tripId));
 
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: Text('$tripTitle photos'),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+    return BrandScaffold(
+      header: BrandHeader(
+        title: '$tripTitle photos',
+        onBack: () => Navigator.of(context).maybePop(),
       ),
       child: postsAsync.when(
-        loading: () => const Center(child: FCircularProgress()),
+        loading: () => Center(
+          child: CircularProgressIndicator(color: BrandColors.primaryContainer),
+        ),
         error: (e, _) => ErrorRetry(
           error: e,
           onRetry: () => ref.invalidate(tripMapPostsProvider(tripId)),
         ),
         data: (posts) {
           if (posts.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Text(
-                  'No photos yet.\nCapture one from the map during a trip.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: c.mutedForeground),
-                ),
+            return const Center(
+              child: BrandEmptyState(
+                icon: Icons.photo_library_outlined,
+                title: 'No photos yet',
+                message: 'Capture one from the map during a trip.',
               ),
             );
           }
           return GridView.builder(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 3,
               mainAxisSpacing: 8,
@@ -70,13 +72,12 @@ class _PhotoTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final c = NavColors.of(context);
     final urlAsync = ref.watch(mapPostSignedUrlProvider(post.storagePath));
     final label = post.caption?.trim().isNotEmpty == true
         ? 'Photo: ${post.caption}'
         : post.posterUsername != null
-            ? 'Photo by @${post.posterUsername}'
-            : 'Trip photo';
+        ? 'Photo by @${post.posterUsername}'
+        : 'Trip photo';
     return Semantics(
       label: label,
       button: true,
@@ -84,14 +85,21 @@ class _PhotoTile extends ConsumerWidget {
       child: GestureDetector(
         onTap: () => showMapPostViewerSheet(context, post),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BrandRadii.cardRadius,
           child: urlAsync.when(
-            loading: () => Container(color: c.surfaceAlt),
-            error: (_, _) => Icon(Icons.broken_image_outlined, color: c.mutedForeground),
+            loading: () =>
+                ColoredBox(color: BrandColors.surfaceContainerLow),
+            error: (_, _) => Icon(
+              Icons.broken_image_outlined,
+              color: BrandColors.textMuted,
+            ),
             data: (url) => Image.network(
               url,
               fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => Icon(Icons.broken_image_outlined, color: c.mutedForeground),
+              errorBuilder: (_, _, _) => Icon(
+                Icons.broken_image_outlined,
+                color: BrandColors.textMuted,
+              ),
             ),
           ),
         ),

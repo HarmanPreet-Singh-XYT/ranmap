@@ -55,6 +55,11 @@ class AiRepository {
       timeout: _timeout,
       fallbackMessage: 'AI assistant request failed',
     );
-    return data['conversationId'] as String;
+    // The server persists the turn before replying, so a malformed success body
+    // shouldn't make the client lose the conversation — fall back to the id we
+    // sent to rather than throwing on the cast.
+    final id = data['conversationId'];
+    if (id is String && id.isNotEmpty) return id;
+    return conversationId;
   }
 }

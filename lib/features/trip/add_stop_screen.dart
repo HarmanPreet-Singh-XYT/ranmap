@@ -6,11 +6,17 @@ import 'package:geolocator/geolocator.dart' hide Position;
 import '../../core/offline/outbox.dart';
 import '../../core/offline/outbox_providers.dart';
 import '../../core/providers/connectivity_provider.dart';
-import '../../core/theme/nav_palette.dart';
-import '../../core/widgets/app_spinner.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/validation.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_alert.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_list_row.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_text_field.dart';
 import '../../data/models/trip.dart';
 import '../../data/models/trip_stop.dart';
 import '../../data/services/supabase_service.dart';
@@ -67,9 +73,11 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
     try {
       final position =
           await Geolocator.getLastKnownPosition() ??
-              await Geolocator.getCurrentPosition(
-                locationSettings: const LocationSettings(timeLimit: Duration(seconds: 15)),
-              );
+          await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              timeLimit: Duration(seconds: 15),
+            ),
+          );
       if (!mounted) return;
       setState(() {
         _point = LatLngPoint(position.latitude, position.longitude);
@@ -95,17 +103,28 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
       current = _point;
     }
     if (current == null) {
-      if (mounted) showAppToast(context, "Couldn't determine a starting point for the map.", error: true);
+      if (mounted) {
+        showAppToast(
+          context,
+          "Couldn't determine a starting point for the map.",
+          error: true,
+        );
+      }
       return;
     }
     if (!mounted) return;
     final picked = await Navigator.of(context).push<Position>(
       MaterialPageRoute(
-        builder: (_) => PickLocationScreen(initialCenter: Geo.pos(current!.lat, current.lng)),
+        builder: (_) => PickLocationScreen(
+          initialCenter: Geo.pos(current!.lat, current.lng),
+        ),
       ),
     );
     if (picked != null) {
-      setState(() => _point = LatLngPoint(picked.lat.toDouble(), picked.lng.toDouble()));
+      setState(
+        () =>
+            _point = LatLngPoint(picked.lat.toDouble(), picked.lng.toDouble()),
+      );
     }
   }
 
@@ -149,14 +168,21 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (isNetworkError(e) || ref.read(isOfflineProvider)) {
-        await ref.read(outboxProvider).enqueue(OutboxEntry(
-              id: id,
-              type: OutboxType.tripStop,
-              payload: stop.toInsertJson(),
-              createdAt: DateTime.now(),
-            ));
+        await ref
+            .read(outboxProvider)
+            .enqueue(
+              OutboxEntry(
+                id: id,
+                type: OutboxType.tripStop,
+                payload: stop.toInsertJson(),
+                createdAt: DateTime.now(),
+              ),
+            );
         if (mounted) {
-          showAppToast(context, "You're offline — this stop will sync when you reconnect.");
+          showAppToast(
+            context,
+            "You're offline — this stop will sync when you reconnect.",
+          );
           Navigator.of(context).pop();
         }
       } else {
@@ -169,79 +195,106 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
-
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: const Text('Add stop'),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+    return BrandScaffold(
+      header: BrandHeader(
+        title: 'Add stop',
+        onBack: () => Navigator.of(context).maybePop(),
       ),
       child: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.only(
+          top: BrandSpace.md,
+          bottom: BrandSpace.xl,
+        ),
         children: [
-          FTextField(
-            control: FTextFieldControl.managed(
-              controller: _nameCtrl,
-              onChange: (_) {
-                if (_error != null) setState(() => _error = null);
-              },
-            ),
-            label: const Text('Stop name'),
+          const _FieldLabel('Stop name'),
+          BrandTextField(
+            controller: _nameCtrl,
             maxLength: kNameMaxLength,
+            onChanged: (_) {
+              if (_error != null) setState(() => _error = null);
+            },
           ),
-          const SizedBox(height: 20),
-          Text('Type', style: _section(c)),
-          const SizedBox(height: 10),
+          const SizedBox(height: BrandSpace.lg),
+          Text(
+            'Type',
+            style: BrandText.weight(
+              BrandText.titleSm,
+              700,
+            ).copyWith(color: BrandColors.textHeadline),
+          ),
+          const SizedBox(height: BrandSpace.sm),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: BrandSpace.sm,
+            runSpacing: BrandSpace.sm,
             children: _kStopKinds.map((entry) {
               final (id, label, icon) = entry;
               final selected = _kind == id;
-              return FButton(
-                variant: selected ? .primary : .outline,
-                size: .sm,
-                selected: selected,
-                onPress: () => setState(() => _kind = id),
-                prefix: Icon(icon),
-                child: Text(label),
-              );
+              return selected
+                  ? BrandPrimaryButton(
+                      label: label,
+                      leadingIcon: icon,
+                      trailingIcon: null,
+                      glow: false,
+                      expand: false,
+                      onPressed: () => setState(() => _kind = id),
+                    )
+                  : BrandSecondaryButton(
+                      label: label,
+                      leading: Icon(
+                        icon,
+                        size: 18,
+                        color: BrandColors.textHeadlineAlt,
+                      ),
+                      expand: false,
+                      onPressed: () => setState(() => _kind = id),
+                    );
             }).toList(),
           ),
-          const SizedBox(height: 16),
-          FTextField(
-            control: FTextFieldControl.managed(controller: _notesCtrl),
-            label: const Text('Notes (optional)'),
-            maxLines: 2,
+          const SizedBox(height: BrandSpace.md),
+          const _FieldLabel('Notes (optional)'),
+          BrandTextField(
+            controller: _notesCtrl,
             maxLength: kNotesMaxLength,
+            maxLines: 3,
           ),
-          const SizedBox(height: 24),
-          Text('Location', style: _section(c)),
-          const SizedBox(height: 10),
-          FTileGroup(
-            children: [
-              FTile(
-                prefix: const Icon(Icons.place_outlined),
-                title: Text(
-                  _resolvingLocation
-                      ? 'Finding your location…'
-                      : _point == null
-                          ? 'No location set'
-                          : '${_point!.lat.toStringAsFixed(5)}, ${_point!.lng.toStringAsFixed(5)}',
-                ),
-                suffix: FButton(
-                  variant: .outline,
-                  size: .sm,
-                  onPress: _resolvingLocation ? null : _pickOnMap,
-                  child: const Text('Pick on map'),
-                ),
+          const SizedBox(height: BrandSpace.lg),
+          Text(
+            'Location',
+            style: BrandText.weight(
+              BrandText.titleSm,
+              700,
+            ).copyWith(color: BrandColors.textHeadline),
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          BrandCard(
+            padding: const EdgeInsets.symmetric(
+              horizontal: BrandSpace.md,
+              vertical: BrandSpace.xs,
+            ),
+            child: BrandListRow(
+              icon: Icons.place_outlined,
+              iconColor: BrandColors.primary,
+              title: _resolvingLocation
+                  ? 'Finding your location…'
+                  : _point == null
+                  ? 'No location set'
+                  : '${_point!.lat.toStringAsFixed(5)}, ${_point!.lng.toStringAsFixed(5)}',
+              trailing: BrandSecondaryButton(
+                label: 'Pick on map',
+                expand: false,
+                onPressed: _resolvingLocation ? null : _pickOnMap,
               ),
-            ],
+            ),
           ),
-          const SizedBox(height: 24),
-          Text('Planned arrival (optional)', style: _section(c)),
-          const SizedBox(height: 10),
+          const SizedBox(height: BrandSpace.lg),
+          Text(
+            'Planned arrival (optional)',
+            style: BrandText.weight(
+              BrandText.titleSm,
+              700,
+            ).copyWith(color: BrandColors.textHeadline),
+          ),
+          const SizedBox(height: BrandSpace.sm),
           FDateField.calendar(
             label: const Text('Date'),
             selectionControl: FDateSelectionControl.managedSingle(
@@ -252,11 +305,17 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
                   return;
                 }
                 final t = _plannedArrival ?? DateTime.now();
-                _plannedArrival = DateTime(date.year, date.month, date.day, t.hour, t.minute);
+                _plannedArrival = DateTime(
+                  date.year,
+                  date.month,
+                  date.day,
+                  t.hour,
+                  t.minute,
+                );
               }),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: BrandSpace.md),
           FTimeField.picker(
             label: const Text('Time'),
             control: FTimeFieldControl.managed(
@@ -266,31 +325,44 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
               onChange: (time) => setState(() {
                 if (time == null) return;
                 final d = _plannedArrival ?? DateTime.now();
-                _plannedArrival = DateTime(d.year, d.month, d.day, time.hour, time.minute);
+                _plannedArrival = DateTime(
+                  d.year,
+                  d.month,
+                  d.day,
+                  time.hour,
+                  time.minute,
+                );
               }),
             ),
           ),
           if (_error != null) ...[
-            const SizedBox(height: 20),
-            FAlert(variant: .destructive, title: Text(_error!)),
+            const SizedBox(height: BrandSpace.lg),
+            BrandAlert(message: _error!),
           ],
-          const SizedBox(height: 28),
-          FButton(
-            size: .lg,
-            onPress: _saving ? null : _save,
-            child: _saving
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: AppSpinner(color: Colors.white),
-                  )
-                : const Text('Add stop'),
+          const SizedBox(height: BrandSpace.lg),
+          BrandPrimaryButton(
+            label: 'Add stop',
+            onPressed: _saving ? null : _save,
+            loading: _saving,
           ),
         ],
       ),
     );
   }
+}
 
-  TextStyle _section(NavColors c) =>
-      TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.foreground);
+/// A small muted field caption sitting above a [BrandTextField].
+class _FieldLabel extends StatelessWidget {
+  const _FieldLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Text(
+      text,
+      style: BrandText.labelMd.copyWith(color: BrandColors.textBody),
+    ),
+  );
 }

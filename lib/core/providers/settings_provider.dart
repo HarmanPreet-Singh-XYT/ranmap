@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -78,32 +80,32 @@ class AppSettingsNotifier extends Notifier<AppSettings> {
   }
 
   void setThemeMode(ThemeMode mode) {
-    _prefs.setString(_kThemeMode, mode.name);
+    unawaited(_prefs.setString(_kThemeMode, mode.name));
     state = state.copyWith(themeMode: mode);
   }
 
   void setDistanceUnit(DistanceUnit unit) {
-    _prefs.setString(_kDistanceUnit, unit.name);
+    unawaited(_prefs.setString(_kDistanceUnit, unit.name));
     state = state.copyWith(distanceUnit: unit);
   }
 
   void setMapStyleId(String id) {
-    _prefs.setString(_kMapStyle, id);
+    unawaited(_prefs.setString(_kMapStyle, id));
     state = state.copyWith(mapStyleId: id);
   }
 
   void setMapThreeD(bool enabled) {
-    _prefs.setBool(_kMapThreeD, enabled);
+    unawaited(_prefs.setBool(_kMapThreeD, enabled));
     state = state.copyWith(mapThreeD: enabled);
   }
 
   void setMapTerrain(bool enabled) {
-    _prefs.setBool(_kMapTerrain, enabled);
+    unawaited(_prefs.setBool(_kMapTerrain, enabled));
     state = state.copyWith(mapTerrain: enabled);
   }
 
   void setPhotoVisibility(String visibility) {
-    _prefs.setString(_kPhotoVisibility, visibility);
+    unawaited(_prefs.setString(_kPhotoVisibility, visibility));
     state = state.copyWith(photoVisibility: visibility);
   }
 }

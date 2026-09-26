@@ -1,15 +1,20 @@
 import 'package:flutter/material.dart';
-import 'package:forui/forui.dart';
 
 import '../../core/constants/defaults.dart';
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
 import 'map_engine/map_engine.dart';
 
 /// Lets the user pick an arbitrary point on the map (rather than defaulting
 /// to their current location) by centering a fixed pin and dragging the map
 /// underneath it. Returns the picked [Position], or null if cancelled.
 class PickLocationScreen extends StatefulWidget {
-  const PickLocationScreen({super.key, this.initialCenter, this.title = 'Pick a location'});
+  const PickLocationScreen({
+    super.key,
+    this.initialCenter,
+    this.title = 'Pick a location',
+  });
 
   /// Where to open the camera. Null falls back to a wide, pan-able world view
   /// (used when the user's location isn't known yet).
@@ -35,21 +40,14 @@ class _PickLocationScreenState extends State<PickLocationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
-
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: Text(widget.title),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
-        suffixes: [
-          FButton(
-            size: .sm,
-            onPress: _confirm,
-            child: const Text('Use this spot'),
-          ),
-        ],
+    return BrandScaffold(
+      header: BrandHeader(
+        title: widget.title,
+        onBack: () => Navigator.of(context).maybePop(),
       ),
+      // Full-bleed map: drop the shell's page margin so the camera fills the
+      // viewport edge-to-edge.
+      padding: EdgeInsets.zero,
       child: Stack(
         alignment: Alignment.center,
         children: [
@@ -62,8 +60,25 @@ class _PickLocationScreenState extends State<PickLocationScreen> {
           ),
           IgnorePointer(
             child: Padding(
-              padding: const EdgeInsets.only(bottom: 36),
-              child: Icon(Icons.location_pin, size: 48, color: c.activeRoute),
+              padding: EdgeInsets.only(bottom: 36),
+              child: Icon(
+                Icons.location_pin,
+                size: 48,
+                color: BrandColors.primary,
+              ),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: BrandSpace.lg,
+            child: Center(
+              child: BrandPrimaryButton(
+                label: 'Use this spot',
+                expand: false,
+                trailingIcon: Icons.check_rounded,
+                onPressed: _confirm,
+              ),
             ),
           ),
         ],

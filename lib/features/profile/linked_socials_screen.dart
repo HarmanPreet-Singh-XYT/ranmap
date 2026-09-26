@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:forui/forui.dart';
 
-import '../../core/theme/nav_palette.dart';
-import '../../core/widgets/app_spinner.dart';
+import '../../core/theme/brand_palette.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/validation.dart';
+import '../../core/widgets/app_spinner.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_alert.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_text_field.dart';
 import '../../core/widgets/error_retry.dart';
 import 'profile_providers.dart';
 
@@ -20,7 +24,8 @@ class LinkedSocialsScreen extends ConsumerStatefulWidget {
   const LinkedSocialsScreen({super.key});
 
   @override
-  ConsumerState<LinkedSocialsScreen> createState() => _LinkedSocialsScreenState();
+  ConsumerState<LinkedSocialsScreen> createState() =>
+      _LinkedSocialsScreenState();
 }
 
 class _LinkedSocialsScreenState extends ConsumerState<LinkedSocialsScreen> {
@@ -29,13 +34,17 @@ class _LinkedSocialsScreenState extends ConsumerState<LinkedSocialsScreen> {
   final Map<String, TextEditingController> _socialCtrls = {
     for (final (id, _, _) in _socials) id: TextEditingController(),
   };
-  bool _seeded = false;
   bool _savingSocials = false;
   bool _sendingCode = false;
   bool _checkingCode = false;
   bool _codeSent = false;
   String? _error;
   String? _codeError;
+
+  /// Signature of the server data last seeded into the controllers, so a
+  /// re-fetch re-seeds only when something actually changed (and never clobbers
+  /// what the user is typing).
+  String? _seededSignature;
 
   @override
   void dispose() {
@@ -47,17 +56,22 @@ class _LinkedSocialsScreenState extends ConsumerState<LinkedSocialsScreen> {
     super.dispose();
   }
 
-  void _seed(String? phone, Map<String, String> socials) {
-    if (_seeded) return;
-    _seeded = true;
+  void _syncFromServer(String? phone, Map<String, String> socials) {
+    final signature =
+        '$phone|${socials.entries.map((e) => '${e.key}=${e.value}').join('&')}';
+    if (signature == _seededSignature) return;
+    _seededSignature = signature;
     _phoneCtrl.text = phone ?? '';
-    socials.forEach((k, v) => _socialCtrls[k]?.text = v);
+    for (final (id, _, _) in _socials) {
+      _socialCtrls[id]!.text = socials[id] ?? '';
+    }
   }
 
   Future<void> _sendCode() async {
     final phone = _phoneCtrl.text.trim();
-    if (!RegExp(r'^\+[1-9]\d{6,14}$').hasMatch(phone)) {
-      setState(() => _codeError = 'Enter your number in international format, e.g. +15551234567');
+    final phoneValidationError = phoneError(phone);
+    if (phoneValidationError != null) {
+      setState(() => _codeError = phoneValidationError);
       return;
     }
 
@@ -89,7 +103,9 @@ class _LinkedSocialsScreenState extends ConsumerState<LinkedSocialsScreen> {
       _codeError = null;
     });
     try {
-      await ref.read(phoneRepositoryProvider).checkCode(phoneNumber: phone, code: code);
+      await ref
+          .read(phoneRepositoryProvider)
+          .checkCode(phoneNumber: phone, code: code);
       ref.invalidate(myPrivateProfileProvider);
       _codeCtrl.clear();
       setState(() => _codeSent = false);
@@ -107,10 +123,19 @@ class _LinkedSocialsScreenState extends ConsumerState<LinkedSocialsScreen> {
       _error = null;
     });
     try {
+      // Preserve any social keys we don't render, so saving the three known
+      // handles doesn't silently drop the rest.
       final socials = <String, String>{
-        for (final entry in _socialCtrls.entries)
-          if (entry.value.text.trim().isNotEmpty) entry.key: entry.value.text.trim(),
+        ...?ref.read(myPrivateProfileProvider).valueOrNull?.socials,
       };
+      for (final entry in _socialCtrls.entries) {
+        final value = entry.value.text.trim();
+        if (value.isEmpty) {
+          socials.remove(entry.key);
+        } else {
+          socials[entry.key] = value;
+        }
+      }
       await ref.read(profileRepositoryProvider).updateMySocials(socials);
       ref.invalidate(myPrivateProfileProvider);
       if (mounted) Navigator.of(context).pop();
@@ -123,120 +148,130 @@ class _LinkedSocialsScreenState extends ConsumerState<LinkedSocialsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
     final privateAsync = ref.watch(myPrivateProfileProvider);
 
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: const Text('Linked socials'),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+    return BrandScaffold(
+      header: BrandHeader(
+        title: 'Linked socials',
+        onBack: () => Navigator.of(context).maybePop(),
       ),
       child: privateAsync.when(
-        loading: () => const Center(child: FCircularProgress()),
-        error: (e, _) => ErrorRetry(error: e, onRetry: () => ref.invalidate(myPrivateProfileProvider)),
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => ErrorRetry(
+          error: e,
+          onRetry: () => ref.invalidate(myPrivateProfileProvider),
+        ),
         data: (private) {
-          _seed(private.phoneNumber, private.socials);
+          _syncFromServer(private.phoneNumber, private.socials);
           final phoneMatchesStored =
-              private.phoneNumber != null && _phoneCtrl.text.trim() == private.phoneNumber;
+              private.phoneNumber != null &&
+              _phoneCtrl.text.trim() == private.phoneNumber;
           final isVerified = phoneMatchesStored && private.phoneVerified;
 
           return ListView(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.only(
+              top: BrandSpace.md,
+              bottom: BrandSpace.xl,
+            ),
             children: [
-              Row(
-                children: [
-                  Text('Mobile number', style: _section(c)),
-                  const SizedBox(width: 10),
-                  if (isVerified)
-                    FBadge(variant: .secondary, child: const Text('Verified')),
-                ],
+              BrandSectionHeader(
+                icon: Icons.phone_iphone_rounded,
+                title: 'Mobile number',
+                trailing: isVerified
+                    ? BrandPill(
+                        label: 'Verified',
+                        icon: Icons.verified_rounded,
+                        background: BrandColors.secondaryFixed,
+                        foreground: BrandColors.onSecondaryFixedVariant,
+                        iconColor: BrandColors.primary,
+                      )
+                    : null,
               ),
-              const SizedBox(height: 12),
-              FTextField(
-                control: FTextFieldControl.managed(
-                  controller: _phoneCtrl,
-                  onChange: (_) {
-                    if (_codeSent) setState(() => _codeSent = false);
-                  },
-                ),
-                label: const Text('Phone number'),
+              const SizedBox(height: BrandSpace.sm),
+              BrandTextField(
+                controller: _phoneCtrl,
                 hint: '+15551234567',
+                leadingIcon: Icons.phone_outlined,
                 keyboardType: TextInputType.phone,
+                onChanged: (_) {
+                  // Always rebuild: editing the number must immediately
+                  // un-badge a previously verified number, not just when a
+                  // code is pending.
+                  setState(() {
+                    if (_codeSent) _codeSent = false;
+                  });
+                },
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: BrandSpace.sm),
               if (!isVerified) ...[
                 if (!_codeSent)
-                  FButton(
-                    variant: .outline,
-                    onPress: _sendingCode ? null : _sendCode,
-                    prefix: _sendingCode ? const FCircularProgress(size: .sm) : const Icon(Icons.sms_outlined),
-                    child: Text(_sendingCode ? 'Sending…' : 'Send verification code'),
+                  BrandSecondaryButton(
+                    label: _sendingCode ? 'Sending…' : 'Send verification code',
+                    leading: _sendingCode
+                        ? const AppSpinner()
+                        : const Icon(Icons.sms_outlined, size: 20),
+                    onPressed: _sendingCode ? null : _sendCode,
                   )
                 else ...[
-                  FTextField(
-                    control: FTextFieldControl.managed(controller: _codeCtrl),
-                    label: const Text('Verification code'),
+                  BrandTextField(
+                    controller: _codeCtrl,
+                    hint: 'Verification code',
+                    leadingIcon: Icons.password_rounded,
                     keyboardType: TextInputType.number,
-                    maxLength: 10,
+                    maxLength: kOtpLength,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: BrandSpace.sm),
                   Row(
                     children: [
-                      FButton(
-                        onPress: _checkingCode ? null : _checkCode,
-                        child: _checkingCode
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: AppSpinner(color: Colors.white),
-                              )
-                            : const Text('Verify'),
+                      BrandPrimaryButton(
+                        label: 'Verify',
+                        expand: false,
+                        trailingIcon: null,
+                        glow: false,
+                        loading: _checkingCode,
+                        onPressed: _checkingCode ? null : _checkCode,
                       ),
-                      const SizedBox(width: 8),
-                      FButton(
-                        variant: .ghost,
-                        onPress: _sendingCode ? null : _sendCode,
-                        child: const Text('Resend code'),
+                      const SizedBox(width: BrandSpace.sm),
+                      BrandSecondaryButton(
+                        label: 'Resend code',
+                        expand: false,
+                        onPressed: _sendingCode ? null : _sendCode,
                       ),
                     ],
                   ),
                 ],
                 if (_codeError != null) ...[
-                  const SizedBox(height: 12),
-                  FAlert(variant: .destructive, title: Text(_codeError!)),
+                  const SizedBox(height: BrandSpace.gutterSm),
+                  BrandAlert(message: _codeError!),
                 ],
               ],
-              const SizedBox(height: 28),
-              Text('Socials', style: _section(c)),
-              const SizedBox(height: 12),
+              const SizedBox(height: BrandSpace.lg),
+              const BrandSectionHeader(
+                icon: Icons.alternate_email_rounded,
+                title: 'Socials',
+              ),
+              const SizedBox(height: BrandSpace.sm),
               ..._socials.map((s) {
-                final (id, label, hint) = s;
+                final (id, label, _) = s;
                 return Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: FTextField(
-                    control: FTextFieldControl.managed(controller: _socialCtrls[id]!),
-                    label: Text(label),
-                    hint: hint,
+                  padding: const EdgeInsets.only(bottom: BrandSpace.md),
+                  child: BrandTextField(
+                    controller: _socialCtrls[id]!,
+                    hint: label,
+                    leadingIcon: Icons.link_rounded,
                     maxLength: kSocialHandleMaxLength,
                   ),
                 );
               }),
               if (_error != null) ...[
-                const SizedBox(height: 8),
-                FAlert(variant: .destructive, title: Text(_error!)),
+                const SizedBox(height: BrandSpace.sm),
+                BrandAlert(message: _error!),
               ],
-              const SizedBox(height: 24),
-              FButton(
-                size: .lg,
-                onPress: _savingSocials ? null : _saveSocials,
-                child: _savingSocials
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: AppSpinner(color: Colors.white),
-                      )
-                    : const Text('Save'),
+              const SizedBox(height: BrandSpace.lg),
+              BrandPrimaryButton(
+                label: 'Save',
+                loading: _savingSocials,
+                onPressed: _savingSocials ? null : _saveSocials,
               ),
             ],
           );
@@ -244,7 +279,4 @@ class _LinkedSocialsScreenState extends ConsumerState<LinkedSocialsScreen> {
       ),
     );
   }
-
-  TextStyle _section(NavColors c) =>
-      TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.foreground);
 }

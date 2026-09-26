@@ -52,3 +52,13 @@ flutter:
   assets:
     - .env
     - assets/models/
+    - assets/images/onboarding/
+    - assets/images/tour/
+    - assets/images/paywall/
+  fonts:
+    # "Convoy Clean Modern" brand typeface. Shipped as a variable font, so the
+    # weight axis is selected per-style via `fontVariations` (see
+    # core/theme/brand_typography.dart) rather than separate static files.
+    - family: Plus Jakarta Sans
+      fonts:
+        - asset: assets/fonts/PlusJakartaSans.ttf

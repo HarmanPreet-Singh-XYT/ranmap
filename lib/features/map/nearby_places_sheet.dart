@@ -28,7 +28,8 @@ Future<NearbyPlace?> showNearbyPlacesSheet(
     context: context,
     side: FLayout.btt,
     mainAxisMaxRatio: null,
-    builder: (_) => _NearbyPlacesSheet(center: center, routePolyline: routePolyline),
+    builder: (_) =>
+        _NearbyPlacesSheet(center: center, routePolyline: routePolyline),
   );
 }
 
@@ -137,7 +138,10 @@ class _NearbyPlacesSheetState extends State<_NearbyPlacesSheet> {
             ),
             if (_canSearchAlongRoute)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
                 child: FSwitch(
                   label: const Text('Search along the route'),
                   value: _alongRoute,
@@ -152,41 +156,47 @@ class _NearbyPlacesSheetState extends State<_NearbyPlacesSheet> {
               child: _loading
                   ? const Center(child: FCircularProgress())
                   : _error != null
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Semantics(
-                                  liveRegion: true,
-                                  child: Text(_error!, textAlign: TextAlign.center),
-                                ),
-                                const SizedBox(height: 14),
-                                FButton(onPress: _search, child: const Text('Try again')),
-                              ],
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Semantics(
+                              liveRegion: true,
+                              child: Text(_error!, textAlign: TextAlign.center),
                             ),
+                            const SizedBox(height: 14),
+                            FButton(
+                              onPress: _search,
+                              child: const Text('Try again'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : _places.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No places found nearby.',
+                        style: TextStyle(color: c.mutedForeground),
+                      ),
+                    )
+                  : ListView.builder(
+                      controller: scrollController,
+                      itemCount: _places.length,
+                      itemBuilder: (context, i) {
+                        final place = _places[i];
+                        return FTile(
+                          prefix: Icon(
+                            Icons.place_outlined,
+                            color: c.activeRoute,
                           ),
-                        )
-                      : _places.isEmpty
-                          ? Center(
-                              child: Text(
-                                'No places found nearby.',
-                                style: TextStyle(color: c.mutedForeground),
-                              ),
-                            )
-                          : ListView.builder(
-                              controller: scrollController,
-                              itemCount: _places.length,
-                              itemBuilder: (context, i) {
-                                final place = _places[i];
-                                return FTile(
-                                  prefix: Icon(Icons.place_outlined, color: c.activeRoute),
-                                  title: Text(place.name),
-                                  onPress: () => _openDetails(place),
-                                );
-                              },
-                            ),
+                          title: Text(place.name),
+                          onPress: () => _openDetails(place),
+                        );
+                      },
+                    ),
             ),
           ],
         );

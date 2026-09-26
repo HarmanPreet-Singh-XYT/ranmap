@@ -46,5 +46,6 @@ const _premiumMarker = 'Ranmap Pro required';
 /// paywall rather than surface a raw message.
 bool looksPremiumRequired(Object error) {
   if (isPremiumRequired(error)) return true;
-  return error is PostgrestException && error.message.startsWith(_premiumMarker);
+  return error is PostgrestException &&
+      error.message.startsWith(_premiumMarker);
 }

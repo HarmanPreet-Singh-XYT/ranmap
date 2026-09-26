@@ -66,37 +66,39 @@ class NavColors {
   /// Caution / attention only.
   final Color warning;
 
-  /// Day-driving palette.
+  /// Day palette — the "Convoy Clean Modern" brand: a warm off-white canvas,
+  /// pure-white cards, deep pine text and a grass-green active action.
   static const light = NavColors(
-    canvas: Color(0xFFF4F2EF),
+    canvas: Color(0xFFF9FAFB),
     surface: Color(0xFFFFFFFF),
-    surfaceAlt: Color(0xFFEDF1F6),
+    surfaceAlt: Color(0xFFF3F4F5),
     landmass: Color(0xFFEFEBE9),
     water: Color(0xFFAED5F8),
-    activeRoute: Color(0xFF1A73E8),
+    activeRoute: Color(0xFF22C55E),
     altRoute: Color(0xFFB6BCC4),
     highway: Color(0xFFF59E0B),
-    border: Color(0xFFE3E6EA),
-    foreground: Color(0xFF1A1C1E),
-    mutedForeground: Color(0xFF5F6368),
-    destructive: Color(0xFFD93025),
-    success: Color(0xFF188038),
+    border: Color(0xFFE7E8E9),
+    foreground: Color(0xFF191C1D),
+    mutedForeground: Color(0xFF4B5563),
+    destructive: Color(0xFFBA1A1A),
+    success: Color(0xFF006E2F),
     warning: Color(0xFFF9AB00),
   );
 
-  /// Night-driving palette — deep charcoal, never pure black.
+  /// Night palette — deep pine-tinted charcoal, never pure black, with the
+  /// brand green brightened for dark surfaces.
   static const dark = NavColors(
-    canvas: Color(0xFF1A1C1E),
-    surface: Color(0xFF2C2F33),
-    surfaceAlt: Color(0xFF35383D),
-    landmass: Color(0xFF1A1C1E),
-    water: Color(0xFF1B2A4A),
-    activeRoute: Color(0xFF3085FE),
-    altRoute: Color(0xFF5F6368),
+    canvas: Color(0xFF0F1512),
+    surface: Color(0xFF1A211C),
+    surfaceAlt: Color(0xFF232B25),
+    landmass: Color(0xFF14181A),
+    water: Color(0xFF14263A),
+    activeRoute: Color(0xFF4AE176),
+    altRoute: Color(0xFF5F6A62),
     highway: Color(0xFFFFB300),
-    border: Color(0xFF3A3E44),
-    foreground: Color(0xFFE8EAED),
-    mutedForeground: Color(0xFF9AA0A6),
+    border: Color(0xFF313B33),
+    foreground: Color(0xFFE8EFE9),
+    mutedForeground: Color(0xFF9BA89E),
     destructive: Color(0xFFF28B82),
     success: Color(0xFF81C995),
     warning: Color(0xFFFDD663),

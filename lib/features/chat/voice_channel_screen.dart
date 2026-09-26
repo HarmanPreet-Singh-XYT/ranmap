@@ -3,12 +3,17 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:forui/forui.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_alert.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_list_row.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
 import '../premium/paywall.dart';
 import '../premium/premium_providers.dart';
 import 'chat_providers.dart';
@@ -21,7 +26,11 @@ class VoiceChannelScreen extends ConsumerStatefulWidget {
   final ChatChannel channel;
   final String title;
 
-  const VoiceChannelScreen({super.key, required this.channel, required this.title});
+  const VoiceChannelScreen({
+    super.key,
+    required this.channel,
+    required this.title,
+  });
 
   @override
   ConsumerState<VoiceChannelScreen> createState() => _VoiceChannelScreenState();
@@ -32,6 +41,7 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
 
   lk.Room? _room;
   lk.EventsListener<lk.RoomEvent>? _events;
+  Timer? _reconnectTimer;
   bool _connecting = true;
   bool _muted = false;
   bool _reconnecting = false;
@@ -39,6 +49,10 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
   bool _joining = false;
   int _reconnectAttempts = 0;
   String? _error;
+
+  /// True when the OS blocked microphone access. The call stays connected (the
+  /// user can still hear others); a hint is shown instead of failing the join.
+  bool _micDenied = false;
 
   @override
   void initState() {
@@ -49,12 +63,15 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
   @override
   void dispose() {
     _leaving = true;
+    _reconnectTimer?.cancel();
     unawaited(_teardownRoom());
     super.dispose();
   }
 
   /// Tears down the current room and its event listener, if any.
   Future<void> _teardownRoom() async {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _events?.dispose();
     _events = null;
     final room = _room;
@@ -73,6 +90,9 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
     // Guard against overlapping joins (Retry + reconnect timer + initState).
     if (_joining) return;
     _joining = true;
+    // A fresh join (initial or manual Retry) starts the backoff over, so a
+    // previously exhausted reconnect loop doesn't immediately give up again.
+    if (initial) _reconnectAttempts = 0;
     setState(() {
       if (initial) _connecting = true;
       _error = null;
@@ -81,16 +101,27 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
 
     lk.Room? room;
     try {
-      final voiceToken = await ref.read(voiceRepositoryProvider).fetchToken(
+      final voiceToken = await ref
+          .read(voiceRepositoryProvider)
+          .fetchToken(
             tripId: widget.channel.tripId,
             groupId: widget.channel.groupId,
           );
       room = lk.Room();
       room.addListener(_onRoomChanged);
       await room.connect(voiceToken.url, voiceToken.token);
+      // Route voice to the loudspeaker (not the earpiece) and let the SDK apply
+      // its communication audio-session preset.
+      unawaited(_configureAudio());
       // Preserve the user's mute intent across a reconnect instead of forcing
-      // the mic on behind a "muted" indicator.
-      await room.localParticipant?.setMicrophoneEnabled(!_muted);
+      // the mic on behind a "muted" indicator. A blocked mic must not tear down
+      // a working call — join anyway and surface a hint.
+      try {
+        await room.localParticipant?.setMicrophoneEnabled(!_muted);
+        _micDenied = false;
+      } catch (_) {
+        _micDenied = true;
+      }
       if (!mounted) {
         room.removeListener(_onRoomChanged);
         await room.disconnect();
@@ -160,6 +191,7 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
 
   void _scheduleReconnect() {
     if (_leaving || !mounted) return;
+    _reconnectTimer?.cancel();
     _reconnectAttempts++;
     if (_reconnectAttempts > _maxReconnectAttempts) {
       setState(() {
@@ -172,9 +204,18 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
     setState(() => _reconnecting = true);
     // Exponential backoff: 1s, 2s, 4s, 8s, 16s (capped at 30s).
     final seconds = math.min(30, 1 << (_reconnectAttempts - 1));
-    Future.delayed(Duration(seconds: seconds), () {
+    _reconnectTimer = Timer(Duration(seconds: seconds), () {
       if (!_leaving && mounted) _join(initial: false);
     });
+  }
+
+  /// Best-effort platform audio setup: prefer the loudspeaker over the earpiece.
+  Future<void> _configureAudio() async {
+    try {
+      await lk.AudioManager.instance.setSpeakerOutputPreferred(true);
+    } catch (_) {
+      // Unsupported platform / no audio session: keep the default route.
+    }
   }
 
   void _onRoomChanged() {
@@ -193,7 +234,10 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
     }
     // The room may have been torn down while the await was in flight.
     if (!mounted) return;
-    setState(() => _muted = next);
+    setState(() {
+      _muted = next;
+      if (!next) _micDenied = false;
+    });
   }
 
   Future<void> _leave() async {
@@ -204,7 +248,6 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
     final room = _room;
 
     // "Travel together": this channel is unlocked when ANY member is Pro, even
@@ -215,104 +258,158 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
         : ref.watch(groupProProvider(channel.groupId!));
     final proUnlocked = proAsync.valueOrNull ?? false;
 
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: Text('${widget.title} · Voice'),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+    final Widget content;
+    if (_connecting) {
+      content = const Center(child: CircularProgressIndicator());
+    } else if (_error != null) {
+      content = Center(
+        child: Padding(
+          padding: const EdgeInsets.all(BrandSpace.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              BrandAlert(message: _error!),
+              const SizedBox(height: BrandSpace.md),
+              BrandPrimaryButton(
+                label: 'Retry',
+                expand: false,
+                onPressed: () => _join(),
+              ),
+            ],
+          ),
+        ),
+      );
+    } else if (room == null) {
+      content = Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            if (_reconnecting) ...[
+              const SizedBox(height: BrandSpace.sm),
+              Text(
+                'Reconnecting…',
+                style: BrandText.bodyMd.copyWith(color: BrandColors.textMuted),
+              ),
+            ],
+          ],
+        ),
+      );
+    } else {
+      content = Column(
+        children: [
+          if (_reconnecting) ...[
+            const Padding(
+              padding: EdgeInsets.only(top: BrandSpace.sm),
+              child: SizedBox(
+                height: 18,
+                width: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(BrandSpace.sm),
+              child: Text(
+                'Reconnecting…',
+                style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
+              ),
+            ),
+          ],
+          if (_micDenied)
+            const Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: BrandSpace.md,
+                vertical: BrandSpace.xs,
+              ),
+              child: BrandAlert(
+                variant: BrandAlertVariant.info,
+                message: 'Microphone access is blocked — enable it in Settings to talk.',
+              ),
+            ),
+          if (proUnlocked)
+            const Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: BrandSpace.md,
+                vertical: BrandSpace.xs,
+              ),
+              child: BrandAlert(
+                variant: BrandAlertVariant.info,
+                message: 'Pro voice — unlocked for everyone here',
+              ),
+            ),
+          Expanded(child: _ParticipantList(room: room)),
+        ],
+      );
+    }
+
+    return BrandScaffold(
+      header: BrandHeader(
+        title: '${widget.title} · Voice',
+        onBack: () => Navigator.of(context).maybePop(),
       ),
-      footer: room == null
-          ? null
-          : Padding(
-              padding: const EdgeInsets.symmetric(vertical: 14),
+      child: Column(
+        children: [
+          Expanded(child: content),
+          if (room != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: BrandSpace.md),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  FButton.icon(
-                    onPress: _toggleMute,
-                    variant: _muted ? .primary : .outline,
-                    size: .lg,
-                    semanticsLabel: _muted ? 'Unmute' : 'Mute',
-                    child: Icon(_muted ? Icons.mic_off_rounded : Icons.mic_rounded),
+                  BrandSecondaryButton(
+                    label: _muted ? 'Unmute' : 'Mute',
+                    expand: false,
+                    leading: Icon(
+                      _muted ? Icons.mic_off_rounded : Icons.mic_rounded,
+                      size: 20,
+                      color: BrandColors.textHeadlineAlt,
+                    ),
+                    onPressed: _toggleMute,
                   ),
-                  const SizedBox(width: 16),
-                  FButton.icon(
-                    onPress: _leave,
-                    variant: .destructive,
-                    size: .lg,
-                    semanticsLabel: 'Leave voice',
-                    child: const Icon(Icons.call_end_rounded),
-                  ),
+                  const SizedBox(width: BrandSpace.md),
+                  _LeaveButton(onPressed: _leave),
                 ],
               ),
             ),
-      child: _connecting
-          ? const Center(child: FCircularProgress())
-          : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: c.foreground)),
-                        const SizedBox(height: 16),
-                        FButton(onPress: () => _join(), child: const Text('Retry')),
-                      ],
-                    ),
-                  ),
-                )
-              : room == null
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const FCircularProgress(),
-                          if (_reconnecting) ...[
-                            const SizedBox(height: 12),
-                            Text('Reconnecting…', style: TextStyle(color: c.mutedForeground)),
-                          ],
-                        ],
-                      ),
-                    )
-                  : Column(
-                      children: [
-                        if (_reconnecting) ...[
-                          const FProgress(),
-                          Padding(
-                            padding: const EdgeInsets.all(8),
-                            child: Text('Reconnecting…', style: TextStyle(color: c.mutedForeground)),
-                          ),
-                        ],
-                        if (proUnlocked) const _ProVoiceBanner(),
-                        Expanded(child: _ParticipantList(room: room)),
-                      ],
-                    ),
+        ],
+      ),
     );
   }
 }
 
-class _ProVoiceBanner extends StatelessWidget {
-  const _ProVoiceBanner();
+/// The red "leave voice" pill — the brand's destructive call-to-action.
+class _LeaveButton extends StatelessWidget {
+  const _LeaveButton({required this.onPressed});
+
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
-    return Container(
-      width: double.infinity,
-      color: c.surfaceAlt,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Row(
-        children: [
-          Icon(Icons.workspace_premium_rounded, size: 18, color: c.highway),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Pro voice — unlocked for everyone here',
-              style: TextStyle(color: c.foreground),
+    return BrandPressable(
+      onTap: onPressed,
+      child: Container(
+        height: 56,
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        decoration: BoxDecoration(
+          color: BrandColors.error,
+          borderRadius: BrandRadii.pill,
+          boxShadow: BrandShadows.subtle,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.call_end_rounded,
+              size: 20,
+              color: BrandColors.onPrimary,
             ),
-          ),
-        ],
+            const SizedBox(width: 8),
+            Text(
+              'Leave',
+              style: BrandText.labelLg.copyWith(color: BrandColors.onPrimary),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -325,47 +422,68 @@ class _ParticipantList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
     final participants = <lk.Participant>[
       if (room.localParticipant != null) room.localParticipant!,
       ...room.remoteParticipants.values,
     ];
 
     if (participants.isEmpty) {
-      return Center(child: Text('Connecting…', style: TextStyle(color: c.mutedForeground)));
+      return Center(
+        child: Text(
+          'Connecting…',
+          style: BrandText.bodyMd.copyWith(color: BrandColors.textMuted),
+        ),
+      );
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: participants.length,
-      itemBuilder: (context, i) {
-        final participant = participants[i];
-        final isLocal = participant is lk.LocalParticipant;
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: FTile(
-            prefix: Container(
-              height: 40,
-              width: 40,
-              decoration: BoxDecoration(
-                color: participant.isSpeaking ? c.success : c.surfaceAlt,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.person,
-                size: 20,
-                color: participant.isSpeaking ? Colors.white : c.foreground,
-              ),
-            ),
-            title: Text(participant.name.isNotEmpty ? participant.name : participant.identity),
-            subtitle: Text(isLocal ? 'You' : 'In voice'),
-            suffix: Icon(
-              participant.isMuted ? Icons.mic_off_rounded : Icons.mic_rounded,
-              color: participant.isMuted ? c.mutedForeground : c.success,
-            ),
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
+      children: [
+        BrandCard(
+          padding: const EdgeInsets.symmetric(
+            horizontal: BrandSpace.md,
+            vertical: BrandSpace.xs,
           ),
-        );
-      },
+          child: Column(
+            children: [
+              for (final (i, participant) in participants.indexed) ...[
+                if (i > 0) const BrandRowDivider(),
+                _ParticipantRow(participant: participant),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ParticipantRow extends StatelessWidget {
+  const _ParticipantRow({required this.participant});
+
+  final lk.Participant participant;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLocal = participant is lk.LocalParticipant;
+    return BrandListRow(
+      icon: Icons.person_rounded,
+      iconBackground: participant.isSpeaking
+          ? BrandColors.accentMint
+          : BrandColors.surfaceContainerLow,
+      iconColor: BrandColors.textHeadline,
+      title: participant.name.isNotEmpty
+          ? participant.name
+          : participant.identity,
+      subtitle: isLocal ? 'You' : 'In voice',
+      showChevron: false,
+      trailing: Icon(
+        participant.isMuted ? Icons.mic_off_rounded : Icons.mic_rounded,
+        size: 20,
+        color: participant.isMuted
+            ? BrandColors.textMuted
+            : BrandColors.primary,
+      ),
     );
   }
 }

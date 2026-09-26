@@ -3,7 +3,15 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ranmap/core/offline/outbox.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+OutboxEntry _entry(String id, {String body = 'x'}) => OutboxEntry(
+  id: id,
+  type: OutboxType.chatMessage,
+  payload: {'body': body},
+  createdAt: DateTime.parse('2025-01-02T03:04:05.000Z'),
+);
 
 void main() {
   group('OutboxEntry', () {
@@ -84,6 +92,46 @@ void main() {
         isRetryableOutboxError(const PostgrestException(message: 'denied', code: '42501')),
         isFalse,
       );
+    });
+  });
+
+  group('Outbox persistence', () {
+    setUp(() => SharedPreferences.setMockInitialValues({}));
+
+    test('pending writes survive a new instance', () async {
+      final a = Outbox();
+      await a.enqueue(_entry('e1', body: 'hi'));
+      final b = Outbox();
+      expect((await b.all()).map((e) => e.id), ['e1']);
+    });
+
+    test('failed entries are persisted and cleared', () async {
+      final a = Outbox();
+      a.recordFailed(_entry('f1'));
+      // Let the fire-and-forget persist land.
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      final b = Outbox();
+      await b.all(); // triggers load
+      expect(b.failed.value.map((e) => e.id), ['f1']);
+
+      b.acknowledgeFailed();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      final c = Outbox();
+      await c.all();
+      expect(c.failed.value, isEmpty);
+    });
+
+    test('bounds the queue, recording the dropped oldest as failed', () async {
+      final a = Outbox();
+      for (var i = 0; i < 505; i++) {
+        await a.enqueue(_entry('q$i'));
+      }
+      final all = await a.all();
+      expect(all.length, 500);
+      expect(all.first.id, 'q5');
+      expect(a.failed.value, isNotEmpty);
     });
   });
 }

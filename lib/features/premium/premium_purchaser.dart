@@ -1,9 +1,17 @@
+/// The subscription term a user picked on the paywall.
+enum PaywallPlan { annual, monthly }
+
 /// Handles a store purchase / restore. RevenueCat implements this
 /// (see `revenuecat.dart`); [UnavailablePremiumPurchaser] is used until billing
 /// is configured.
 abstract class PremiumPurchaser {
-  Future<void> purchase();
-  Future<void> restore();
+  /// Buys [plan] (annual by default — the best-value option the paywall
+  /// defaults to).
+  Future<void> purchase({PaywallPlan plan});
+
+  /// Restores prior purchases and reports whether an active entitlement is now
+  /// present, so the UI can be honest when there was nothing to restore.
+  Future<bool> restore();
 }
 
 /// Thrown when billing isn't configured for this build.
@@ -26,8 +34,9 @@ class UnavailablePremiumPurchaser implements PremiumPurchaser {
   const UnavailablePremiumPurchaser();
 
   @override
-  Future<void> purchase() async => throw const PremiumPurchaseUnavailable();
+  Future<void> purchase({PaywallPlan plan = PaywallPlan.annual}) async =>
+      throw const PremiumPurchaseUnavailable();
 
   @override
-  Future<void> restore() async => throw const PremiumPurchaseUnavailable();
+  Future<bool> restore() async => throw const PremiumPurchaseUnavailable();
 }

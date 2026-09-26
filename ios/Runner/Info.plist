@@ -26,6 +26,30 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- OAuth callback scheme; must match kAuthRedirectUrl in
+	     lib/features/auth/social_auth.dart and Supabase's redirect allow-list. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.ranmap.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.ranmap.app</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Allow HTTP to localhost and Bonjour (*.local) hosts only, so the app can
+	     reach a local ranmap-server on a Mac (e.g. http://your-mac.local:8787)
+	     during development. This does NOT open arbitrary cleartext loads;
+	     production traffic should be HTTPS. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Ranmap uses your location to show you on the map and keep your trip in sync with your group.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

@@ -1,55 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:forui/forui.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show OAuthProvider;
 
 import '../../core/providers/app_prefs_provider.dart';
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
+import '../../core/util/error_text.dart';
+import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_icons.dart';
+import '../../core/widgets/brand/brand_pod.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_step_indicator.dart';
+import '../../core/widgets/brand/brand_tag.dart';
+import '../auth/social_auth.dart';
 
-/// A single intro slide.
-class _Slide {
-  const _Slide({
-    required this.icon,
-    required this.title,
-    required this.body,
-    required this.colors,
-  });
-
-  final IconData icon;
-  final String title;
-  final String body;
-  final List<Color> colors;
-}
-
-const _slides = <_Slide>[
-  _Slide(
-    icon: Icons.near_me_rounded,
-    title: 'Track your crew, live',
-    body: 'See everyone’s position on a real 3D map as you drive — together, in real time.',
-    colors: [Color(0xFF1A73E8), Color(0xFF4C9AF5)],
-  ),
-  _Slide(
-    icon: Icons.alt_route_rounded,
-    title: 'Plan the route',
-    body: 'Pick a start and destination, compare alternate routes, and follow them turn by turn.',
-    colors: [Color(0xFF0E7490), Color(0xFF22B8D6)],
-  ),
-  _Slide(
-    icon: Icons.headset_mic_rounded,
-    title: 'Talk hands-free',
-    body: 'Hop on a voice channel with your group and keep the conversation going on the road.',
-    colors: [Color(0xFF4338CA), Color(0xFF7C3AED)],
-  ),
-  _Slide(
-    icon: Icons.receipt_long_rounded,
-    title: 'Keep the trip log',
-    body: 'Log stops, fuel and expenses, and pin photos right to the route as you go.',
-    colors: [Color(0xFF1A73E8), Color(0xFF0EA5E9)],
-  ),
-];
-
-/// The pre-auth intro carousel. Shown once on first launch, before sign-in.
+/// The v2 intro screen, shown after the v1 feature tour hands off. Its options
+/// (email / Google / Apple) each route into the chosen auth flow. The
+/// signed-out landing is gated on [AppPrefs.introV1Seen] (the tour), so once
+/// that's walked a relaunch resumes here; `introV2Seen` is only a progress flag.
 class WelcomeScreen extends ConsumerStatefulWidget {
   const WelcomeScreen({super.key});
 
@@ -58,79 +29,271 @@ class WelcomeScreen extends ConsumerStatefulWidget {
 }
 
 class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
-  final _controller = PageController();
-  int _index = 0;
-  bool _finishing = false;
+  bool _leaving = false;
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  Future<void> _finish() async {
-    if (_finishing) return;
-    setState(() => _finishing = true);
-    await ref.read(appPrefsProvider).markIntroSeen();
-    if (mounted) context.go('/sign-in');
-  }
-
-  void _next() {
-    if (_index == _slides.length - 1) {
-      _finish();
-    } else {
-      _controller.nextPage(duration: const Duration(milliseconds: 320), curve: Curves.easeOutCubic);
-    }
+  /// Marks the welcome as seen and opens the chosen auth screen.
+  ///
+  /// Pushes (not `go`) so the welcome stays on the stack — the auth screens'
+  /// back returns here. The `_leaving` guard is cleared once that route pops,
+  /// so the buttons work again on return.
+  Future<void> _leave(String location) async {
+    if (_leaving) return;
+    setState(() => _leaving = true);
+    await ref.read(appPrefsProvider).markIntroV2Seen();
+    if (!mounted) return;
+    await context.push(location);
+    if (mounted) setState(() => _leaving = false);
   }
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
-    final last = _index == _slides.length - 1;
+    return BrandScaffold(
+      child: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Column(
+              children: [
+                const SizedBox(height: BrandSpace.sm),
+                const BrandDots(count: 3, index: 0),
+                const SizedBox(height: BrandSpace.md),
+                const _BentoCollage()
+                    .animate()
+                    .fadeIn(duration: 480.ms, curve: Curves.easeOut)
+                    .scale(
+                      begin: const Offset(0.96, 0.96),
+                      end: const Offset(1, 1),
+                      curve: Curves.easeOutCubic,
+                    ),
+                const SizedBox(height: BrandSpace.xl),
+                const _ValueProp()
+                    .animate()
+                    .fadeIn(delay: 120.ms, duration: 420.ms)
+                    .slideY(begin: 0.15, end: 0, curve: Curves.easeOutCubic),
+                const SizedBox(height: BrandSpace.lg),
+                _Actions(onStart: () => _leave('/sign-up'), onSocial: _social)
+                    .animate()
+                    .fadeIn(delay: 220.ms, duration: 420.ms)
+                    .slideY(begin: 0.15, end: 0, curve: Curves.easeOutCubic),
+                const SizedBox(height: BrandSpace.md),
+                _Footer(onLogIn: () => _leave('/sign-in')),
+                const SizedBox(height: BrandSpace.md),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
-    return FScaffold(
-      childPad: false,
-      child: SafeArea(
-        child: Column(
+  /// Opens the provider's OAuth screen. We mark the intro seen up front so the
+  /// welcome isn't re-gated when the browser round-trips back into the app.
+  Future<void> _social(OAuthProvider provider) async {
+    if (_leaving) return;
+    setState(() => _leaving = true);
+    await ref.read(appPrefsProvider).markIntroV2Seen();
+    try {
+      final launched = await signInWithProvider(provider);
+      if (!launched && mounted) {
+        showAppToast(context, 'Could not open the sign-in page');
+      }
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _leaving = false);
+    }
+  }
+}
+
+/// The 2×2 bento cluster: two photo pods and two pastel illustration pods.
+class _BentoCollage extends StatelessWidget {
+  const _BentoCollage();
+
+  // Bundled copies of the design previews, so the hero renders offline.
+  static const _topLeftPhoto = 'assets/images/onboarding/welcome_crew.jpg';
+  static const _bottomRightPhoto = 'assets/images/onboarding/welcome_route.jpg';
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 310),
+        child: AspectRatio(
+          aspectRatio: 1,
+          child: Padding(
+            padding: const EdgeInsets.all(4),
+            child: Column(
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      Expanded(child: _PhotoPod(asset: _topLeftPhoto)),
+                      const SizedBox(width: BrandSpace.gutterSm),
+                      Expanded(
+                        child: BrandPod(
+                          color: BrandColors.accentPeach,
+                          child: _IllustrationPod(
+                            icon: Icons.directions_car_rounded,
+                            iconColor: BrandColors.tertiary,
+                            label: 'Convoy',
+                            dotColor: BrandColors.primary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: BrandSpace.gutterSm),
+                Expanded(
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: BrandPod(
+                          color: BrandColors.accentMint,
+                          child: _IllustrationPod(
+                            icon: Icons.cell_tower_rounded,
+                            iconColor: BrandColors.primary,
+                            label: 'Live Audio',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: BrandSpace.gutterSm),
+                      Expanded(
+                        child: _PhotoPod(
+                          asset: _bottomRightPhoto,
+                          badge: 'Route 1',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A pastel pod: a frosted circular icon badge over a small dot + label.
+class _IllustrationPod extends StatelessWidget {
+  const _IllustrationPod({
+    required this.icon,
+    required this.iconColor,
+    required this.label,
+    this.dotColor,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String label;
+  final Color? dotColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final dot = Container(
+      height: 6,
+      width: 6,
+      decoration: BoxDecoration(
+        color: dotColor ?? BrandColors.primaryContainer,
+        shape: BoxShape.circle,
+      ),
+    );
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        BrandIconBadge(
+          icon: icon,
+          iconColor: iconColor,
+          size: 54,
+          iconSize: 28,
+        ),
+        const SizedBox(height: 6),
+        Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Align(
-              alignment: Alignment.centerRight,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 8, 12, 0),
-                child: FButton(
-                  variant: .ghost,
-                  size: .sm,
-                  mainAxisSize: MainAxisSize.min,
-                  onPress: _finish,
-                  child: Text('Skip'),
+            dot,
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                label.toUpperCase(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: BrandText.labelSm.copyWith(
+                  color: BrandColors.textHeadline,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),
-            Expanded(
-              child: PageView.builder(
-                controller: _controller,
-                itemCount: _slides.length,
-                onPageChanged: (i) => setState(() => _index = i),
-                itemBuilder: (context, i) => _SlideView(slide: _slides[i]),
-              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// A photo pod with a rounded clip, drawn over a painted gradient so the tile
+/// still reads if the asset is somehow missing.
+class _PhotoPod extends StatelessWidget {
+  const _PhotoPod({required this.asset, this.badge});
+
+  final String asset;
+  final String? badge;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BrandRadii.podRadius,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [BrandColors.secondaryContainer, BrandColors.accentSky],
+          ),
+        ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.asset(
+              asset,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => const SizedBox.shrink(),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-              child: Column(
-                children: [
-                  _Dots(count: _slides.length, index: _index, color: c.activeRoute),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FButton(
-                      size: .lg,
-                      onPress: _finishing ? null : _next,
-                      child: Text(last ? 'Get started' : 'Next'),
-                    ),
+            if (badge != null)
+              Positioned(
+                right: 8,
+                bottom: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
                   ),
-                ],
+                  decoration: BoxDecoration(
+                    color: BrandColors.surface.withValues(alpha: 0.85),
+                    borderRadius: BrandRadii.pill,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.near_me_rounded,
+                        size: 13,
+                        color: BrandColors.primary,
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        badge!,
+                        style: BrandText.labelSm.copyWith(
+                          color: BrandColors.textHeadline,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -138,126 +301,110 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
   }
 }
 
-class _SlideView extends StatelessWidget {
-  const _SlideView({required this.slide});
-
-  final _Slide slide;
+class _ValueProp extends StatelessWidget {
+  const _ValueProp();
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
-
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(
-            height: 260,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(32),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: slide.colors,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: slide.colors.first.withValues(alpha: 0.35),
-                  offset: const Offset(0, 18),
-                  blurRadius: 40,
-                ),
-              ],
-            ),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Positioned(
-                  top: -40,
-                  right: -30,
-                  child: _Blob(color: Colors.white.withValues(alpha: 0.14), size: 160),
-                ),
-                Positioned(
-                  bottom: -50,
-                  left: -40,
-                  child: _Blob(color: Colors.white.withValues(alpha: 0.10), size: 200),
-                ),
-                Container(
-                  height: 128,
-                  width: 128,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white.withValues(alpha: 0.18),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 1.5),
-                  ),
-                  child: Icon(slide.icon, size: 60, color: Colors.white),
-                ),
-              ],
-            ),
-          )
-              .animate()
-              .fadeIn(duration: 420.ms, curve: Curves.easeOut)
-              .scale(begin: const Offset(0.94, 0.94), end: const Offset(1, 1), curve: Curves.easeOutBack),
-          const SizedBox(height: 40),
-          Text(
-            slide.title,
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, height: 1.15, color: c.foreground),
-          ).animate().fadeIn(delay: 120.ms, duration: 360.ms).slideY(begin: 0.25, end: 0, curve: Curves.easeOut),
+          const BrandTag(
+            icon: Icons.satellite_alt_rounded,
+            label: 'Real-Time Convoy Navigation',
+          ),
           const SizedBox(height: 12),
           Text(
-            slide.body,
+            'Drive Together,\nStay Connected',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 16, height: 1.4, color: c.mutedForeground),
-          ).animate().fadeIn(delay: 220.ms, duration: 360.ms).slideY(begin: 0.25, end: 0, curve: Curves.easeOut),
+            style: BrandText.displayLgMobile.copyWith(
+              color: BrandColors.textHeadline,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
+            child: Text(
+              'Live 3D location, convoy voice chat, and shared road-trip pitstops for every adventure.',
+              textAlign: TextAlign.center,
+              style: BrandText.bodyMd.copyWith(color: BrandColors.textBody),
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-class _Blob extends StatelessWidget {
-  const _Blob({required this.color, required this.size});
+class _Actions extends StatelessWidget {
+  const _Actions({required this.onStart, required this.onSocial});
 
-  final Color color;
-  final double size;
+  final VoidCallback onStart;
+  final ValueChanged<OAuthProvider> onSocial;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: size,
-      width: size,
-      decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+    return Column(
+      children: [
+        BrandPrimaryButton(label: 'Get Started', onPressed: onStart),
+        const SizedBox(height: BrandSpace.gutterSm),
+        BrandSecondaryButton(
+          label: 'Continue with Google',
+          leading: const GoogleGlyph(),
+          onPressed: () => onSocial(OAuthProvider.google),
+        ),
+        const SizedBox(height: BrandSpace.gutterSm),
+        BrandSecondaryButton(
+          label: 'Continue with Apple',
+          leading: const AppleGlyph(),
+          onPressed: () => onSocial(OAuthProvider.apple),
+        ),
+      ],
     );
   }
 }
 
-class _Dots extends StatelessWidget {
-  const _Dots({required this.count, required this.index, required this.color});
+class _Footer extends StatelessWidget {
+  const _Footer({required this.onLogIn});
 
-  final int count;
-  final int index;
-  final Color color;
+  final VoidCallback onLogIn;
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Column(
       children: [
-        for (var i = 0; i < count; i++)
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeOut,
-            margin: const EdgeInsets.symmetric(horizontal: 4),
-            height: 8,
-            width: i == index ? 26 : 8,
-            decoration: BoxDecoration(
-              color: i == index ? color : c.border,
-              borderRadius: BorderRadius.circular(100),
+        Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 6,
+          children: [
+            Text(
+              'Already have a RanMap account?',
+              style: BrandText.bodyMd.copyWith(color: BrandColors.textBody),
             ),
+            GestureDetector(
+              onTap: onLogIn,
+              behavior: HitTestBehavior.opaque,
+              child: Text(
+                'Log in',
+                style: BrandText.weight(
+                  BrandText.labelMd,
+                  700,
+                ).copyWith(color: BrandColors.primary),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text(
+            'By continuing you agree to our Terms of Service and Privacy Policy.',
+            textAlign: TextAlign.center,
+            style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
           ),
+        ),
       ],
     );
   }

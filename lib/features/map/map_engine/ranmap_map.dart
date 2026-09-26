@@ -109,21 +109,23 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
   Future<void> _applyLocationPuck(MapboxMap map) async {
     final vehicleType = widget.userVehicleType;
     try {
-      await map.location.updateSettings(LocationComponentSettings(
-        enabled: widget.showUserLocation,
-        puckBearingEnabled: true,
-        locationPuck: vehicleType == null
-            ? null
-            : LocationPuck(
-                locationPuck3D: LocationPuck3D(
-                  modelUri: VehicleModels.assetFor(vehicleType),
-                  modelScale: const <double?>[1, 1, 1],
-                  // Matches the SDK's default 3D-puck orientation; the puck
-                  // then rotates this with the device heading.
-                  modelRotation: const <double?>[0, 0, 90],
+      await map.location.updateSettings(
+        LocationComponentSettings(
+          enabled: widget.showUserLocation,
+          puckBearingEnabled: true,
+          locationPuck: vehicleType == null
+              ? null
+              : LocationPuck(
+                  locationPuck3D: LocationPuck3D(
+                    modelUri: VehicleModels.assetFor(vehicleType),
+                    modelScale: const <double?>[1, 1, 1],
+                    // Matches the SDK's default 3D-puck orientation; the puck
+                    // then rotates this with the device heading.
+                    modelRotation: const <double?>[0, 0, 90],
+                  ),
                 ),
-              ),
-      ));
+        ),
+      );
     } catch (_) {
       // The puck needs location permission; a failure here is non-fatal.
     }
@@ -194,7 +196,8 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
   /// always lands on a freshly minted token rather than looping on a stale one.
   void _armRefresh(MapboxToken token) {
     _refreshTimer?.cancel();
-    final until = token.expiresAt.difference(DateTime.now()) - const Duration(minutes: 2);
+    final until =
+        token.expiresAt.difference(DateTime.now()) - const Duration(minutes: 2);
     _refreshTimer = Timer(until.isNegative ? Duration.zero : until, () {
       if (mounted) ref.invalidate(mapboxTokenProvider);
     });
@@ -204,29 +207,33 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
   Widget build(BuildContext context) {
     // The map can't render without a token, so gate on the vendored one: show a
     // spinner while it loads and a retry on failure, rather than a blank map.
-    return ref.watch(mapboxTokenProvider).when(
-      loading: () => const Center(child: FCircularProgress()),
-      error: (_, _) => _MapTokenError(onRetry: () => ref.invalidate(mapboxTokenProvider)),
-      data: (token) {
-        if (_appliedToken != token.token) {
-          _appliedToken = token.token;
-          _armRefresh(token);
-          // On a refresh (a new token after the map already exists) reload the
-          // style so tile requests pick up the new token. On first load the map
-          // is still null, and the token was already installed by the provider.
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _map?.loadStyleURI(widget.style.uri);
-          });
-        }
-        return MapWidget(
-          key: const ValueKey('ranmap-map'),
-          styleUri: _style.uri,
-          viewport: _viewport,
-          onMapCreated: _onMapCreated,
-          onStyleLoadedListener: _onStyleLoaded,
+    return ref
+        .watch(mapboxTokenProvider)
+        .when(
+          loading: () => const Center(child: FCircularProgress()),
+          error: (_, _) => _MapTokenError(
+            onRetry: () => ref.invalidate(mapboxTokenProvider),
+          ),
+          data: (token) {
+            if (_appliedToken != token.token) {
+              _appliedToken = token.token;
+              _armRefresh(token);
+              // On a refresh (a new token after the map already exists) reload the
+              // style so tile requests pick up the new token. On first load the map
+              // is still null, and the token was already installed by the provider.
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _map?.loadStyleURI(widget.style.uri);
+              });
+            }
+            return MapWidget(
+              key: const ValueKey('ranmap-map'),
+              styleUri: _style.uri,
+              viewport: _viewport,
+              onMapCreated: _onMapCreated,
+              onStyleLoadedListener: _onStyleLoaded,
+            );
+          },
         );
-      },
-    );
   }
 }
 

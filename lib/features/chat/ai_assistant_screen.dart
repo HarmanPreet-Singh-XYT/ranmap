@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:forui/forui.dart';
 
 import '../../core/constants/defaults.dart';
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/validation.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_text_field.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/ai_message.dart';
 import '../premium/paywall.dart';
@@ -56,15 +60,18 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
     setState(() {
       _sending = true;
       _localMessages.add(local);
+      // Bound the echo list (consumed echoes are filtered out at render).
+      if (_localMessages.length > 50) {
+        _localMessages.removeRange(0, _localMessages.length - 50);
+      }
     });
     _inputController.clear();
     _scrollToBottom();
 
     try {
-      final newConversationId = await ref.read(aiRepositoryProvider).sendMessage(
-            conversationId: _conversationId,
-            content: text,
-          );
+      final newConversationId = await ref
+          .read(aiRepositoryProvider)
+          .sendMessage(conversationId: _conversationId, content: text);
       setState(() => _conversationId = newConversationId);
       ref.invalidate(aiMessagesProvider(newConversationId));
       ref.invalidate(aiConversationsProvider);
@@ -95,6 +102,14 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
     }
   }
 
+  static int _remoteMatchCount(List<AiMessage> remote, String key) {
+    var count = 0;
+    for (final m in remote) {
+      if ('${m.role}\u0000${m.content}' == key) count++;
+    }
+    return count;
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
@@ -108,92 +123,136 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
     final remoteMessages = _conversationId == kNewConversationId
         ? const AsyncValue<List<AiMessage>>.data([])
         : ref.watch(aiMessagesProvider(_conversationId));
 
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: const Text('AI Assistant'),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
+    return BrandScaffold(
+      header: BrandHeader(
+        title: 'AI Assistant',
+        onBack: () => Navigator.of(context).maybePop(),
       ),
       child: Column(
         children: [
           Expanded(
             child: remoteMessages.when(
-              loading: () => const Center(child: FCircularProgress()),
+              loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => ErrorRetry(
                 error: e,
-                onRetry: () => ref.invalidate(aiMessagesProvider(_conversationId)),
+                onRetry: () =>
+                    ref.invalidate(aiMessagesProvider(_conversationId)),
               ),
               data: (remote) {
                 // Merge server history with any not-yet-refreshed local echo.
-                final pendingLocal = _localMessages
-                    .where((m) => !remote.any((r) => r.content == m.content && r.role == m.role))
-                    .toList();
-                final all = [...remote, ...pendingLocal]..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+                // Match by (role, content) count — not by mere presence — so
+                // sending the same text twice doesn't make the second echo
+                // vanish the moment the first server row arrives.
+                final consumed = <String, int>{};
+                final pendingLocal = <AiMessage>[];
+                for (final local in _localMessages) {
+                  final key = '${local.role}\u0000${local.content}';
+                  final available =
+                      _remoteMatchCount(remote, key) - (consumed[key] ?? 0);
+                  if (available > 0) {
+                    consumed[key] = (consumed[key] ?? 0) + 1;
+                    continue;
+                  }
+                  pendingLocal.add(local);
+                }
+                final all = [...remote, ...pendingLocal]
+                  ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
                 if (all.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Text(
-                        'Ask me to remember a place, plan a new trip, or schedule '
-                        'one — e.g. "save Joshua Tree as a stop", "create a trip '
-                        'called Road Trip", or "schedule Road Trip for next Friday '
-                        'at 8am".',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: c.mutedForeground),
-                      ),
+                  return const Center(
+                    child: BrandEmptyState(
+                      icon: Icons.smart_toy_outlined,
+                      title: 'Ask the trip assistant',
+                      message:
+                          'Remember a place, plan a new trip, or schedule one — '
+                          'e.g. "save Joshua Tree as a stop", "create a trip '
+                          'called Road Trip", or "schedule Road Trip for next '
+                          'Friday at 8am".',
                     ),
                   );
                 }
 
                 return ListView.builder(
                   controller: _scrollController,
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
                   itemCount: all.length,
-                  itemBuilder: (context, index) => _MessageBubble(message: all[index]),
+                  itemBuilder: (context, index) =>
+                      _MessageBubble(message: all[index]),
                 );
               },
             ),
           ),
           if (_sending)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 6),
-              child: FProgress(),
-            ),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: FTextField(
-                      control: FTextFieldControl.managed(controller: _inputController),
-                      hint: 'Ask the trip assistant…',
-                      maxLines: 4,
-                      minLines: 1,
-                      maxLength: kChatMessageMaxLength,
-                      textInputAction: TextInputAction.send,
-                      onSubmit: (_) => _send(),
-                      enabled: !_sending,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  FButton.icon(
-                    onPress: _sending ? null : _send,
-                    child: const Icon(Icons.send_rounded),
-                  ),
-                ],
+              padding: EdgeInsets.symmetric(vertical: BrandSpace.sm),
+              child: SizedBox(
+                height: 18,
+                width: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
               ),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              BrandSpace.md,
+              BrandSpace.sm,
+              BrandSpace.md,
+              BrandSpace.md,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: BrandTextField(
+                    controller: _inputController,
+                    hint: 'Ask the trip assistant…',
+                    maxLength: kChatMessageMaxLength,
+                    maxLines: 4,
+                    minLines: 1,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _send(),
+                    enabled: !_sending,
+                  ),
+                ),
+                const SizedBox(width: BrandSpace.sm),
+                _SendButton(onTap: _sending ? null : _send, enabled: !_sending),
+              ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The circular grass-green send action that pairs with the composer field.
+class _SendButton extends StatelessWidget {
+  const _SendButton({required this.onTap, required this.enabled});
+
+  final VoidCallback? onTap;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return BrandPressable(
+      onTap: onTap,
+      enabled: enabled,
+      child: Container(
+        height: 56,
+        width: 56,
+        decoration: BoxDecoration(
+          color: BrandColors.primaryContainer,
+          shape: BoxShape.circle,
+          boxShadow: BrandShadows.primaryGlow,
+        ),
+        child: Icon(
+          Icons.send_rounded,
+          size: 22,
+          color: BrandColors.onPrimary,
+        ),
       ),
     );
   }
@@ -206,22 +265,27 @@ class _MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
     final isUser = message.isUser;
+    final bg = isUser
+        ? BrandColors.primaryContainer
+        : BrandColors.surfaceContainerLow;
+    final fg = isUser ? BrandColors.onPrimary : BrandColors.textHeadline;
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
+        margin: const EdgeInsets.symmetric(vertical: BrandSpace.xs),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.75,
+        ),
         decoration: BoxDecoration(
-          color: isUser ? c.activeRoute : c.surfaceAlt,
-          borderRadius: BorderRadius.circular(16),
+          color: bg,
+          borderRadius: BrandRadii.cardRadius,
         ),
         child: Text(
           message.content,
-          style: TextStyle(color: isUser ? Colors.white : c.foreground),
+          style: BrandText.bodyMd.copyWith(color: fg),
         ),
       ),
     );

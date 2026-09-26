@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:forui/forui.dart';
 
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/error_retry.dart';
 import '../social/social_providers.dart';
 import '../trip/trip_providers.dart';
@@ -10,17 +11,19 @@ import 'chat_providers.dart';
 import 'chat_screen.dart';
 
 /// Lists chat channels the user can open: one per trip, one per group.
+///
+/// Rendered as the body of the "Group Chat" tab (no scaffold of its own), in
+/// the brand's section-header + icon-row language.
 class ChatChannelsScreen extends ConsumerWidget {
   const ChatChannelsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final c = NavColors.of(context);
     final tripsAsync = ref.watch(myTripsProvider);
     final groupsAsync = ref.watch(myGroupsProvider);
 
     if (tripsAsync.isLoading || groupsAsync.isLoading) {
-      return const Center(child: FCircularProgress());
+      return const Center(child: CircularProgressIndicator());
     }
     final error = tripsAsync.error ?? groupsAsync.error;
     if (error != null) {
@@ -37,86 +40,81 @@ class ChatChannelsScreen extends ConsumerWidget {
     final groups = groupsAsync.valueOrNull ?? const [];
 
     if (trips.isEmpty && groups.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Text(
-            'Join a trip or group to start chatting.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: c.mutedForeground),
-          ),
+      return const Center(
+        child: BrandEmptyState(
+          icon: Icons.forum_outlined,
+          title: 'No channels yet',
+          message: 'Join a trip or group to start chatting.',
         ),
       );
     }
 
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
       children: [
         if (trips.isNotEmpty) ...[
-          _SectionHeader(title: 'Trips', color: c),
-          FTileGroup(
-            children: [
-              for (final trip in trips)
-                FTile(
-                  prefix: const Icon(Icons.directions_car_filled_rounded),
-                  title: Text(trip.title),
-                  onPress: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => ChatScreen(
-                        channel: ChatChannel.trip(trip.id),
-                        title: trip.title,
+          const BrandSectionHeader(
+            icon: Icons.directions_car_filled_rounded,
+            title: 'Trips',
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          BrandCard(
+            padding: const EdgeInsets.symmetric(
+              horizontal: BrandSpace.md,
+              vertical: BrandSpace.xs,
+            ),
+            child: Column(
+              children: [
+                for (final (i, trip) in trips.indexed) ...[
+                  if (i > 0) const BrandRowDivider(),
+                  BrandListRow(
+                    icon: Icons.directions_car_filled_rounded,
+                    title: trip.title,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ChatScreen(
+                          channel: ChatChannel.trip(trip.id),
+                          title: trip.title,
+                        ),
                       ),
                     ),
                   ),
-                ),
-            ],
+                ],
+              ],
+            ),
           ),
         ],
         if (groups.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          _SectionHeader(title: 'Groups', color: c),
-          FTileGroup(
-            children: [
-              for (final group in groups)
-                FTile(
-                  prefix: const Icon(Icons.groups_rounded),
-                  title: Text(group.name),
-                  onPress: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => ChatScreen(
-                        channel: ChatChannel.group(group.id),
-                        title: group.name,
+          const SizedBox(height: BrandSpace.lg),
+          const BrandSectionHeader(icon: Icons.groups_rounded, title: 'Groups'),
+          const SizedBox(height: BrandSpace.sm),
+          BrandCard(
+            padding: const EdgeInsets.symmetric(
+              horizontal: BrandSpace.md,
+              vertical: BrandSpace.xs,
+            ),
+            child: Column(
+              children: [
+                for (final (i, group) in groups.indexed) ...[
+                  if (i > 0) const BrandRowDivider(),
+                  BrandListRow(
+                    icon: Icons.groups_rounded,
+                    title: group.name,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ChatScreen(
+                          channel: ChatChannel.group(group.id),
+                          title: group.name,
+                        ),
                       ),
                     ),
                   ),
-                ),
-            ],
+                ],
+              ],
+            ),
           ),
         ],
       ],
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.title, required this.color});
-
-  final String title;
-  final NavColors color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
-      child: Text(
-        title,
-        style: TextStyle(
-          color: color.activeRoute,
-          fontWeight: FontWeight.w700,
-          fontSize: 13,
-          letterSpacing: 0.4,
-        ),
-      ),
     );
   }
 }

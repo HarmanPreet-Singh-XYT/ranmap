@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/theme/nav_palette.dart';
+import '../../../core/theme/brand_palette.dart';
 
-/// The Ranmap brand mark: a rounded gradient tile with a navigation glyph.
+/// The Ranmap brand mark: a rounded gradient tile with a navigation glyph,
+/// in the brand's grass-green ramp.
 class BrandMark extends StatelessWidget {
   const BrandMark({super.key, this.size = 72});
 
@@ -10,7 +11,6 @@ class BrandMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = NavColors.of(context);
     return Container(
       height: size,
       width: size,
@@ -19,17 +19,21 @@ class BrandMark extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [c.activeRoute, const Color(0xFF4C9AF5)],
+          colors: [BrandColors.primaryContainer, BrandColors.primary],
         ),
         boxShadow: [
           BoxShadow(
-            color: c.activeRoute.withValues(alpha: 0.35),
+            color: BrandColors.primaryContainer.withValues(alpha: 0.35),
             offset: const Offset(0, 10),
             blurRadius: 24,
           ),
         ],
       ),
-      child: Icon(Icons.navigation_rounded, color: Colors.white, size: size * 0.55),
+      child: Icon(
+        Icons.navigation_rounded,
+        color: Colors.white,
+        size: size * 0.55,
+      ),
     );
   }
 }

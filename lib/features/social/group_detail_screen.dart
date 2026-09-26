@@ -2,10 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 
-import '../../core/theme/nav_palette.dart';
+import '../../core/theme/brand_palette.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_list_row.dart';
+import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_text_field.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/group.dart';
 import '../../data/services/supabase_service.dart';
@@ -23,14 +28,13 @@ class GroupDetailScreen extends ConsumerWidget {
     required String title,
     required String body,
     required String confirmLabel,
-  }) =>
-      showAppConfirmDialog(
-        context,
-        title: title,
-        message: body,
-        confirmLabel: confirmLabel,
-        destructive: true,
-      );
+  }) => showAppConfirmDialog(
+    context,
+    title: title,
+    message: body,
+    confirmLabel: confirmLabel,
+    destructive: true,
+  );
 
   Future<void> _leaveGroup(BuildContext context, WidgetRef ref) async {
     final confirmed = await _confirm(
@@ -49,7 +53,12 @@ class GroupDetailScreen extends ConsumerWidget {
     }
   }
 
-  Future<void> _removeMember(BuildContext context, WidgetRef ref, String userId, String username) async {
+  Future<void> _removeMember(
+    BuildContext context,
+    WidgetRef ref,
+    String userId,
+    String username,
+  ) async {
     final confirmed = await _confirm(
       context,
       title: 'Remove @$username?',
@@ -58,8 +67,27 @@ class GroupDetailScreen extends ConsumerWidget {
     );
     if (!confirmed) return;
     try {
-      await ref.read(groupRepositoryProvider).removeMember(groupId: group.id, userId: userId);
+      await ref
+          .read(groupRepositoryProvider)
+          .removeMember(groupId: group.id, userId: userId);
       ref.invalidate(groupMembersProvider(group.id));
+    } catch (e) {
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
+
+  Future<void> _deleteGroup(BuildContext context, WidgetRef ref) async {
+    final confirmed = await _confirm(
+      context,
+      title: 'Delete group?',
+      body: 'This permanently deletes the group for everyone.',
+      confirmLabel: 'Delete',
+    );
+    if (!confirmed) return;
+    try {
+      await ref.read(groupRepositoryProvider).deleteGroup(group.id);
+      ref.invalidate(myGroupsProvider);
+      if (context.mounted) Navigator.of(context).pop();
     } catch (e) {
       if (context.mounted) showAppToast(context, friendlyError(e), error: true);
     }
@@ -74,17 +102,31 @@ class GroupDetailScreen extends ConsumerWidget {
       return;
     }
     final myUid = SupabaseService.currentUser?.id;
-    final candidates = friendsAsync.map((row) {
-      final isRequester = row['requester_id'] == myUid;
-      final other = isRequester
-          ? row['addressee'] as Map<String, dynamic>?
-          : row['requester'] as Map<String, dynamic>?;
-      return other;
-    }).whereType<Map<String, dynamic>>().toList();
+    // Don't offer people who are already in the group — inserting them again
+    // hits the (group_id, user_id) primary key.
+    final existingIds = {
+      for (final member
+          in (ref.read(groupMembersProvider(group.id)).valueOrNull ?? const []))
+        member['user_id'] as String?,
+    };
+    final candidates = friendsAsync
+        .map((row) {
+          final isRequester = row['requester_id'] == myUid;
+          final other = isRequester
+              ? row['addressee'] as Map<String, dynamic>?
+              : row['requester'] as Map<String, dynamic>?;
+          return other;
+        })
+        .whereType<Map<String, dynamic>>()
+        .where((profile) => !existingIds.contains(profile['id']))
+        .toList();
 
     if (candidates.isEmpty) {
       if (context.mounted) {
-        showAppToast(context, 'Add friends first, then invite them to a group.');
+        showAppToast(
+          context,
+          'Add friends first, then invite them to a group.',
+        );
       }
       return;
     }
@@ -96,20 +138,27 @@ class GroupDetailScreen extends ConsumerWidget {
       builder: (context) => ListView(
         shrinkWrap: true,
         children: [
-          FTileGroup(
-            children: [
-              for (final profile in candidates)
-                FTile(
-                  prefix: Container(
-                    height: 40,
-                    width: 40,
-                    decoration: BoxDecoration(color: NavColors.of(context).surfaceAlt, shape: BoxShape.circle),
-                    child: Icon(Icons.person, color: NavColors.of(context).activeRoute, size: 20),
-                  ),
-                  title: Text('@${profile['username']}'),
-                  onPress: () => Navigator.of(context).pop(profile),
-                ),
-            ],
+          Padding(
+            padding: const EdgeInsets.all(BrandSpace.md),
+            child: BrandCard(
+              padding: const EdgeInsets.symmetric(
+                horizontal: BrandSpace.md,
+                vertical: BrandSpace.xs,
+              ),
+              child: Column(
+                children: [
+                  for (final (i, profile) in candidates.indexed) ...[
+                    if (i > 0) const BrandRowDivider(),
+                    BrandListRow(
+                      icon: Icons.person_rounded,
+                      title: '@${profile['username']}',
+                      showChevron: false,
+                      onTap: () => Navigator.of(context).pop(profile),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -134,57 +183,87 @@ class GroupDetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final c = NavColors.of(context);
     final membersAsync = ref.watch(groupMembersProvider(group.id));
     final myUid = SupabaseService.currentUser?.id;
     final isOwner = myUid == group.ownerId;
 
-    return FScaffold(
-      childPad: false,
-      header: FHeader.nested(
-        title: Text(group.name),
-        prefixes: [FHeaderAction.back(onPress: () => Navigator.of(context).maybePop())],
-        suffixes: [
-          if (!isOwner)
-            FHeaderAction(
-              icon: const Icon(Icons.logout_rounded),
-              onPress: () => _leaveGroup(context, ref),
-            ),
-        ],
+    return BrandScaffold(
+      header: BrandHeader(
+        title: group.name,
+        onBack: () => Navigator.of(context).maybePop(),
       ),
       child: Stack(
         children: [
           membersAsync.when(
             data: (members) => ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+              padding: const EdgeInsets.only(top: BrandSpace.sm, bottom: 96),
               children: [
-                FTileGroup(
-                  children: [
-                    for (final member in members) _memberTile(context, c, ref, member, isOwner, myUid),
-                  ],
+                BrandCard(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: BrandSpace.md,
+                    vertical: BrandSpace.xs,
+                  ),
+                  child: Column(
+                    children: [
+                      for (final (i, member) in members.indexed) ...[
+                        if (i > 0) const BrandRowDivider(),
+                        _memberTile(context, ref, member, isOwner, myUid),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: BrandSpace.lg),
+                BrandCard(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: BrandSpace.md,
+                    vertical: BrandSpace.xs,
+                  ),
+                  child: BrandListRow(
+                    icon: isOwner
+                        ? Icons.delete_outline_rounded
+                        : Icons.logout_rounded,
+                    iconBackground: BrandColors.errorContainer,
+                    iconColor: BrandColors.error,
+                    titleColor: BrandColors.error,
+                    title: isOwner ? 'Delete group' : 'Leave group',
+                    subtitle: isOwner
+                        ? 'Permanently deletes the group for everyone'
+                        : 'You will no longer see this group or its shared trips',
+                    showChevron: false,
+                    onTap: () => isOwner
+                        ? _deleteGroup(context, ref)
+                        : _leaveGroup(context, ref),
+                  ),
                 ),
               ],
             ),
-            loading: () => const Center(child: FCircularProgress()),
-            error: (e, _) => ErrorRetry(error: e, onRetry: () => ref.invalidate(groupMembersProvider(group.id))),
-          ),
-          Positioned(
-            right: 16,
-            bottom: 16,
-            child: FButton(
-              onPress: () => _addFriend(context, ref),
-              prefix: const Icon(Icons.person_add),
-              child: const Text('Add member'),
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => ErrorRetry(
+              error: e,
+              onRetry: () => ref.invalidate(groupMembersProvider(group.id)),
             ),
           ),
+          // Only the owner may add members (RLS enforces it too), and the FAB
+          // clears the home indicator on gesture-nav devices.
+          if (isOwner)
+            Positioned(
+              right: BrandSpace.md,
+              bottom: BrandSpace.md,
+              child: BrandPrimaryButton(
+                label: 'Add member',
+                leadingIcon: Icons.person_add_rounded,
+                trailingIcon: null,
+                expand: false,
+                onPressed: () => _addFriend(context, ref),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  FTile _memberTile(
+  Widget _memberTile(
     BuildContext context,
-    NavColors c,
     WidgetRef ref,
     Map<String, dynamic> member,
     bool isOwner,
@@ -194,22 +273,17 @@ class GroupDetailScreen extends ConsumerWidget {
     final userId = member['user_id'] as String?;
     final username = profile?['username'] as String? ?? 'unknown';
     final canRemove = isOwner && userId != null && userId != myUid;
-    return FTile(
-      prefix: Container(
-        height: 40,
-        width: 40,
-        decoration: BoxDecoration(color: c.surfaceAlt, shape: BoxShape.circle),
-        child: Icon(Icons.person, color: c.activeRoute, size: 20),
-      ),
-      title: Text('@$username'),
-      suffix: canRemove
-          ? FButton.icon(
-              variant: .ghost,
-              size: .sm,
-              onPress: () => _removeMember(context, ref, userId, username),
-              child: Icon(Icons.person_remove_outlined, color: c.destructive),
+    return BrandListRow(
+      icon: Icons.person_rounded,
+      title: '@$username',
+      showChevron: false,
+      trailing: canRemove
+          ? BrandFieldAction(
+              icon: Icons.person_remove_outlined,
+              color: BrandColors.error,
+              onTap: () => _removeMember(context, ref, userId, username),
             )
-          : Text(member['role'] as String? ?? 'member'),
+          : BrandPill(label: member['role'] as String? ?? 'member'),
     );
   }
 }

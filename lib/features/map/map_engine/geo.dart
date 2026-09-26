@@ -14,7 +14,8 @@ abstract final class Geo {
   static Position pos(double lat, double lng) => Position(lng, lat);
 
   /// A GeoJSON `Point` from the app's lat/lng order.
-  static Point point(double lat, double lng) => Point(coordinates: pos(lat, lng));
+  static Point point(double lat, double lng) =>
+      Point(coordinates: pos(lat, lng));
 
   /// A GeoJSON `LineString` from a decoded route polyline.
   static LineString lineString(List<Position> coordinates) =>

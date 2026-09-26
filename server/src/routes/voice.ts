@@ -1,4 +1,4 @@
-import { AccessToken } from "livekit-server-sdk";
+import { AccessToken, TrackSource } from "livekit-server-sdk";
 import { Router } from "express";
 import { asyncHandler } from "../lib/async-handler.js";
 import { env } from "../lib/env.js";
@@ -100,7 +100,15 @@ voiceRouter.post(
         name: identity,
         ttl: "1h",
       });
-      token.addGrant({ room: roomName, roomJoin: true, canPublish: true, canSubscribe: true });
+      token.addGrant({
+        room: roomName,
+        roomJoin: true,
+        canPublish: true,
+        canSubscribe: true,
+        // Audio only: grant the microphone (and nothing else) so this matches
+        // the audio-only feature — the app has no camera-in-call rationale.
+        canPublishSources: [TrackSource.MICROPHONE],
+      });
 
       res.json({ url: livekitUrl, token: await token.toJwt(), roomName });
     } catch (err) {

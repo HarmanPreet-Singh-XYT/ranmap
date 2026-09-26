@@ -7,7 +7,9 @@ import '../../data/models/trip_stop.dart';
 import '../../data/repositories/trip_repository.dart';
 import '../../data/services/supabase_service.dart';
 
-final tripRepositoryProvider = Provider<TripRepository>((ref) => TripRepository());
+final tripRepositoryProvider = Provider<TripRepository>(
+  (ref) => TripRepository(),
+);
 
 /// All trips the current user is part of, newest first.
 final myTripsProvider = FutureProvider.autoDispose<List<Trip>>((ref) {
@@ -26,36 +28,41 @@ final activeTripProvider = FutureProvider.autoDispose<Trip?>((ref) async {
 });
 
 /// Members (with joined profile) of a given trip.
-final tripMembersProvider =
-    FutureProvider.autoDispose.family<List<Map<String, dynamic>>, String>((ref, tripId) {
-  return ref.watch(tripRepositoryProvider).membersFor(tripId);
-});
+final tripMembersProvider = FutureProvider.autoDispose
+    .family<List<Map<String, dynamic>>, String>((ref, tripId) {
+      return ref.watch(tripRepositoryProvider).membersFor(tripId);
+    });
 
 /// Trip invites sent to the current user that are still pending.
-final tripInvitesProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) {
-  return ref.watch(tripRepositoryProvider).incomingTripInvites();
-});
+final tripInvitesProvider =
+    FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) {
+      return ref.watch(tripRepositoryProvider).incomingTripInvites();
+    });
 
 /// Stops planned/logged for a trip, chronological.
-final tripStopsProvider =
-    FutureProvider.autoDispose.family<List<TripStop>, String>((ref, tripId) {
-  return ref.watch(tripRepositoryProvider).stopsFor(tripId);
-});
+final tripStopsProvider = FutureProvider.autoDispose
+    .family<List<TripStop>, String>((ref, tripId) {
+      return ref.watch(tripRepositoryProvider).stopsFor(tripId);
+    });
 
 /// Expenses logged for a trip.
-final tripExpensesProvider =
-    FutureProvider.autoDispose.family<List<TripExpense>, String>((ref, tripId) {
-  return ref.watch(tripRepositoryProvider).expensesFor(tripId);
-});
+final tripExpensesProvider = FutureProvider.autoDispose
+    .family<List<TripExpense>, String>((ref, tripId) {
+      return ref.watch(tripRepositoryProvider).expensesFor(tripId);
+    });
 
 /// The current user's stats rollup for a trip (distance, speed, duration).
-final tripStatsProvider =
-    FutureProvider.autoDispose.family<TripStats?, String>((ref, tripId) {
-  final uid = SupabaseService.currentUserId;
-  return ref.watch(tripRepositoryProvider).statsFor(tripId: tripId, userId: uid);
-});
+final tripStatsProvider = FutureProvider.autoDispose.family<TripStats?, String>(
+  (ref, tripId) {
+    final uid = SupabaseService.currentUserId;
+    return ref
+        .watch(tripRepositoryProvider)
+        .statsFor(tripId: tripId, userId: uid);
+  },
+);
 
 /// Every trip's stats rollup for the current user, for the history screen.
-final myTripStatsProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) {
-  return ref.watch(tripRepositoryProvider).myTripStats();
-});
+final myTripStatsProvider =
+    FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) {
+      return ref.watch(tripRepositoryProvider).myTripStats();
+    });

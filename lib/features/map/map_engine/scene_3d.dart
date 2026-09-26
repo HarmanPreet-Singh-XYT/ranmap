@@ -34,7 +34,11 @@ abstract final class Scene3D {
   }) async {
     Future<void> config(String name, Object value) async {
       try {
-        await map.style.setStyleImportConfigProperty(basemapImportId, name, value);
+        await map.style.setStyleImportConfigProperty(
+          basemapImportId,
+          name,
+          value,
+        );
       } catch (_) {
         // Not a Standard style (e.g. Outdoors): no `basemap` import to configure.
       }
@@ -53,16 +57,20 @@ abstract final class Scene3D {
     try {
       if (enabled) {
         if (!await map.style.styleSourceExists(_terrainSourceId)) {
-          await map.style.addSource(RasterDemSource(
-            id: _terrainSourceId,
-            url: _demTilesetUrl,
-            tileSize: 512,
-          ));
+          await map.style.addSource(
+            RasterDemSource(
+              id: _terrainSourceId,
+              url: _demTilesetUrl,
+              tileSize: 512,
+            ),
+          );
         }
-        await map.style.setStyleTerrain(jsonEncode({
-          'source': _terrainSourceId,
-          'exaggeration': _terrainExaggeration,
-        }));
+        await map.style.setStyleTerrain(
+          jsonEncode({
+            'source': _terrainSourceId,
+            'exaggeration': _terrainExaggeration,
+          }),
+        );
       } else {
         // A null terrain source flattens the scene back to 2D.
         await map.style.setStyleTerrain(jsonEncode({'source': null}));
