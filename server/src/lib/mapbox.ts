@@ -15,6 +15,12 @@ export interface NormalizedRoute {
   polyline: string;
 }
 
+/** How much a stop adds to the drive, in provider terms. */
+export interface NormalizedDetour {
+  durationSeconds: number;
+  distanceMeters: number;
+}
+
 /** One place of interest, as the client receives it. */
 export interface NormalizedPlace {
   id: string;
@@ -22,6 +28,34 @@ export interface NormalizedPlace {
   lat: number;
   lng: number;
   category: string | null;
+  /**
+   * Measured from the search anchor to this place, when one was available.
+   * Optional and per-place: it's attached by the places route after a real
+   * Directions call, and omitted whenever that call isn't possible.
+   */
+  detour?: NormalizedDetour;
+}
+
+/**
+ * Our vehicle modes (the same set as `profiles.vehicle_type`) mapped to the
+ * Mapbox Directions profile that routes the way that mode travels. `car`,
+ * `suv` and `other` all drive; `bike` and `scooter` cycle. Anything not in the
+ * map is an unrecognised mode and maps to null so a caller can reject it.
+ */
+const PROFILE_BY_MODE: Record<string, string> = {
+  car: "driving",
+  suv: "driving",
+  other: "driving",
+  bike: "cycling",
+  scooter: "cycling",
+};
+
+/** The default Mapbox Directions profile when no mode is given. */
+export const DEFAULT_MAPBOX_PROFILE = "driving";
+
+/** The Mapbox Directions profile for one of our modes, or null if unknown. */
+export function mapboxProfileForMode(mode: string): string | null {
+  return PROFILE_BY_MODE[mode] ?? null;
 }
 
 /** Mapbox's non-error success code. Any other code but NoRoute is an error. */
@@ -97,6 +131,23 @@ export function normalizeCategorySearch(body: unknown): NormalizedPlace[] | null
     });
   }
   return places;
+}
+
+/**
+ * Attaches each measured detour to the place it belongs to, position by
+ * position, leaving places with no measurement untouched. Split out from the
+ * route so the merge — the only part of the detour flow without a network call
+ * — stays unit-testable.
+ */
+export function attachDetours(
+  places: NormalizedPlace[],
+  detours: (NormalizedDetour | null)[],
+): void {
+  for (let i = 0; i < detours.length; i += 1) {
+    const place = places[i];
+    const detour = detours[i];
+    if (place && detour) place.detour = detour;
+  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

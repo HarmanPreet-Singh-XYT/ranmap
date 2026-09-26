@@ -84,6 +84,25 @@ export const aiTools: Anthropic.Tool[] = [
       required: ["trip_title", "name", "latitude", "longitude"],
     },
   },
+  {
+    name: "propose_stop",
+    description:
+      "Propose a stop for the convoy to vote on, rather than adding it to the trip directly. The stop only becomes a real stop once a majority of the trip's members approve it. Use this when the user suggests a place to stop but the decision is the group's to make.",
+    input_schema: {
+      type: "object",
+      properties: {
+        trip_title: { type: "string", description: "Exact title of the existing trip." },
+        name: { type: "string", description: "Short name for the proposed stop." },
+        note: {
+          type: "string",
+          description: "Optional context about why this stop is being proposed.",
+        },
+        latitude: { type: "number" },
+        longitude: { type: "number" },
+      },
+      required: ["trip_title", "name"],
+    },
+  },
 ];
 
 const STOP_KINDS = new Set(["food", "scenery", "fuel", "rest", "custom"]);
@@ -305,6 +324,39 @@ export async function runTool(
     });
     if (error) return JSON.stringify({ error: "Could not add that stop." });
     return JSON.stringify({ ok: true, trip_title: title, stop: stopName, kind });
+  }
+
+  if (name === "propose_stop") {
+    const title = clamp(String(args.trip_title ?? "").trim(), MAX_NAME_CHARS);
+    const stopName = clamp(String(args.name ?? "").trim(), MAX_NAME_CHARS);
+    if (!title || !stopName) {
+      return JSON.stringify({ error: "Missing trip_title or stop name" });
+    }
+
+    const found = await findMyTripByTitle(userId, title);
+    if ("error" in found) return JSON.stringify({ error: found.error });
+
+    // Coordinates are optional: a proposal without them still records the
+    // intent, and the DB places the promoted stop at the trip's route point.
+    const lat = validLatitude(args.latitude);
+    const lng = validLongitude(args.longitude);
+
+    // Use the atomic RPC so the proposal row and its membership check apply
+    // together (mirrors create_trip).
+    const { data: proposal, error } = await supabaseAdmin.rpc("propose_stop", {
+      p_trip: found.tripId,
+      p_name: stopName,
+      p_note: typeof args.note === "string" ? clamp(args.note, MAX_NOTES_CHARS) : null,
+      p_lat: lat,
+      p_lng: lng,
+    });
+    if (error || !proposal) {
+      return JSON.stringify({ error: "Could not propose that stop." });
+    }
+
+    const row = Array.isArray(proposal) ? proposal[0] : proposal;
+    const proposalId = (row as { id?: string } | null)?.id ?? null;
+    return JSON.stringify({ ok: true, proposal_id: proposalId, name: stopName });
   }
 
   return JSON.stringify({ error: `Unknown tool: ${name}` });

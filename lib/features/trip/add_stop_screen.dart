@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 import 'package:geolocator/geolocator.dart' hide Position;
 
+import '../../core/constants/avatars.dart';
 import '../../core/offline/outbox.dart';
 import '../../core/offline/outbox_providers.dart';
 import '../../core/providers/connectivity_provider.dart';
@@ -19,11 +20,13 @@ import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/brand/brand_text_field.dart';
 import '../../data/models/trip.dart';
 import '../../data/models/trip_stop.dart';
+import '../../data/services/google_maps_api_service.dart';
 import '../../data/services/supabase_service.dart';
 // `LocationSettings` collides with mapbox's; hide it so geolocator's is used.
 import '../map/map_engine/map_engine.dart' hide LocationSettings;
 import '../map/pick_location_screen.dart';
 import 'trip_providers.dart';
+import 'vehicle_mode_ui.dart';
 
 const _kStopKinds = [
   ('food', 'Food', Icons.restaurant_rounded),
@@ -38,9 +41,14 @@ const _kStopKinds = [
 /// an optional planned-arrival time, and appends it to the end of the
 /// trip's stop order (see TripRepository.addStop).
 class AddStopScreen extends ConsumerStatefulWidget {
-  const AddStopScreen({super.key, required this.tripId});
+  const AddStopScreen({super.key, required this.tripId, this.originPoint});
 
   final String tripId;
+
+  /// The trip's planned origin, used as the previous waypoint when this is the
+  /// first stop on the trip (so the leg measures origin → this stop). Null when
+  /// the trip has no planned origin.
+  final LatLngPoint? originPoint;
 
   @override
   ConsumerState<AddStopScreen> createState() => _AddStopScreenState();
@@ -50,6 +58,8 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
   final _nameCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
   String _kind = 'custom';
+  // Travel mode for the leg leading to this stop (see the mode picker below).
+  String _mode = kDefaultVehicleType;
   LatLngPoint? _point;
   DateTime? _plannedArrival;
   bool _resolvingLocation = true;
@@ -161,10 +171,39 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
       notes: notes.isEmpty ? null : notes,
     );
 
+    // The waypoint this stop follows — the trip's current last stop, or the
+    // trip origin for the first stop. Read before inserting, since the new stop
+    // is appended at the end of the order.
+    List<TripStop>? existingStops;
+    try {
+      existingStops =
+          ref.read(tripStopsProvider(widget.tripId)).valueOrNull ??
+          await ref.read(tripRepositoryProvider).stopsFor(widget.tripId);
+    } catch (_) {
+      // Couldn't read the current chain — still add the stop, but skip the leg
+      // rather than record one at a guessed position.
+      existingStops = null;
+    }
+
     final id = generateUuidV4();
     try {
       await ref.read(tripRepositoryProvider).addStop(stop, id: id);
+      // Record the leg leading to the new stop. Best-effort: a failure here
+      // must never re-enqueue the (already-added) stop.
+      if (existingStops != null) {
+        try {
+          await _recordLeg(
+            seq: existingStops.length,
+            toStopId: id,
+            previousPoint: existingStops.isNotEmpty
+                ? existingStops.last.point
+                : widget.originPoint,
+            point: stop.point,
+          );
+        } catch (_) {}
+      }
       ref.invalidate(tripStopsProvider(widget.tripId));
+      ref.invalidate(tripLegsProvider(widget.tripId));
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (isNetworkError(e) || ref.read(isOfflineProvider)) {
@@ -174,7 +213,10 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
               OutboxEntry(
                 id: id,
                 type: OutboxType.tripStop,
-                payload: stop.toInsertJson(),
+                // The chosen travel mode travels with the stop so the replayed
+                // stop can also record its leg (see TripRepository.replayStop);
+                // `leg_mode` isn't a trip_stops column, so replay strips it.
+                payload: {...stop.toInsertJson(), 'leg_mode': _mode},
                 createdAt: DateTime.now(),
               ),
             );
@@ -191,6 +233,78 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// Records the leg from [previousPoint] to the newly-added [point] with the
+  /// chosen mode. [toStopId] is the new stop, so the leg stays bound to it
+  /// through later reorders/deletes. The leg is measured through the directions
+  /// service with that mode's profile; the geometry/distance/duration are left
+  /// null when no real route comes back, so a leg never carries invented data.
+  Future<void> _recordLeg({
+    required int seq,
+    required String toStopId,
+    required LatLngPoint? previousPoint,
+    required LatLngPoint point,
+  }) async {
+    double? distanceM;
+    double? durationS;
+    String? polyline;
+
+    if (previousPoint != null) {
+      try {
+        final routes = await GoogleMapsApiService.directions(
+          origin: Geo.pos(previousPoint.lat, previousPoint.lng),
+          destination: Geo.pos(point.lat, point.lng),
+          profile: _mode,
+        );
+        if (routes.isNotEmpty) {
+          final route = routes.first;
+          distanceM = route.distanceMeters.toDouble();
+          durationS = route.durationSeconds.toDouble();
+          polyline = route.encodedPolyline;
+        }
+      } catch (_) {
+        // No route measured — record the leg with just its chosen mode.
+      }
+    }
+
+    await ref
+        .read(tripRepositoryProvider)
+        .createTripLeg(
+          tripId: widget.tripId,
+          seq: seq,
+          toStopId: toStopId,
+          mode: _mode,
+          distanceM: distanceM,
+          durationS: durationS,
+          polyline: polyline,
+        );
+  }
+
+  /// One selectable travel-mode pill. Mirrors the stop-kind picker: the
+  /// selected mode is filled, the rest are neutral. Modes come from
+  /// [kVehicleOptions] (car | bike | scooter | suv).
+  Widget _modePill(VehicleOption option) {
+    final selected = _mode == option.id;
+    return BrandPressable(
+      borderRadius: BrandRadii.pill,
+      onTap: () => setState(() => _mode = option.id),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+        child: BrandPill(
+          label: option.label,
+          icon: vehicleModeIcon(option.id),
+          bold: selected,
+          background: selected
+              ? BrandColors.primaryContainer
+              : BrandColors.surfaceContainerLow,
+          foreground: selected
+              ? BrandColors.onPrimary
+              : BrandColors.onSurfaceVariant,
+          iconColor: selected ? BrandColors.onPrimary : BrandColors.primary,
+        ),
+      ),
+    );
   }
 
   @override
@@ -249,6 +363,20 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
                       onPressed: () => setState(() => _kind = id),
                     );
             }).toList(),
+          ),
+          const SizedBox(height: BrandSpace.lg),
+          Text(
+            'Travel mode',
+            style: BrandText.weight(
+              BrandText.titleSm,
+              700,
+            ).copyWith(color: BrandColors.textHeadline),
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          Wrap(
+            spacing: BrandSpace.sm,
+            runSpacing: BrandSpace.sm,
+            children: kVehicleOptions.map(_modePill).toList(),
           ),
           const SizedBox(height: BrandSpace.md),
           const _FieldLabel('Notes (optional)'),

@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/models/stop_proposal.dart';
 import '../../data/models/trip.dart';
 import '../../data/models/trip_expense.dart';
+import '../../data/models/trip_leg.dart';
 import '../../data/models/trip_stats.dart';
 import '../../data/models/trip_stop.dart';
 import '../../data/repositories/trip_repository.dart';
@@ -43,6 +45,20 @@ final tripInvitesProvider =
 final tripStopsProvider = FutureProvider.autoDispose
     .family<List<TripStop>, String>((ref, tripId) {
       return ref.watch(tripRepositoryProvider).stopsFor(tripId);
+    });
+
+/// Legs of a trip (each segment between consecutive waypoints, with its own
+/// mode + measured route), ordered by their position along the chain.
+final tripLegsProvider = FutureProvider.autoDispose
+    .family<List<TripLeg>, String>((ref, tripId) {
+      return ref.watch(tripRepositoryProvider).fetchTripLegs(tripId);
+    });
+
+/// Convoy stop proposals for a trip with their live tallies (approvals,
+/// rejections, the caller's own vote, member count).
+final tripProposalsProvider = FutureProvider.autoDispose
+    .family<List<StopProposal>, String>((ref, tripId) {
+      return ref.watch(tripRepositoryProvider).fetchTripProposals(tripId);
     });
 
 /// Expenses logged for a trip.

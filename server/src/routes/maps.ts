@@ -3,7 +3,14 @@ import { asyncHandler } from "../lib/async-handler.js";
 import { env } from "../lib/env.js";
 import { fail, notConfigured } from "../lib/errors.js";
 import { normalizePlaceDetails, PLACE_DETAILS_FIELD_MASK } from "../lib/google-places.js";
-import { normalizeCategorySearch, normalizeDirections } from "../lib/mapbox.js";
+import {
+  attachDetours,
+  DEFAULT_MAPBOX_PROFILE,
+  mapboxProfileForMode,
+  normalizeCategorySearch,
+  normalizeDirections,
+} from "../lib/mapbox.js";
+import type { NormalizedDetour, NormalizedPlace } from "../lib/mapbox.js";
 import { createMapboxTokenVendor } from "../lib/mapbox-token.js";
 import { isPro } from "../lib/plan-store.js";
 import { rateLimit } from "../lib/rate-limit.js";
@@ -58,13 +65,18 @@ const freeSearchTier = requireProOrTrial(
   consumeUsage,
 );
 
-const MAPBOX_DIRECTIONS_URL = "https://api.mapbox.com/directions/v5/mapbox/driving";
+// The Mapbox Directions base; the travel profile (driving/cycling) is appended
+// per request from the caller's mode (see mapboxProfileForMode).
+const MAPBOX_DIRECTIONS_BASE = "https://api.mapbox.com/directions/v5/mapbox";
 const MAPBOX_CATEGORY_URL = "https://api.mapbox.com/search/searchbox/v1/category";
 const GOOGLE_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText";
 const TIMEOUT_MS = 10_000;
 const MAX_RADIUS_METERS = 50_000;
 // Search Box caps results at 25 for /category.
 const MAX_RESULTS = 25;
+// Each detour is its own paid Directions call, so only measure the handful of
+// top results a user is likely to consider stopping at.
+const MAX_DETOUR_PLACES = 5;
 const LAT_LNG_RE = /^-?\d{1,3}(\.\d+)?,-?\d{1,3}(\.\d+)?$/;
 const DEGREES_PER_METER = 1 / 111_320;
 // Search Box's `radius` is in degrees, not meters (0.00001–10).
@@ -135,6 +147,52 @@ function providerFailed(context: string, response: ProviderResponse): boolean {
   return true;
 }
 
+/**
+ * Measures one leg from [origin] to [place] via Mapbox Directions, for the
+ * "+12 min · +8 mi" a stop would add to the drive. Returns null on any
+ * failure — a detour that can't be measured is omitted, never surfaced as an
+ * error, so a bad detour call can't take down the whole search.
+ */
+async function fetchDetour(
+  accessToken: string,
+  origin: LatLng,
+  place: NormalizedPlace,
+): Promise<NormalizedDetour | null> {
+  // Mapbox takes lng,lat order.
+  const coordinates = `${origin.longitude},${origin.latitude};${place.lng},${place.lat}`;
+  const params = new URLSearchParams({
+    // We only need the distance/time, so ask for the lightest geometry we can
+    // still normalize — `overview=false` would omit it and drop the route.
+    overview: "simplified",
+    access_token: accessToken,
+  });
+
+  try {
+    const response = await fetchJson(
+      `${MAPBOX_DIRECTIONS_BASE}/${DEFAULT_MAPBOX_PROFILE}/${coordinates}?${params.toString()}`,
+    );
+    if (providerFailed("maps: place detour", response)) return null;
+
+    const route = normalizeDirections(response.body)?.[0];
+    if (!route) return null;
+    return { durationSeconds: route.durationSeconds, distanceMeters: route.distanceMeters };
+  } catch (err) {
+    console.error("maps: place detour: request failed", err);
+    return null;
+  }
+}
+
+/** Measures detours for the first [MAX_DETOUR_PLACES] places, in parallel. */
+async function attachDetoursToPlaces(
+  accessToken: string,
+  places: NormalizedPlace[],
+  origin: LatLng,
+): Promise<void> {
+  const targets = places.slice(0, MAX_DETOUR_PLACES);
+  const detours = await Promise.all(targets.map((place) => fetchDetour(accessToken, origin, place)));
+  attachDetours(places, detours);
+}
+
 // GET /maps/token -> { token, expiresAt }
 // Hands the client a short-lived Mapbox temporary token to render the map with,
 // so the app ships no long-lived Mapbox credential: a leaked token expires
@@ -155,8 +213,11 @@ mapsRouter.get(
   }),
 );
 
-// GET /maps/directions?origin=lat,lng&destination=lat,lng
+// GET /maps/directions?origin=lat,lng&destination=lat,lng[&profile=car]
 // -> { routes: [{ summary, distanceMeters, durationSeconds, polyline }] }
+// `profile` is one of our vehicle modes (car|bike|scooter|suv|other); it maps
+// to the Mapbox travel profile. Omitted defaults to driving, so existing
+// callers are unchanged.
 mapsRouter.get(
   "/directions",
   freeSearchTier,
@@ -174,6 +235,19 @@ mapsRouter.get(
       return;
     }
 
+    // An explicit profile must be one of our modes; an unknown value is
+    // rejected the same way an unknown place `type` is. Absent → driving.
+    const profileParam = String(req.query.profile ?? "").trim();
+    let profile = DEFAULT_MAPBOX_PROFILE;
+    if (profileParam) {
+      const mapped = mapboxProfileForMode(profileParam);
+      if (mapped === null) {
+        res.status(400).json({ error: "profile must be one of car, bike, scooter, suv, other" });
+        return;
+      }
+      profile = mapped;
+    }
+
     // Mapbox takes lng,lat order.
     const coordinates = `${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}`;
     const params = new URLSearchParams({
@@ -184,7 +258,9 @@ mapsRouter.get(
     });
 
     try {
-      const response = await fetchJson(`${MAPBOX_DIRECTIONS_URL}/${coordinates}?${params.toString()}`);
+      const response = await fetchJson(
+        `${MAPBOX_DIRECTIONS_BASE}/${profile}/${coordinates}?${params.toString()}`,
+      );
       if (providerFailed("maps: directions", response)) {
         res.status(502).json({ error: "Could not fetch directions. Please try again." });
         return;
@@ -206,7 +282,11 @@ mapsRouter.get(
 // GET /maps/places/nearby?type=restaurant
 //   &location=lat,lng[&radius=5000]   -> search around a point
 //   | &route=<polyline>               -> search along that route
-// -> { places: [{ id, name, lat, lng, category }] }
+//   [&origin=lat,lng]                 -> anchor to measure each result's detour
+// -> { places: [{ id, name, lat, lng, category, detour?:
+//      { durationSeconds, distanceMeters } }] }
+// `detour` is present only for the top few results and only when an anchor
+// (the `origin`, or the search `location`) exists to measure from.
 mapsRouter.get(
   "/places/nearby",
   freeSearchTier,
@@ -231,6 +311,12 @@ mapsRouter.get(
       res.status(400).json({ error: "location must be valid lat,lng" });
       return;
     }
+
+    // The point detours are measured from: an explicit anchor, else the search
+    // centre. A pure along-route search carries no coordinate of its own, so
+    // unless the client sends `origin` its results simply come back without a
+    // detour.
+    const origin = parseLatLng(String(req.query.origin ?? "").trim()) ?? center;
 
     const params = new URLSearchParams({
       language: "en",
@@ -261,6 +347,14 @@ mapsRouter.get(
         res.status(502).json({ error: "Could not fetch nearby places. Please try again." });
         return;
       }
+
+      // Detours are best-effort: a place whose detour call fails still comes
+      // back, just without one. Skip the extra calls entirely when no anchor
+      // was supplied to measure from.
+      if (origin) {
+        await attachDetoursToPlaces(mapboxAccessToken, places, origin);
+      }
+
       res.json({ places });
     } catch (err) {
       fail(res, err, 502, "Could not fetch nearby places. Please try again.", "maps: places");

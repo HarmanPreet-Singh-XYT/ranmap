@@ -4,7 +4,9 @@ import 'package:forui/forui.dart';
 
 import 'package:intl/intl.dart';
 
+import '../../core/constants/avatars.dart';
 import '../../core/providers/settings_provider.dart';
+import '../../core/router/auth_state_provider.dart';
 import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
@@ -14,20 +16,27 @@ import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_data.dart';
 import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_timeline.dart';
 import '../../core/widgets/error_retry.dart';
+import '../../data/models/stop_proposal.dart';
 import '../../data/models/trip.dart';
 import '../../data/models/trip_expense.dart';
+import '../../data/models/trip_leg.dart';
 import '../../data/models/trip_stats.dart';
 import '../../data/models/trip_stop.dart';
 import '../../data/services/google_maps_api_service.dart';
 import '../../data/services/supabase_service.dart';
 import '../map/live_sync_providers.dart';
+import '../map/map_engine/geo.dart';
 import '../map/trip_photos_screen.dart';
 import 'add_expense_screen.dart';
 import 'add_stop_screen.dart';
+import 'trip_ledger.dart';
 import 'trip_providers.dart';
+import 'vehicle_mode_ui.dart';
 
 class TripDetailScreen extends ConsumerWidget {
   const TripDetailScreen({super.key, required this.trip});
@@ -195,7 +204,10 @@ class TripDetailScreen extends ConsumerWidget {
                 ),
                 FTabEntry(
                   label: const Text('Stops'),
-                  child: _StopsTab(tripId: trip.id),
+                  child: _StopsTab(
+                    tripId: trip.id,
+                    originPoint: trip.originPoint,
+                  ),
                 ),
                 FTabEntry(
                   label: const Text('Expenses'),
@@ -268,6 +280,11 @@ class _StatsTab extends ConsumerWidget {
           final projectedFuel = fuelCostPerKm == null
               ? null
               : _projectedFuelCost(fuelCostPerKm, routePolyline);
+          // Litres / spend / efficiency, from the fuel-category rows only.
+          final expenses = expensesAsync.valueOrNull;
+          final fuelSummary = expenses == null
+              ? null
+              : _fuelSummary(expenses, s, unit);
 
           return ListView(
             padding: const EdgeInsets.only(
@@ -327,6 +344,10 @@ class _StatsTab extends ConsumerWidget {
                   wide: true,
                 ),
               ],
+              if (fuelSummary != null) ...[
+                const SizedBox(height: BrandSpace.md),
+                fuelSummary,
+              ],
               const SizedBox(height: BrandSpace.md),
               Text(
                 'Stats update automatically while the trip is active, or pull to refresh.',
@@ -382,6 +403,103 @@ class _StatsTab extends ConsumerWidget {
     return (meters / 1000) * costPerKm;
   }
 
+  /// A fuel / efficiency block derived only from the fuel-category expense
+  /// rows: total litres pumped, what it cost, and — when both a distance and
+  /// some litres are known — the trip's efficiency. Returns null when there is
+  /// no real reading to show, so the section is omitted entirely rather than
+  /// printing zeros or placeholders.
+  Widget? _fuelSummary(
+    List<TripExpense> expenses,
+    TripStats stats,
+    DistanceUnit unit,
+  ) {
+    final fuel = expenses.where((e) => e.category == 'fuel').toList();
+    if (fuel.isEmpty) return null;
+
+    var litres = 0.0;
+    var litresRecorded = false;
+    var spend = 0.0;
+    for (final e in fuel) {
+      final l = e.fuelLiters;
+      if (l != null) {
+        litres += l;
+        litresRecorded = true;
+      }
+      spend += e.amount;
+    }
+
+    final hasLitres = litresRecorded && litres > 0;
+    final distanceKm = stats.totalDistanceKm;
+
+    // Distance per litre in the user's unit, plus its inverse per 100 units.
+    String? efficiencyValue;
+    String? efficiencyCaption;
+    if (hasLitres && distanceKm > 0) {
+      final perLitre = distanceInUnit(distanceKm / litres, unit);
+      final litresPer100 = litres / (distanceInUnit(distanceKm, unit) / 100);
+      efficiencyValue =
+          '${perLitre.toStringAsFixed(1)} ${distanceUnitSymbol(unit)}/L';
+      efficiencyCaption =
+          '${litresPer100.toStringAsFixed(1)} L/100 ${distanceUnitSymbol(unit)}';
+    }
+
+    final tiles = <Widget>[
+      if (hasLitres)
+        BrandStatTile(
+          label: 'Fuel',
+          value: '${litres.toStringAsFixed(1)} L',
+          icon: Icons.local_gas_station_rounded,
+        ),
+      if (spend > 0)
+        BrandStatTile(
+          label: 'Fuel cost',
+          value:
+              '${ledgerSymbol(fuel.first.currency)}${spend.toStringAsFixed(2)}',
+          icon: Icons.payments_outlined,
+        ),
+      if (efficiencyValue != null)
+        BrandStatTile(
+          label: 'Efficiency',
+          value: efficiencyValue,
+          caption: efficiencyCaption,
+          icon: Icons.speed_rounded,
+        ),
+    ];
+    if (tiles.isEmpty) return null;
+
+    return BrandCard(
+      padding: const EdgeInsets.all(BrandSpace.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          BrandSectionHeader(
+            icon: Icons.local_gas_station_rounded,
+            title: 'Fuel & efficiency',
+          ),
+          const SizedBox(height: BrandSpace.md),
+          for (var i = 0; i < tiles.length; i += 2) ...[
+            // Equal-height pairing, two tiles per row.
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: tiles[i]),
+                  const SizedBox(width: BrandSpace.sm),
+                  Expanded(
+                    child: i + 1 < tiles.length
+                        ? tiles[i + 1]
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ),
+            ),
+            if (i + 2 < tiles.length) const SizedBox(height: BrandSpace.sm),
+          ],
+        ],
+      ),
+    );
+  }
+
   String _formatDuration(int seconds) {
     final duration = Duration(seconds: seconds);
     final hours = duration.inHours;
@@ -430,9 +548,13 @@ class _StatTile extends StatelessWidget {
 }
 
 class _StopsTab extends ConsumerStatefulWidget {
-  const _StopsTab({required this.tripId});
+  const _StopsTab({required this.tripId, this.originPoint});
 
   final String tripId;
+
+  /// The trip's planned origin, handed to [AddStopScreen] so the first stop's
+  /// leg can be measured from it.
+  final LatLngPoint? originPoint;
 
   @override
   ConsumerState<_StopsTab> createState() => _StopsTabState();
@@ -461,28 +583,171 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
             tripId: widget.tripId,
             orderedStopIds: reordered.map((s) => s.id).toList(),
           );
+      // The new order is persisted — resync the legs so each describes the
+      // segment it now does. Best-effort: a resync failure must not undo the
+      // saved order, so it never surfaces as a reorder error.
+      try {
+        await _resyncLegs(reordered);
+      } catch (e) {
+        debugPrint('reorder: leg resync failed: $e');
+      }
     } catch (e) {
       if (mounted) showAppToast(context, friendlyError(e), error: true);
     } finally {
       ref.invalidate(tripStopsProvider(widget.tripId));
+      ref.invalidate(tripLegsProvider(widget.tripId));
       if (mounted) setState(() => _optimisticOrder = null);
     }
+  }
+
+  /// The default travel mode for a leg with no recorded mode: the current
+  /// user's profile vehicle, or the DB default when no profile is loaded.
+  String get _defaultLegMode =>
+      ref.read(myProfileProvider).valueOrNull?.vehicleType ??
+      kDefaultVehicleType;
+
+  /// Rewrites the trip's legs to match [orderedStops] (the new waypoint order:
+  /// origin → stop0 → stop1 → …), re-measuring each segment.
+  ///
+  /// Each leg's travel mode is preserved from the leg that already arrived at
+  /// the same stop (keyed by `to_stop_id`, snapshotted before the legs are
+  /// touched); a stop with no prior leg falls back to [_defaultLegMode]. Because
+  /// the segment changed, the old geometry is stale, so every leg is
+  /// re-measured through the directions service — a leg whose measurement fails
+  /// (or whose route is unknown) is still stored, with its mode and a null
+  /// measurement, never an invented one.
+  ///
+  /// Deleting every leg first and recreating them sidesteps the
+  /// `unique (trip_id, seq)` constraint that renumbering in place would hit.
+  Future<void> _resyncLegs(List<TripStop> orderedStops) async {
+    // Nothing to route when the trip has no stops.
+    if (orderedStops.isEmpty) return;
+    final repo = ref.read(tripRepositoryProvider);
+    final defaultMode = _defaultLegMode;
+
+    // Snapshot each leg's mode by the stop it arrives at, before the delete
+    // below wipes them.
+    final existingLegs =
+        ref.read(tripLegsProvider(widget.tripId)).valueOrNull ??
+        await repo.fetchTripLegs(widget.tripId);
+    final modeByStop = <String, String>{
+      for (final leg in existingLegs)
+        if (leg.toStopId != null) leg.toStopId!: leg.mode,
+    };
+
+    await repo.deleteTripLegs(widget.tripId);
+
+    for (var i = 0; i < orderedStops.length; i++) {
+      final stop = orderedStops[i];
+      final mode = modeByStop[stop.id] ?? defaultMode;
+      // The waypoint this leg leaves from: the trip origin for the first stop,
+      // otherwise the stop just before it. Null when the trip has no origin —
+      // the leg is then recorded with its mode and no measurement.
+      final previousPoint = i == 0
+          ? widget.originPoint
+          : orderedStops[i - 1].point;
+
+      double? distanceM;
+      double? durationS;
+      String? polyline;
+      if (previousPoint != null) {
+        try {
+          final routes = await GoogleMapsApiService.directions(
+            origin: Geo.pos(previousPoint.lat, previousPoint.lng),
+            destination: Geo.pos(stop.point.lat, stop.point.lng),
+            profile: mode,
+          );
+          if (routes.isNotEmpty) {
+            final route = routes.first;
+            distanceM = route.distanceMeters.toDouble();
+            durationS = route.durationSeconds.toDouble();
+            polyline = route.encodedPolyline;
+          }
+        } catch (_) {
+          // Segment changed but couldn't be re-measured — keep the mode and
+          // leave the measurement null rather than reuse stale geometry.
+        }
+      }
+
+      await repo.createTripLeg(
+        tripId: widget.tripId,
+        seq: i,
+        toStopId: stop.id,
+        mode: mode,
+        distanceM: distanceM,
+        durationS: durationS,
+        polyline: polyline,
+      );
+    }
+  }
+
+  /// The "Convoy vote" cards for the trip's still-open proposals (none when
+  /// there's nothing to vote on, so the section disappears entirely).
+  List<Widget> _convoyVoteCards(List<StopProposal> proposals) {
+    return [
+      for (var i = 0; i < proposals.length; i++) ...[
+        if (i > 0) const SizedBox(height: BrandSpace.gutterSm),
+        _ConvoyVoteCard(
+          key: ValueKey(proposals[i].id),
+          tripId: widget.tripId,
+          proposal: proposals[i],
+        ),
+      ],
+    ];
   }
 
   @override
   Widget build(BuildContext context) {
     final stopsAsync = ref.watch(tripStopsProvider(widget.tripId));
+    // Each leg is keyed by the stop it arrives at (its `to_stop_id`), so the leg
+    // leading into a stop can be shown just above it and follows that stop when
+    // the itinerary is reordered. Segments with no leg are left blank rather
+    // than given an invented one.
+    final legs =
+        ref.watch(tripLegsProvider(widget.tripId)).valueOrNull ??
+        const <TripLeg>[];
+    final legByStopId = {
+      for (final leg in legs)
+        if (leg.toStopId != null) leg.toStopId!: leg,
+    };
+    // Only open proposals are shown; a promoted/rejected one leaves the vote
+    // card and (on promotion) shows up in the itinerary below.
+    final openProposals =
+        ref
+            .watch(tripProposalsProvider(widget.tripId))
+            .valueOrNull
+            ?.where((p) => p.isOpen)
+            .toList() ??
+        const <StopProposal>[];
 
     return Stack(
       children: [
         stopsAsync.when(
           data: (fetched) {
+            final voteCards = _convoyVoteCards(openProposals);
             if (fetched.isEmpty) {
-              return const Center(
-                child: BrandEmptyState(
-                  icon: Icons.place_outlined,
-                  title: 'No stops planned yet.',
+              // Nothing to reorder yet — still surface any open votes.
+              if (voteCards.isEmpty) {
+                return const Center(
+                  child: BrandEmptyState(
+                    icon: Icons.place_outlined,
+                    title: 'No stops planned yet.',
+                  ),
+                );
+              }
+              return ListView(
+                padding: const EdgeInsets.only(
+                  top: BrandSpace.md,
+                  bottom: BrandSpace.xl,
                 ),
+                children: [
+                  ...voteCards,
+                  const SizedBox(height: BrandSpace.xl),
+                  const BrandEmptyState(
+                    icon: Icons.place_outlined,
+                    title: 'No stops planned yet.',
+                  ),
+                ],
               );
             }
             final stops = _optimisticOrder ?? fetched;
@@ -497,6 +762,16 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
               children: [
                 if (nextStop != null)
                   _NextStopEta(tripId: widget.tripId, stop: nextStop),
+                if (voteCards.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      BrandSpace.md,
+                      BrandSpace.md,
+                      BrandSpace.md,
+                      0,
+                    ),
+                    child: Column(children: voteCards),
+                  ),
                 Expanded(
                   child: ReorderableListView.builder(
                     padding: const EdgeInsets.only(
@@ -508,28 +783,73 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
                         _onReorder(stops, oldIndex, newIndex),
                     itemBuilder: (context, i) {
                       final stop = stops[i];
-                      return Padding(
+                      // Arrived stops are done; the first not-yet-arrived stop is
+                      // the one you're heading to; the rest are upcoming.
+                      final state = stop.actualArrival != null
+                          ? BrandTimelineState.done
+                          : identical(stop, nextStop)
+                          ? BrandTimelineState.active
+                          : BrandTimelineState.upcoming;
+                      // The leg that arrives at this stop, when one was
+                      // recorded.
+                      final leg = legByStopId[stop.id];
+                      return BrandTimelineRow(
                         key: ValueKey(stop.id),
-                        padding: const EdgeInsets.only(
-                          bottom: BrandSpace.gutterSm,
-                        ),
-                        child: Dismissible(
-                          key: ValueKey('dismiss-${stop.id}'),
-                          direction: DismissDirection.endToStart,
-                          confirmDismiss: (_) =>
-                              _confirmDeleteDialog(context, 'Delete stop?'),
-                          onDismissed: (_) async {
-                            try {
-                              await ref
-                                  .read(tripRepositoryProvider)
-                                  .deleteStop(stop.id);
-                              ref.invalidate(tripStopsProvider(widget.tripId));
-                            } catch (_) {
-                              ref.invalidate(tripStopsProvider(widget.tripId));
-                            }
-                          },
-                          background: _dismissBackground(),
-                          child: _StopCard(stop: stop),
+                        state: state,
+                        isLast: i == stops.length - 1,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (leg != null) ...[
+                              _LegIndicator(leg: leg),
+                              const SizedBox(height: BrandSpace.sm),
+                            ],
+                            Dismissible(
+                              key: ValueKey('dismiss-${stop.id}'),
+                              direction: DismissDirection.endToStart,
+                              confirmDismiss: (_) =>
+                                  _confirmDeleteDialog(context, 'Delete stop?'),
+                              onDismissed: (_) async {
+                                // The chain that remains once this stop is gone,
+                                // used to resync the survivors' legs below.
+                                final remaining = stops
+                                    .where((s) => s.id != stop.id)
+                                    .toList();
+                                try {
+                                  await ref
+                                      .read(tripRepositoryProvider)
+                                      .deleteStop(stop.id);
+                                } catch (_) {
+                                  // Fall through to refresh the list below.
+                                } finally {
+                                  // Refresh the itinerary straight away so the
+                                  // dismissed row doesn't linger while the (slower)
+                                  // leg resync below runs.
+                                  ref.invalidate(
+                                    tripStopsProvider(widget.tripId),
+                                  );
+                                }
+                                // Deleting the stop cascades its own leg away
+                                // (0016_trip_legs.sql); resync the rest so each
+                                // surviving leg describes its (now different)
+                                // segment and the chain keeps a contiguous seq.
+                                // Best-effort: the delete is already done, so a
+                                // resync failure must not fail the dismissal.
+                                if (remaining.isNotEmpty) {
+                                  try {
+                                    await _resyncLegs(remaining);
+                                  } catch (e) {
+                                    debugPrint(
+                                      'deleteStop: leg resync failed: $e',
+                                    );
+                                  }
+                                }
+                                ref.invalidate(tripLegsProvider(widget.tripId));
+                              },
+                              background: _dismissBackground(),
+                              child: _StopCard(stop: stop),
+                            ),
+                          ],
                         ),
                       );
                     },
@@ -555,13 +875,193 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
             onPressed: () async {
               await Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => AddStopScreen(tripId: widget.tripId),
+                  builder: (_) => AddStopScreen(
+                    tripId: widget.tripId,
+                    originPoint: widget.originPoint,
+                  ),
                 ),
               );
             },
           ),
         ),
       ],
+    );
+  }
+}
+
+/// The travel-mode connector shown just above the stop a leg arrives at: the
+/// leg's mode as a brand pill, with its real measured distance/duration
+/// alongside. A leg with no measurement shows only its mode — never an
+/// invented figure.
+class _LegIndicator extends ConsumerWidget {
+  const _LegIndicator({required this.leg});
+
+  final TripLeg leg;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
+    final distance = leg.distanceM;
+    final duration = leg.durationS;
+    final measurement = [
+      if (distance != null) formatDistance(distance / 1000, unit),
+      if (duration != null) _formatLegDuration(duration),
+    ].join(' · ');
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        BrandPill(
+          label: vehicleModeLabel(leg.mode),
+          icon: vehicleModeIcon(leg.mode),
+          background: BrandColors.surfaceContainerLow,
+          foreground: BrandColors.onSurfaceVariant,
+          iconColor: BrandColors.primary,
+        ),
+        if (measurement.isNotEmpty) ...[
+          const SizedBox(width: BrandSpace.sm),
+          Text(
+            measurement,
+            style: BrandText.labelSm.copyWith(color: BrandColors.textMuted),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// A leg's routed duration as `~N min` (or `~H h M min` past an hour) — the
+/// `~` marks it as a routing estimate, not a planned arrival time.
+String _formatLegDuration(double seconds) {
+  final minutes = (seconds / 60).round();
+  if (minutes < 60) return '~$minutes min';
+  final hours = minutes ~/ 60;
+  final remainder = minutes % 60;
+  return remainder == 0 ? '~$hours h' : '~$hours h $remainder min';
+}
+
+/// A single open convoy vote: the proposed stop, the real approval tally and
+/// progress toward a majority, and the caller's Approve / Reject actions. All
+/// counts come from the server (see the `trip_proposals` RPC) — nothing is
+/// tallied on the client.
+class _ConvoyVoteCard extends ConsumerStatefulWidget {
+  const _ConvoyVoteCard({
+    super.key,
+    required this.tripId,
+    required this.proposal,
+  });
+
+  final String tripId;
+  final StopProposal proposal;
+
+  @override
+  ConsumerState<_ConvoyVoteCard> createState() => _ConvoyVoteCardState();
+}
+
+class _ConvoyVoteCardState extends ConsumerState<_ConvoyVoteCard> {
+  bool _voting = false;
+
+  Future<void> _vote(bool approve) async {
+    setState(() => _voting = true);
+    try {
+      await ref
+          .read(tripRepositoryProvider)
+          .voteStopProposal(widget.proposal.id, approve);
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    } finally {
+      // Refresh the tally, and the itinerary too — an approval that crosses the
+      // majority promotes the proposal into a real stop.
+      ref.invalidate(tripProposalsProvider(widget.tripId));
+      ref.invalidate(tripStopsProvider(widget.tripId));
+      if (mounted) setState(() => _voting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.proposal;
+    final hasVoted = p.myVote != null;
+
+    return BrandCard(
+      padding: const EdgeInsets.all(BrandSpace.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          BrandSectionHeader(
+            icon: Icons.how_to_vote_rounded,
+            title: 'Convoy vote',
+            subtitle: p.name,
+            trailing: BrandPill(
+              label: hasVoted
+                  ? (p.myVote! ? 'You approved' : 'You rejected')
+                  : 'Vote now',
+              icon: hasVoted
+                  ? Icons.check_circle_rounded
+                  : Icons.ballot_rounded,
+              background: BrandColors.surfaceContainerLow,
+              foreground: BrandColors.onSurfaceVariant,
+              iconColor: p.myVote == false ? BrandColors.error : null,
+            ),
+          ),
+          if (p.note != null) ...[
+            const SizedBox(height: BrandSpace.sm),
+            Text(
+              p.note!,
+              style: BrandText.bodySm.copyWith(color: BrandColors.textBody),
+            ),
+          ],
+          const SizedBox(height: BrandSpace.sm),
+          Row(
+            children: [
+              Text(
+                '${p.approvals} of ${p.memberCount} approved',
+                style: BrandText.weight(
+                  BrandText.labelMd,
+                  700,
+                ).copyWith(color: BrandColors.textHeadline),
+              ),
+              const Spacer(),
+              if (p.rejections > 0)
+                Text(
+                  '${p.rejections} rejected',
+                  style: BrandText.labelSm.copyWith(
+                    color: BrandColors.textMuted,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          BrandProgressBar(value: p.approvalFraction),
+          const SizedBox(height: BrandSpace.md),
+          Row(
+            children: [
+              Expanded(
+                child: BrandPrimaryButton(
+                  label: 'Approve',
+                  leadingIcon: Icons.thumb_up_rounded,
+                  trailingIcon: null,
+                  glow: false,
+                  loading: _voting,
+                  onPressed: _voting ? null : () => _vote(true),
+                ),
+              ),
+              const SizedBox(width: BrandSpace.sm),
+              Expanded(
+                child: BrandSecondaryButton(
+                  label: 'Reject',
+                  leading: Icon(
+                    Icons.thumb_down_rounded,
+                    size: 18,
+                    color: BrandColors.textHeadlineAlt,
+                  ),
+                  onPressed: _voting ? null : () => _vote(false),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -737,37 +1237,11 @@ class _ExpensesTab extends ConsumerWidget {
                 bottom: BrandSpace.xl,
               ),
               children: [
-                BrandCard(
-                  color: BrandColors.surfaceContainerLow,
-                  radius: BrandRadii.cardRadius,
-                  padding: const EdgeInsets.all(BrandSpace.md),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Total: \$${total.toStringAsFixed(2)}',
-                        style: BrandText.weight(
-                          BrandText.titleMd,
-                          800,
-                        ).copyWith(color: BrandColors.textHeadline),
-                      ),
-                      const SizedBox(height: BrandSpace.sm),
-                      Wrap(
-                        spacing: BrandSpace.gutterSm,
-                        runSpacing: BrandSpace.xs,
-                        children: byCategory.entries
-                            .map(
-                              (e) => Text(
-                                '${e.key}: \$${e.value.toStringAsFixed(2)}',
-                                style: BrandText.bodySm.copyWith(
-                                  color: BrandColors.textMuted,
-                                ),
-                              ),
-                            )
-                            .toList(),
-                      ),
-                    ],
-                  ),
+                _LedgerSummary(
+                  tripId: tripId,
+                  expenses: expenses,
+                  total: total,
+                  byCategory: byCategory,
                 ),
                 const SizedBox(height: BrandSpace.md),
                 ...expenses.map(
@@ -817,6 +1291,175 @@ class _ExpensesTab extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// The trip's spend ledger: total, category split, and an equal-share
+/// settlement computed from what each member actually paid. All real data.
+class _LedgerSummary extends ConsumerWidget {
+  const _LedgerSummary({
+    required this.tripId,
+    required this.expenses,
+    required this.total,
+    required this.byCategory,
+  });
+
+  final String tripId;
+  final List<TripExpense> expenses;
+  final double total;
+  final Map<String, double> byCategory;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final symbol = ledgerSymbol(expenses.first.currency);
+
+    final members =
+        ref.watch(tripMembersProvider(tripId)).valueOrNull ??
+        const <Map<String, dynamic>>[];
+    final nameById = <String, String>{
+      for (final m in members)
+        (m['user_id'] as String):
+            (m['profiles'] as Map<String, dynamic>?)?['username'] as String? ??
+            'member',
+    };
+    final ids = <String>{...nameById.keys, ...expenses.map((e) => e.userId)};
+    final paidBy = <String, double>{};
+    for (final e in expenses) {
+      paidBy[e.userId] = (paidBy[e.userId] ?? 0) + e.amount;
+    }
+    final balances = ledgersBalances(
+      paidBy: paidBy,
+      memberIds: ids,
+      total: total,
+    );
+    final transfers = settleLedger(balances);
+    String name(String id) => nameById[id] ?? 'member';
+
+    return BrandCard(
+      padding: const EdgeInsets.all(BrandSpace.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.receipt_long_rounded,
+                size: 20,
+                color: BrandColors.primary,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Trip ledger',
+                style: BrandText.titleSm.copyWith(
+                  color: BrandColors.textHeadline,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: BrandSpace.md),
+          Text(
+            'Total spent',
+            style: BrandText.labelSm.copyWith(color: BrandColors.textMuted),
+          ),
+          Text(
+            '$symbol${total.toStringAsFixed(2)}',
+            style: BrandText.displayLgMobile.copyWith(
+              color: BrandColors.textHeadline,
+            ),
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final e in byCategory.entries)
+                BrandPill(
+                  label:
+                      '${ledgerCategoryLabel(e.key)} $symbol${e.value.toStringAsFixed(0)}',
+                  background: BrandColors.surfaceContainerLow,
+                  foreground: BrandColors.onSurfaceVariant,
+                ),
+            ],
+          ),
+          const SizedBox(height: BrandSpace.md),
+          Divider(height: 1, color: BrandColors.hairline),
+          const SizedBox(height: BrandSpace.md),
+          Text(
+            'Split evenly · ${ids.length} ${ids.length == 1 ? 'person' : 'people'}',
+            style: BrandText.labelSm.copyWith(color: BrandColors.textMuted),
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          for (final id in ids)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '@${name(id)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: BrandText.bodySm.copyWith(
+                        color: BrandColors.textHeadline,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    balances[id]! >= 0
+                        ? 'gets back $symbol${balances[id]!.toStringAsFixed(2)}'
+                        : 'owes $symbol${(-balances[id]!).toStringAsFixed(2)}',
+                    style: BrandText.labelSm.copyWith(
+                      color: balances[id]! >= 0
+                          ? BrandColors.primary
+                          : BrandColors.error,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: BrandSpace.xs),
+          if (transfers.isEmpty)
+            Text(
+              'All square.',
+              style: BrandText.bodySm.copyWith(color: BrandColors.primary),
+            )
+          else ...[
+            Divider(height: 1, color: BrandColors.hairline),
+            const SizedBox(height: BrandSpace.md),
+            Text(
+              'Settle up',
+              style: BrandText.labelSm.copyWith(color: BrandColors.textMuted),
+            ),
+            const SizedBox(height: BrandSpace.sm),
+            for (final t in transfers)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '@${name(t.from)} → @${name(t.to)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: BrandText.bodySm.copyWith(
+                          color: BrandColors.textHeadline,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '$symbol${t.amount.toStringAsFixed(2)}',
+                      style: BrandText.weight(
+                        BrandText.labelSm,
+                        700,
+                      ).copyWith(color: BrandColors.primary),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ],
+      ),
     );
   }
 }

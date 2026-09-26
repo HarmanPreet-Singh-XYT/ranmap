@@ -18,6 +18,7 @@ import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/avatar_view.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_data.dart';
 import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/error_retry.dart';
@@ -998,42 +999,11 @@ class _PilotRollup extends ConsumerWidget {
           ),
           if (recent.length >= 2) ...[
             const SizedBox(height: BrandSpace.md),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: BrandColors.canvas,
-                borderRadius: BrandRadii.miniRadius,
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Recent Trips',
-                          style: BrandText.weight(
-                            BrandText.labelSm,
-                            700,
-                          ).copyWith(color: BrandColors.textHeadline),
-                        ),
-                        Text(
-                          '${recent.length} trips · ${formatDistance(recentKm, unit, decimals: 0)}',
-                          style: BrandText.bodySm.copyWith(
-                            color: BrandColors.primary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  SizedBox(
-                    width: 112,
-                    height: 32,
-                    child: CustomPaint(painter: _SparklinePainter(recent)),
-                  ),
-                ],
-              ),
+            BrandSparklineRow(
+              title: 'Recent Trips',
+              caption:
+                  '${recent.length} trips · ${formatDistance(recentKm, unit, decimals: 0)}',
+              values: recent,
             ),
           ],
         ],
@@ -1047,57 +1017,6 @@ String _formatDuration(int seconds) {
   final h = seconds ~/ 3600;
   final m = (seconds % 3600) ~/ 60;
   return '${h}h ${m}m';
-}
-
-class _SparklinePainter extends CustomPainter {
-  _SparklinePainter(this.values);
-
-  final List<double> values;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (values.length < 2) return;
-    final maxV = values.reduce((a, b) => a > b ? a : b);
-    final minV = values.reduce((a, b) => a < b ? a : b);
-    final range = (maxV - minV).abs() < 0.001 ? 1.0 : (maxV - minV);
-
-    final dx = size.width / (values.length - 1);
-    double x(int i) => dx * i;
-    double y(double v) =>
-        size.height - ((v - minV) / range) * (size.height - 4) - 2;
-
-    final line = Path()..moveTo(x(0), y(values.first));
-    for (var i = 1; i < values.length; i++) {
-      line.lineTo(x(i), y(values[i]));
-    }
-    final fill = Path.from(line)
-      ..lineTo(size.width, size.height)
-      ..lineTo(0, size.height)
-      ..close();
-
-    canvas.drawPath(
-      fill,
-      Paint()..color = BrandColors.primaryContainer.withValues(alpha: 0.12),
-    );
-    canvas.drawPath(
-      line,
-      Paint()
-        ..color = BrandColors.primaryContainer
-        ..strokeWidth = 2.5
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round,
-    );
-    canvas.drawCircle(
-      Offset(x(values.length - 1), y(values.last)),
-      3,
-      Paint()..color = BrandColors.primary,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_SparklinePainter oldDelegate) =>
-      oldDelegate.values != values;
 }
 
 class _MenuCard extends ConsumerWidget {
@@ -1226,11 +1145,7 @@ class _SignOutFooter extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
-                  Icons.logout_rounded,
-                  size: 18,
-                  color: BrandColors.error,
-                ),
+                Icon(Icons.logout_rounded, size: 18, color: BrandColors.error),
                 const SizedBox(width: 8),
                 Text(
                   'Sign Out',

@@ -57,11 +57,11 @@ class TourStat extends TourTile {
   final String? subtitle;
   final IconData? subtitleIcon;
 
-  /// A pill-shaped value chip (e.g. "3 Stops Synced").
+  /// A pill-shaped value chip (e.g. "Stops synced").
   final String? chip;
   final IconData? chipIcon;
 
-  /// A small pill in the top-right (e.g. "98ms", "ZERO-LAG").
+  /// A small pill in the top-right (e.g. "PTT", "ZERO-LAG").
   final String? trailing;
   final Color? trailingColor;
 
@@ -133,31 +133,27 @@ final List<TourPage> kTourPages = [
     body: 'Real-time 3D telemetry and position tracking for group road trips. If someone drops behind or takes a detour, instant radar lock guides them back smoothly.',
     nextLabel: 'Next: Audio Comms',
     tiles: [
-      TourPhoto(
-        'assets/images/tour/convoy_coast.jpg',
-        badgeDot: true,
-        badgeLabel: 'PAC-101',
-      ),
+      TourPhoto('assets/images/tour/convoy_coast.jpg', badgeLabel: 'Convoy'),
       TourStat(
         color: BrandColors.accentPeach,
         icon: Icons.directions_car_rounded,
         iconColor: BrandColors.textHeadline,
         eyebrow: 'Live Convoy',
         title: 'Mesh Active',
-        trailing: '98ms',
+        liveDot: true,
       ),
       TourStat(
         color: BrandColors.accentMint,
         icon: Icons.explore_rounded,
         iconColor: BrandColors.primary,
         eyebrow: '3D Tracking',
-        title: 'Precision ±0.4m',
+        title: 'Precision tracking',
         liveDot: true,
       ),
       TourPhoto(
         'assets/images/tour/cabin_nav.jpg',
         badgeIcon: Icons.social_distance_rounded,
-        badgeLabel: 'Safe Gap: 420m',
+        badgeLabel: 'Safe-gap alerts',
       ),
     ],
     features: const [
@@ -186,9 +182,9 @@ final List<TourPage> kTourPages = [
         color: _tint(BrandColors.accentSky, 0.5),
         icon: Icons.graphic_eq_rounded,
         iconColor: BrandColors.primary,
-        title: 'Ch. 04 Alpha',
-        subtitle: '6 Drivers listening',
-        trailing: 'PTT RADIO',
+        title: 'Convoy channel',
+        subtitle: 'Everyone hears you',
+        trailing: 'PTT',
         liveDot: true,
       ),
       const TourPhoto(
@@ -205,7 +201,7 @@ final List<TourPage> kTourPages = [
         color: _tint(BrandColors.accentPeach, 0.6),
         icon: Icons.headphones_rounded,
         iconColor: BrandColors.onTertiaryContainer,
-        big: (value: '18', unit: 'ms ping'),
+        title: 'Low-latency audio',
         subtitle: 'AI Noise Gate',
         subtitleIcon: Icons.check_circle_rounded,
         trailing: 'ZERO-LAG',
@@ -238,7 +234,7 @@ final List<TourPage> kTourPages = [
       TourPhoto(
         'assets/images/tour/bakery.jpg',
         badgeIcon: Icons.local_cafe_rounded,
-        badgeLabel: 'Mile 142',
+        badgeLabel: 'Scenic stop',
       ),
       TourStat(
         color: BrandColors.secondaryFixed,
@@ -246,7 +242,7 @@ final List<TourPage> kTourPages = [
         iconColor: BrandColors.primary,
         eyebrow: 'Crew Stops',
         title: 'Artisan Roast & View',
-        chip: '3 Stops Synced',
+        chip: 'Stops synced',
         liveDot: true,
       ),
       TourStat(
@@ -255,7 +251,7 @@ final List<TourPage> kTourPages = [
         iconColor: BrandColors.tertiary,
         eyebrow: 'Charge & Fuel',
         title: 'High-Power Fast Charge',
-        chip: '4 Plugs Available',
+        chip: 'Charging stops',
         chipIcon: Icons.bolt_rounded,
       ),
       TourPhoto(
@@ -304,10 +300,8 @@ final List<TourPage> kTourPages = [
         icon: Icons.warning_rounded,
         iconColor: BrandColors.error,
         eyebrow: 'Road Hazard',
-        title: 'Debris in 1.2mi',
-        subtitle: 'Reported by Lead Car',
-        trailing: 'LIVE',
-        trailingColor: BrandColors.error,
+        title: 'Hazard alerts',
+        subtitle: 'Shared by the lead car',
         dotColor: BrandColors.error,
       ),
       TourPhoto(
@@ -342,7 +336,7 @@ final List<TourPage> kTourPages = [
       const TourPhoto(
         'assets/images/tour/golden_crew.jpg',
         badgeIcon: Icons.favorite_rounded,
-        badgeLabel: 'Big Sur Stop #4',
+        badgeLabel: 'Trip memories',
       ),
       TourStat(
         color: _tint(BrandColors.accentMint, 0.3),
@@ -357,14 +351,14 @@ final List<TourPage> kTourPages = [
         icon: Icons.photo_library_rounded,
         iconColor: BrandColors.tertiary,
         eyebrow: 'Trip Vault',
-        chip: '84 Photos Pooled',
+        chip: 'Shared album',
         trailing: 'Cloud Sync',
         trailingColor: BrandColors.tertiary,
       ),
       const TourPhoto(
         'assets/images/tour/tailgate.jpg',
         badgeIcon: Icons.check_circle_rounded,
-        badgeLabel: 'Settled \$142.50',
+        badgeLabel: 'Settle up fast',
         badgeAccent: true,
       ),
     ],

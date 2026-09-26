@@ -38,10 +38,41 @@ class NearbyPlace {
   final String? category;
   final Position location;
 
+  /// How much stopping here adds to the drive — a real routing figure the
+  /// server measured from the search anchor. Null when it couldn't be measured
+  /// (e.g. an along-route search with no anchor), in which case the UI shows
+  /// nothing rather than a placeholder.
+  final PlaceDetour? detour;
+
   const NearbyPlace({
     required this.name,
     required this.placeId,
     required this.location,
     this.category,
+    this.detour,
   });
+}
+
+/// A stop's added drive, in provider-raw units: seconds and metres.
+class PlaceDetour {
+  final int durationSeconds;
+  final int distanceMeters;
+
+  const PlaceDetour({
+    required this.durationSeconds,
+    required this.distanceMeters,
+  });
+
+  /// Parses the optional `detour` object, tolerating absence or a partial
+  /// payload by returning null (the line is simply omitted).
+  static PlaceDetour? fromJson(Object? json) {
+    if (json is! Map<String, dynamic>) return null;
+    final duration = json['durationSeconds'];
+    final distance = json['distanceMeters'];
+    if (duration is! num || distance is! num) return null;
+    return PlaceDetour(
+      durationSeconds: duration.toInt(),
+      distanceMeters: distance.toInt(),
+    );
+  }
 }

@@ -420,16 +420,15 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.textContaining('Ultimate Road Trip'), findsOneWidget);
-    // No offering is configured, so no trial is advertised — the CTA must not
-    // fabricate one.
-    expect(find.textContaining('free trial'), findsNothing);
-    expect(find.textContaining('Subscribe & Unlock Pro'), findsWidgets);
     // Close + restore sit below the CTA, not in the top bar.
     expect(find.text('Close'), findsOneWidget);
     expect(find.text('Restore Purchases'), findsOneWidget);
 
-    await tester.tap(find.text('Monthly Pass'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Unlock Monthly Pass'), findsOneWidget);
+    // With no store offering nothing is invented: no plan cards, no fabricated
+    // price or trial, and the CTA is disabled with an honest note.
+    expect(find.textContaining('Plans aren'), findsOneWidget);
+    expect(find.textContaining('Purchases unavailable'), findsOneWidget);
+    expect(find.textContaining('free trial'), findsNothing);
+    expect(find.text('Monthly Pass'), findsNothing);
   });
 }

@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
+import 'package:intl/intl.dart';
 
+import '../../core/constants/avatars.dart';
 import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/validation.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/avatar_view.dart';
 import '../../core/widgets/brand/brand_alert.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
@@ -37,7 +40,22 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
   final _titleCtrl = TextEditingController();
   final _inviteCtrl = TextEditingController();
   final List<String> _invitees = [];
+
+  /// `username -> avatar_id` for invitees added from the friends list, so the
+  /// roster can render their real avatar. A username typed by hand has no
+  /// profile row here, so its avatar falls back to [kDefaultAvatarSeed].
+  final Map<String, String> _inviteeAvatarIds = {};
   PlannedRoute? _plannedRoute;
+
+  /// Optional planned start time; null (the default) means the trip starts as
+  /// soon as the creator goes active. Sent through as `scheduled_start` on
+  /// create — see [Trip.scheduledStart].
+  DateTime? _scheduledStart;
+
+  /// Bumped when the schedule is cleared so the date/time fields rebuild empty.
+  /// Their managed controls hold their own state, so a plain `initial: null`
+  /// change wouldn't reset them.
+  int _scheduleEpoch = 0;
   bool _saving = false;
   String? _error;
 
@@ -101,19 +119,25 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
             child: Column(
               children: [
                 for (final profile in friends)
-                  BrandListRow(
-                    icon: Icons.person,
-                    iconBackground: BrandColors.surfaceContainerLow,
-                    iconColor: BrandColors.primary,
-                    title: '@${profile['username']}',
-                    showChevron: !_invitees.contains(
-                      profile['username'] as String,
-                    ),
+                  _CrewRow(
+                    seed: profile['avatar_id'] as String? ?? kDefaultAvatarSeed,
+                    username: profile['username'] as String,
                     onTap: _invitees.contains(profile['username'] as String)
                         ? null
                         : () =>
                               Navigator.of(context)
                                   .pop(profile['username'] as String),
+                    trailing: _invitees.contains(profile['username'] as String)
+                        ? const BrandPill(
+                            label: 'Invited',
+                            icon: Icons.check_rounded,
+                            bold: true,
+                          )
+                        : Icon(
+                            Icons.chevron_right_rounded,
+                            size: 20,
+                            color: BrandColors.textMuted,
+                          ),
                   ),
               ],
             ),
@@ -123,8 +147,59 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
     );
 
     if (selected != null && !_invitees.contains(selected)) {
-      setState(() => _invitees.add(selected));
+      // Remember the picked friend's real avatar_id so the roster shows their
+      // face rather than a generic glyph.
+      final picked = friends.firstWhere(
+        (profile) => profile['username'] == selected,
+        orElse: () => const <String, dynamic>{},
+      );
+      setState(() {
+        _invitees.add(selected);
+        final avatarId = picked['avatar_id'] as String?;
+        if (avatarId != null && avatarId.isNotEmpty) {
+          _inviteeAvatarIds[selected] = avatarId;
+        }
+      });
     }
+  }
+
+  void _setScheduleDate(DateTime? date) {
+    setState(() {
+      if (date == null) {
+        _scheduledStart = null;
+        return;
+      }
+      // Keep whatever time was already chosen (or now) when only the date moves.
+      final time = _scheduledStart ?? DateTime.now();
+      _scheduledStart = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        time.hour,
+        time.minute,
+      );
+    });
+  }
+
+  void _setScheduleTime(FTime? time) {
+    if (time == null) return;
+    setState(() {
+      final day = _scheduledStart ?? DateTime.now();
+      _scheduledStart = DateTime(
+        day.year,
+        day.month,
+        day.day,
+        time.hour,
+        time.minute,
+      );
+    });
+  }
+
+  void _clearSchedule() {
+    setState(() {
+      _scheduledStart = null;
+      _scheduleEpoch++;
+    });
   }
 
   Future<void> _createTrip() async {
@@ -148,6 +223,7 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
         Trip.draft(
           createdBy: uid,
           title: title,
+          scheduledStart: _scheduledStart,
           originName: route?.originName,
           originPoint: route?.originPoint,
           destinationName: route?.destinationName,
@@ -251,6 +327,66 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
             ),
           ),
           const SizedBox(height: BrandSpace.lg),
+          BrandSectionHeader(
+            icon: Icons.schedule_rounded,
+            title: 'Scheduled start',
+            subtitle: 'Optional — leave blank to start when you go active',
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          BrandCard(
+            padding: const EdgeInsets.symmetric(
+              horizontal: BrandSpace.md,
+              vertical: BrandSpace.xs,
+            ),
+            child: BrandListRow(
+              icon: _scheduledStart == null
+                  ? Icons.bolt_rounded
+                  : Icons.event_available_rounded,
+              iconColor: BrandColors.primary,
+              title: _scheduledStart == null
+                  ? 'Immediately'
+                  : DateFormat.yMMMd().add_jm().format(_scheduledStart!),
+              subtitle: _scheduledStart == null
+                  ? 'No start time planned'
+                  : 'Planned start time the crew can see',
+              showChevron: false,
+              trailing: _scheduledStart == null
+                  ? null
+                  : BrandSecondaryButton(
+                      label: 'Clear',
+                      expand: false,
+                      onPressed: _clearSchedule,
+                    ),
+            ),
+          ),
+          const SizedBox(height: BrandSpace.md),
+          // Keyed on the epoch so "Clear" rebuilds the fields empty: their
+          // managed controls hold their own value, so passing `initial: null`
+          // on its own wouldn't reset them.
+          KeyedSubtree(
+            key: ValueKey('schedule-date-$_scheduleEpoch'),
+            child: FDateField.calendar(
+              label: const Text('Date'),
+              selectionControl: FDateSelectionControl.managedSingle(
+                initial: _scheduledStart,
+                onChange: _setScheduleDate,
+              ),
+            ),
+          ),
+          const SizedBox(height: BrandSpace.md),
+          KeyedSubtree(
+            key: ValueKey('schedule-time-$_scheduleEpoch'),
+            child: FTimeField.picker(
+              label: const Text('Time'),
+              control: FTimeFieldControl.managed(
+                initial: _scheduledStart == null
+                    ? null
+                    : FTime(_scheduledStart!.hour, _scheduledStart!.minute),
+                onChange: _setScheduleTime,
+              ),
+            ),
+          ),
+          const SizedBox(height: BrandSpace.lg),
           Row(
             children: [
               Expanded(
@@ -298,44 +434,29 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
           ),
           if (_invitees.isNotEmpty) ...[
             const SizedBox(height: BrandSpace.gutterSm),
-            Wrap(
-              spacing: BrandSpace.sm,
-              runSpacing: BrandSpace.sm,
-              children: _invitees
-                  .map(
-                    (u) => GestureDetector(
-                      onTap: () => setState(() => _invitees.remove(u)),
-                      behavior: HitTestBehavior.opaque,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: BrandSpace.gutterSm,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: BrandColors.surfaceContainerLow,
-                          borderRadius: BrandRadii.pill,
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '@$u',
-                              style: BrandText.labelMd.copyWith(
-                                color: BrandColors.textHeadline,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Icon(
-                              Icons.close_rounded,
-                              size: 14,
-                              color: BrandColors.textMuted,
-                            ),
-                          ],
-                        ),
+            BrandCard(
+              padding: const EdgeInsets.symmetric(
+                horizontal: BrandSpace.md,
+                vertical: BrandSpace.xs,
+              ),
+              child: Column(
+                children: [
+                  for (final username in _invitees)
+                    _CrewRow(
+                      seed: _inviteeAvatarIds[username] ?? kDefaultAvatarSeed,
+                      username: username,
+                      onTap: () => setState(() {
+                        _invitees.remove(username);
+                        _inviteeAvatarIds.remove(username);
+                      }),
+                      trailing: Icon(
+                        Icons.close_rounded,
+                        size: 20,
+                        color: BrandColors.textMuted,
                       ),
                     ),
-                  )
-                  .toList(),
+                ],
+              ),
             ),
           ],
           if (_error != null) ...[
@@ -366,6 +487,61 @@ class _FieldLabel extends StatelessWidget {
     child: Text(
       text,
       style: BrandText.labelMd.copyWith(color: BrandColors.textBody),
+    ),
+  );
+}
+
+/// A crew roster row: a member's real [AvatarView], their handle, and an
+/// optional trailing action.
+///
+/// Mirrors [BrandListRow]'s geometry, but that row's icon slot takes an
+/// [IconData], so this row hosts the [AvatarView] directly instead.
+class _CrewRow extends StatelessWidget {
+  const _CrewRow({
+    required this.seed,
+    required this.username,
+    this.trailing,
+    this.onTap,
+  });
+
+  /// The member's `avatar_id`, or [kDefaultAvatarSeed] when it isn't known
+  /// (e.g. a username typed by hand rather than picked from friends).
+  final String seed;
+  final String username;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    behavior: HitTestBehavior.opaque,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          AvatarView(
+            seed: seed,
+            size: 40,
+            background: BrandColors.surfaceContainerLow,
+            accentColor: BrandColors.primary,
+          ),
+          const SizedBox(width: BrandSpace.gutterSm),
+          Expanded(
+            child: Text(
+              '@$username',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: BrandText.titleSm.copyWith(
+                color: BrandColors.textHeadline,
+              ),
+            ),
+          ),
+          if (trailing != null) ...[
+            const SizedBox(width: BrandSpace.sm),
+            trailing!,
+          ],
+        ],
+      ),
     ),
   );
 }

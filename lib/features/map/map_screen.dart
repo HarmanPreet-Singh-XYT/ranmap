@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show listEquals;
@@ -13,12 +14,20 @@ import '../../core/constants/avatars.dart';
 import '../../core/constants/defaults.dart';
 import '../../core/router/auth_state_provider.dart';
 import '../../core/providers/settings_provider.dart';
+import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/theme/nav_palette.dart';
 import '../../core/util/error_text.dart';
+import '../../core/util/geo_distance.dart';
+import '../../core/util/units.dart';
+import '../../core/widgets/avatar_view.dart';
+import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/nav_surface.dart';
 import '../../data/models/map_post.dart';
 import '../../data/models/route_option.dart';
 import '../../data/models/trip.dart';
+import '../../data/models/trip_leg.dart';
+import '../../data/models/trip_stop.dart';
 import '../../data/services/google_maps_api_service.dart';
 import '../trip/trip_providers.dart';
 import 'add_map_post_screen.dart';
@@ -30,7 +39,33 @@ import 'nearby_places_sheet.dart';
 import 'navigate_to_member_sheet.dart';
 
 /// A teammate shown in the live-teammates sheet.
-typedef _Teammate = ({String userId, String? username, double lat, double lng});
+typedef _Teammate = ({
+  String userId,
+  String? username,
+  String avatarId,
+  double lat,
+  double lng,
+});
+
+/// Initial great-circle bearing (radians, clockwise from true north) from
+/// (`lat1`,`lng1`) to (`lat2`,`lng2`) — the standard "initial bearing" formula.
+/// Fed to [Transform.rotate] so a teammate's arrow genuinely points at them;
+/// nothing here is hard-coded.
+double _initialBearingRadians(
+  double lat1,
+  double lng1,
+  double lat2,
+  double lng2,
+) {
+  final phi1 = lat1 * math.pi / 180;
+  final phi2 = lat2 * math.pi / 180;
+  final dLng = (lng2 - lng1) * math.pi / 180;
+  final y = math.sin(dLng) * math.cos(phi2);
+  final x =
+      math.cos(phi1) * math.sin(phi2) -
+      math.sin(phi1) * math.cos(phi2) * math.cos(dLng);
+  return math.atan2(y, x);
+}
 
 /// Live map showing the current user's position (as a 3D vehicle puck),
 /// teammates' vehicles as 3D models on the active trip, photos pinned to the
@@ -242,12 +277,42 @@ class _MapScreenState extends ConsumerState<MapScreen>
     final positionAsync = ref.watch(devicePositionProvider);
 
     return positionAsync.when(
-      data: (position) =>
-          _buildMap(context, position.latitude, position.longitude, activeTrip),
+      data: (position) => _buildMap(
+        context,
+        position.latitude,
+        position.longitude,
+        activeTrip,
+        // Geolocator's own speed in m/s (negative when it has no reading).
+        position.speed,
+      ),
       loading: () => const Center(child: FCircularProgress()),
       error: (e, _) =>
           _LocationErrorView(detail: friendlyError(e), onRetry: _retryLocation),
     );
+  }
+
+  /// The mode of the leg currently in progress, if any: the leg arriving at the
+  /// first stop the traveller hasn't reached yet. The trip origin is reached
+  /// once the trip is active, so the first stop's leg is the origin → first
+  /// stop segment. The leg is matched by the stop it arrives at (`to_stop_id`),
+  /// so the lookup survives a reorder/delete rather than relying on `seq`.
+  /// Returns null when the trip isn't active, every stop has arrived, or no leg
+  /// was recorded for the next stop — the caller then falls back to the profile
+  /// vehicle.
+  String? _activeLegMode(Trip? trip, List<TripStop> stops, List<TripLeg> legs) {
+    if (trip == null || trip.status != TripStatus.active) return null;
+    TripStop? nextStop;
+    for (final stop in stops) {
+      if (stop.actualArrival == null) {
+        nextStop = stop;
+        break;
+      }
+    }
+    if (nextStop == null) return null;
+    for (final leg in legs) {
+      if (leg.toStopId == nextStop.id) return leg.mode;
+    }
+    return null;
   }
 
   Widget _buildMap(
@@ -255,10 +320,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
     double deviceLat,
     double deviceLng,
     Trip? activeTrip,
+    double deviceSpeedMps,
   ) {
     final here = Geo.pos(deviceLat, deviceLng);
     final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
-    final c = NavColors.of(context);
 
     // Keep the AsyncValue around (not just valueOrNull) so a failed live-sync
     // fetch is surfaced instead of silently rendering as "0 teammates".
@@ -278,6 +343,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
     final teammates = <_Teammate>[];
     final poses = <VehiclePose>[];
+    // Real safe-gap figure: the great-circle distance to the closest teammate,
+    // recomputed from the live positions (null when nobody else is on the trip).
+    double? nearestTeammateMeters;
     for (final entry in memberLocations.entries) {
       final loc = entry.value;
       final profile = profileByUserId[entry.key];
@@ -287,6 +355,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
       teammates.add((
         userId: entry.key,
         username: username,
+        avatarId: profile?['avatar_id'] as String? ?? kDefaultAvatarSeed,
         lat: loc.lat,
         lng: loc.lng,
       ));
@@ -299,11 +368,34 @@ class _MapScreenState extends ConsumerState<MapScreen>
           heading: loc.heading,
         ),
       );
+      final meters = haversineMeters(deviceLat, deviceLng, loc.lat, loc.lng);
+      if (nearestTeammateMeters == null || meters < nearestTeammateMeters) {
+        nearestTeammateMeters = meters;
+      }
     }
 
-    final myVehicleType =
+    final profileVehicleType =
         ref.watch(myProfileProvider).valueOrNull?.vehicleType ??
         kDefaultVehicleType;
+    // While a leg is in progress, the traveller's own 3D model matches that
+    // leg's mode; otherwise it falls back to their profile vehicle.
+    final tripStops = activeTrip == null
+        ? const <TripStop>[]
+        : ref.watch(tripStopsProvider(activeTrip.id)).valueOrNull ??
+              const <TripStop>[];
+    final tripLegs = activeTrip == null
+        ? const <TripLeg>[]
+        : ref.watch(tripLegsProvider(activeTrip.id)).valueOrNull ??
+              const <TripLeg>[];
+    final userVehicleType =
+        _activeLegMode(activeTrip, tripStops, tripLegs) ?? profileVehicleType;
+    final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
+
+    // Only show telemetry when the platform actually reported a speed:
+    // geolocator returns a negative value (e.g. -1 on iOS) when it has none,
+    // so anything below zero is treated as "no reading" and omitted. Zero is a
+    // genuine stationary reading and is shown.
+    final liveSpeedMps = deviceSpeedMps >= 0 ? deviceSpeedMps : null;
 
     final mapPostsAsync = activeTrip == null
         ? null
@@ -343,7 +435,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
             threeD: _threeD,
             terrain: _terrain,
             showUserLocation: true,
-            userVehicleType: myVehicleType,
+            userVehicleType: userVehicleType,
             onStyleReady: _onStyleReady,
           ),
           if (activeTripId != null && liveError != null)
@@ -418,41 +510,198 @@ class _MapScreenState extends ConsumerState<MapScreen>
               ),
             ),
           ),
+          // Live-convoy status pill, centred just below the status bar.
+          Positioned(
+            top: 8 + topInset,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: BrandColors.surface.withValues(alpha: 0.92),
+                      borderRadius: BrandRadii.pill,
+                      boxShadow: BrandShadows.subtle,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          height: 8,
+                          width: 8,
+                          decoration: BoxDecoration(
+                            color: activeTrip == null
+                                ? BrandColors.textMuted
+                                : BrandColors.primaryContainer,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          activeTrip == null
+                              ? 'No active convoy'
+                              : 'Convoy live · ${memberLocations.length}',
+                          style: BrandText.labelSm.copyWith(
+                            color: BrandColors.textHeadline,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Own live speed, straight from the device's Position — shown
+                  // only when the platform actually reported one.
+                  if (liveSpeedMps != null) ...[
+                    const SizedBox(width: BrandSpace.sm),
+                    BrandPill(
+                      label: formatSpeed(liveSpeedMps * 3.6, unit),
+                      icon: Icons.speed_rounded,
+                      background: BrandColors.surface.withValues(alpha: 0.92),
+                      foreground: BrandColors.textHeadline,
+                      iconColor: BrandColors.primary,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
           Positioned(
             left: 16,
             right: 16,
             bottom: 16,
-            child: FloatingPanel(
-              onTap: teammates.isEmpty ? null : () => _showTeammates(teammates),
-              child: Row(
+            child: BrandCard(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(
-                    height: 38,
-                    width: 38,
-                    decoration: BoxDecoration(
-                      color: c.surfaceAlt,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      Icons.directions_car_filled_rounded,
-                      color: c.activeRoute,
-                      size: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      activeTrip == null
-                          ? 'No active trip'
-                          : '${activeTrip.title} · ${memberLocations.length} teammate${memberLocations.length == 1 ? '' : 's'} live',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: c.foreground,
+                  // Live roster: each teammate's avatar + how far away they are,
+                  // tap to navigate to them.
+                  if (teammates.isNotEmpty) ...[
+                    SizedBox(
+                      height: 68,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: teammates.length,
+                        separatorBuilder: (_, _) =>
+                            const SizedBox(width: BrandSpace.md),
+                        itemBuilder: (context, i) {
+                          final teammate = teammates[i];
+                          return _TeammateChip(
+                            teammate: teammate,
+                            meters: haversineMeters(
+                              deviceLat,
+                              deviceLng,
+                              teammate.lat,
+                              teammate.lng,
+                            ),
+                            // Real initial bearing so the arrow points at them.
+                            bearing: _initialBearingRadians(
+                              deviceLat,
+                              deviceLng,
+                              teammate.lat,
+                              teammate.lng,
+                            ),
+                            unit: unit,
+                            onTap: () => showNavigateToMemberSheet(
+                              context,
+                              destination: Geo.pos(teammate.lat, teammate.lng),
+                              username: teammate.username,
+                              vehicleType: profileVehicleType,
+                            ),
+                          );
+                        },
                       ),
                     ),
+                    const SizedBox(height: BrandSpace.sm),
+                    // Safe-gap readout: the live distance to the closest
+                    // teammate, recomputed from real positions above.
+                    if (nearestTeammateMeters != null)
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.social_distance_rounded,
+                            size: 14,
+                            color: BrandColors.textMuted,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Nearest: ${formatShortDistance(nearestTeammateMeters, unit).replaceAll(' away', '')}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: BrandText.bodySm.copyWith(
+                                color: BrandColors.textBody,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    const SizedBox(height: BrandSpace.sm),
+                  ],
+                  GestureDetector(
+                    onTap: teammates.isEmpty
+                        ? null
+                        : () => _showTeammates(teammates),
+                    behavior: HitTestBehavior.opaque,
+                    child: Row(
+                      children: [
+                        Container(
+                          height: 38,
+                          width: 38,
+                          decoration: BoxDecoration(
+                            color: BrandColors.secondaryFixed.withValues(
+                              alpha: 0.5,
+                            ),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.directions_car_filled_rounded,
+                            color: BrandColors.primary,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                activeTrip == null
+                                    ? 'No active trip'
+                                    : activeTrip.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: BrandText.weight(
+                                  BrandText.titleSm,
+                                  700,
+                                ).copyWith(color: BrandColors.textHeadline),
+                              ),
+                              Text(
+                                activeTrip == null
+                                    ? 'Start a trip to roll together'
+                                    : '${memberLocations.length} teammate${memberLocations.length == 1 ? '' : 's'} live now',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: BrandText.bodySm.copyWith(
+                                  color: BrandColors.textMuted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (teammates.isNotEmpty)
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            color: BrandColors.textMuted,
+                          ),
+                      ],
+                    ),
                   ),
-                  if (teammates.isNotEmpty)
-                    Icon(Icons.chevron_right_rounded, color: c.mutedForeground),
                 ],
               ),
             ),
@@ -700,6 +949,84 @@ class _LocationErrorView extends StatelessWidget {
               FButton(onPress: onRetry, child: const Text('Try again')),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One live teammate in the map's convoy roster: avatar, handle and how far
+/// away they are. Tapping navigates to them.
+class _TeammateChip extends StatelessWidget {
+  const _TeammateChip({
+    required this.teammate,
+    required this.meters,
+    required this.bearing,
+    required this.unit,
+    required this.onTap,
+  });
+
+  final _Teammate teammate;
+  final double meters;
+
+  /// Initial bearing to the teammate, in radians clockwise from north — the
+  /// angle the arrow is rotated by so it physically points at them.
+  final double bearing;
+  final DistanceUnit unit;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 66,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AvatarView(
+              seed: teammate.avatarId,
+              size: 36,
+              background: BrandColors.surfaceContainerLow,
+              accentColor: BrandColors.primary,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              teammate.username != null ? '@${teammate.username}' : 'Teammate',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: BrandText.labelSm.copyWith(
+                color: BrandColors.textHeadline,
+              ),
+            ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // North-up glyph rotated by the live bearing to this teammate.
+                Transform.rotate(
+                  angle: bearing,
+                  child: Icon(
+                    Icons.navigation_rounded,
+                    size: 12,
+                    color: BrandColors.primary,
+                  ),
+                ),
+                const SizedBox(width: 3),
+                Flexible(
+                  child: Text(
+                    formatShortDistance(meters, unit).replaceAll(' away', ''),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: BrandText.bodySm.copyWith(
+                      color: BrandColors.textMuted,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );

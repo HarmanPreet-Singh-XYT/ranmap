@@ -21,16 +21,23 @@ class GoogleMapsApiService {
 
   /// All candidate routes between [origin] and [destination], for the user to
   /// pick from.
+  ///
+  /// [profile] is one of our vehicle modes (`car` | `bike` | `scooter` | `suv`);
+  /// the server maps it to the provider's travel profile. Omitted → driving, so
+  /// existing callers are unchanged.
   static Future<List<RouteOption>> directions({
     required Position origin,
     required Position destination,
+    String? profile,
   }) async {
     final body = await _get('/maps/directions', {
       'origin': '${origin.lat},${origin.lng}',
       'destination': '${destination.lat},${destination.lng}',
+      'profile': ?profile,
     });
 
-    final routes = (body['routes'] as List? ?? const []).cast<Map<String, dynamic>>();
+    final routes = (body['routes'] as List? ?? const [])
+        .cast<Map<String, dynamic>>();
     final options = routes.map((route) {
       final polyline = route['polyline'] as String;
       return RouteOption(
@@ -65,12 +72,18 @@ class GoogleMapsApiService {
 
   /// Points of interest along an encoded route polyline. A single request —
   /// the provider searches the whole route, rather than us sampling points.
+  ///
+  /// [origin] is an anchor the server measures each result's detour from; pass
+  /// it so along-route results carry a "how much does this stop add" figure.
   static Future<List<NearbyPlace>> placesAlongRoute({
     required String routePolyline,
+    Position? origin,
     String? category,
   }) async {
+    final originParam = origin == null ? null : '${origin.lat},${origin.lng}';
     final body = await _get('/maps/places/nearby', {
       'route': routePolyline,
+      'origin': ?originParam,
       'type': ?category,
     });
     return _placesFrom(body);
@@ -87,12 +100,14 @@ class GoogleMapsApiService {
   }
 
   static List<NearbyPlace> _placesFrom(Map<String, dynamic> body) {
-    final places = (body['places'] as List? ?? const []).cast<Map<String, dynamic>>();
+    final places = (body['places'] as List? ?? const [])
+        .cast<Map<String, dynamic>>();
     return places.map((place) {
       return NearbyPlace(
         name: place['name'] as String? ?? 'Unnamed place',
         placeId: place['id'] as String? ?? '',
         category: place['category'] as String?,
+        detour: PlaceDetour.fromJson(place['detour']),
         // GeoJSON order is [lng, lat]; the API returns them separately.
         location: Position(
           (place['lng'] as num).toDouble(),
@@ -102,7 +117,10 @@ class GoogleMapsApiService {
     }).toList();
   }
 
-  static Future<Map<String, dynamic>> _get(String path, Map<String, String> query) {
+  static Future<Map<String, dynamic>> _get(
+    String path,
+    Map<String, String> query,
+  ) {
     return BackendClient.getJson(
       path,
       query: query,
@@ -113,7 +131,8 @@ class GoogleMapsApiService {
 
   /// Decodes a Google encoded polyline (e.g. `trips.route_polyline`) into
   /// map points.
-  static List<Position> decodePolyline(String encoded) => _decodePolyline(encoded);
+  static List<Position> decodePolyline(String encoded) =>
+      _decodePolyline(encoded);
 
   /// Decodes an encoded polyline into a list of points. Standard algorithm:
   /// https://developers.google.com/maps/documentation/utilities/polylinealgorithm

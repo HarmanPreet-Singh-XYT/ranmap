@@ -41,6 +41,14 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
     super.dispose();
   }
 
+  /// Drops a one-tap tool's starter text into the composer, cursor at the end,
+  /// so the user completes it and sends a real instruction.
+  void _prefill(String text) {
+    _inputController
+      ..text = text
+      ..selection = TextSelection.collapsed(offset: text.length);
+  }
+
   Future<void> _send() async {
     final text = _inputController.text.trim();
     if (text.isEmpty || _sending) return;
@@ -195,6 +203,34 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
             ),
+          // One-tap tools: each drops a real instruction into the composer, so
+          // the assistant runs the matching tool (add_stop / save_place /
+          // schedule_trip) and returns a receipt for what it actually did.
+          if (!_sending)
+            SizedBox(
+              height: 36,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: BrandSpace.md),
+                children: [
+                  _ToolChip(
+                    icon: Icons.add_location_alt_rounded,
+                    label: 'Add a stop',
+                    onTap: () => _prefill('Add a stop to my trip: '),
+                  ),
+                  _ToolChip(
+                    icon: Icons.bookmark_add_outlined,
+                    label: 'Save a place',
+                    onTap: () => _prefill('Save this place: '),
+                  ),
+                  _ToolChip(
+                    icon: Icons.event_available_rounded,
+                    label: 'Schedule a trip',
+                    onTap: () => _prefill('Schedule a trip: '),
+                  ),
+                ],
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(
               BrandSpace.md,
@@ -228,6 +264,51 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
   }
 }
 
+/// A one-tap tool shortcut above the composer.
+class _ToolChip extends StatelessWidget {
+  const _ToolChip({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: BrandSpace.sm),
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: BrandColors.surfaceContainerLow,
+            borderRadius: BrandRadii.pill,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 15, color: BrandColors.primary),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: BrandText.labelSm.copyWith(
+                  color: BrandColors.textHeadline,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// The circular grass-green send action that pairs with the composer field.
 class _SendButton extends StatelessWidget {
   const _SendButton({required this.onTap, required this.enabled});
@@ -248,11 +329,7 @@ class _SendButton extends StatelessWidget {
           shape: BoxShape.circle,
           boxShadow: BrandShadows.primaryGlow,
         ),
-        child: Icon(
-          Icons.send_rounded,
-          size: 22,
-          color: BrandColors.onPrimary,
-        ),
+        child: Icon(Icons.send_rounded, size: 22, color: BrandColors.onPrimary),
       ),
     );
   }
@@ -273,20 +350,89 @@ class _MessageBubble extends StatelessWidget {
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: BrandSpace.xs),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-        ),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BrandRadii.cardRadius,
-        ),
-        child: Text(
-          message.content,
-          style: BrandText.bodyMd.copyWith(color: fg),
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: isUser
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
+        children: [
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: BrandSpace.xs),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.75,
+            ),
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BrandRadii.cardRadius,
+            ),
+            child: Text(
+              message.content,
+              style: BrandText.bodyMd.copyWith(color: fg),
+            ),
+          ),
+          // What the assistant actually did this turn (real tool executions).
+          for (final receipt in message.tools)
+            _ToolReceiptCard(receipt: receipt),
+        ],
+      ),
+    );
+  }
+}
+
+/// A receipt for a tool the assistant really executed, with its real result.
+class _ToolReceiptCard extends StatelessWidget {
+  const _ToolReceiptCard({required this.receipt});
+
+  final AiToolReceipt receipt;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: BrandSpace.xs),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.of(context).size.width * 0.75,
+      ),
+      decoration: BoxDecoration(
+        color: BrandColors.surface,
+        borderRadius: BrandRadii.miniRadius,
+        border: Border.all(color: BrandColors.hairline),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            receipt.ok
+                ? Icons.check_circle_rounded
+                : Icons.error_outline_rounded,
+            size: 16,
+            color: receipt.ok ? BrandColors.primary : BrandColors.error,
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  receipt.title,
+                  style: BrandText.labelSm.copyWith(
+                    color: BrandColors.textHeadline,
+                  ),
+                ),
+                if (receipt.detail != null)
+                  Text(
+                    receipt.detail!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: BrandText.bodySm.copyWith(
+                      color: BrandColors.textMuted,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

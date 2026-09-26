@@ -1,13 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../core/constants/avatars.dart';
+import '../../core/constants/plan_limits.dart';
 import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/avatar_view.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_data.dart';
 import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/brand/brand_text_field.dart';
@@ -198,6 +204,8 @@ class GroupDetailScreen extends ConsumerWidget {
             data: (members) => ListView(
               padding: const EdgeInsets.only(top: BrandSpace.sm, bottom: 96),
               children: [
+                _CapacityCard(groupId: group.id, count: members.length),
+                const SizedBox(height: BrandSpace.md),
                 BrandCard(
                   padding: const EdgeInsets.symmetric(
                     horizontal: BrandSpace.md,
@@ -272,11 +280,16 @@ class GroupDetailScreen extends ConsumerWidget {
     final profile = member['profiles'] as Map<String, dynamic>?;
     final userId = member['user_id'] as String?;
     final username = profile?['username'] as String? ?? 'unknown';
+    // The joined `profiles` row carries `avatar_id`; fall back to the brand's
+    // default seed when it's absent or empty so the avatar still renders.
+    final avatarId = profile?['avatar_id'] as String?;
+    final seed = (avatarId != null && avatarId.isNotEmpty)
+        ? avatarId
+        : kDefaultAvatarSeed;
     final canRemove = isOwner && userId != null && userId != myUid;
-    return BrandListRow(
-      icon: Icons.person_rounded,
-      title: '@$username',
-      showChevron: false,
+    return _MemberRow(
+      seed: seed,
+      username: username,
       trailing: canRemove
           ? BrandFieldAction(
               icon: Icons.person_remove_outlined,
@@ -284,6 +297,110 @@ class GroupDetailScreen extends ConsumerWidget {
               onTap: () => _removeMember(context, ref, userId, username),
             )
           : BrandPill(label: member['role'] as String? ?? 'member'),
+    );
+  }
+}
+
+/// The convoy's real capacity: the live member count against the free-tier cap,
+/// or "Unlimited" once any member carries Pro.
+///
+/// Pro is a server check, so it resolves to `false` (the free view) while
+/// loading rather than blocking the card — the count itself is always real.
+class _CapacityCard extends ConsumerWidget {
+  const _CapacityCard({required this.groupId, required this.count});
+
+  final String groupId;
+  final int count;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isPro = ref.watch(groupProProvider(groupId)).valueOrNull ?? false;
+    final full = !isPro && count >= kFreeGroupMemberLimit;
+
+    return BrandCard(
+      padding: const EdgeInsets.all(BrandSpace.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          BrandSectionHeader(
+            icon: Icons.diversity_3_rounded,
+            title: 'Convoy capacity',
+            trailing: BrandPill(
+              bold: true,
+              label: isPro
+                  ? '$count members · Unlimited'
+                  : '$count / $kFreeGroupMemberLimit members',
+              icon: isPro ? Icons.all_inclusive_rounded : null,
+              background: isPro ? BrandColors.accentMint : null,
+              foreground: isPro ? BrandColors.onSecondaryFixedVariant : null,
+              iconColor: isPro ? BrandColors.primary : null,
+            ),
+          ),
+          if (!isPro) ...[
+            const SizedBox(height: BrandSpace.md),
+            BrandProgressBar(value: count / kFreeGroupMemberLimit),
+            if (full) ...[
+              const SizedBox(height: BrandSpace.md),
+              Text(
+                'This convoy is full — RanMap Pro raises the cap for everyone.',
+                style: BrandText.bodyMd.copyWith(color: BrandColors.textBody),
+              ),
+              const SizedBox(height: BrandSpace.md),
+              BrandSecondaryButton(
+                label: 'See Pro',
+                onPressed: () => context.push('/paywall'),
+              ),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// A roster row: the member's real avatar, their handle, and the caller-supplied
+/// trailing widget (the owner-only remove action, or the role pill).
+///
+/// Mirrors [BrandListRow]'s geometry, but that row's icon slot takes an
+/// [IconData], so this row hosts the [AvatarView] directly instead.
+class _MemberRow extends StatelessWidget {
+  const _MemberRow({
+    required this.seed,
+    required this.username,
+    required this.trailing,
+  });
+
+  final String seed;
+  final String username;
+  final Widget trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          AvatarView(
+            seed: seed,
+            size: 40,
+            background: BrandColors.surfaceContainerLow,
+            accentColor: BrandColors.primary,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              '@$username',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: BrandText.titleSm.copyWith(
+                color: BrandColors.textHeadline,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          trailing,
+        ],
+      ),
     );
   }
 }

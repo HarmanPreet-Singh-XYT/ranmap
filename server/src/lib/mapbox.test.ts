@@ -1,6 +1,26 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { normalizeCategorySearch, normalizeDirections } from "./mapbox.js";
+import {
+  attachDetours,
+  DEFAULT_MAPBOX_PROFILE,
+  mapboxProfileForMode,
+  normalizeCategorySearch,
+  normalizeDirections,
+} from "./mapbox.js";
+import type { NormalizedPlace } from "./mapbox.js";
+
+test("mapboxProfileForMode maps our modes to Mapbox profiles", () => {
+  assert.equal(mapboxProfileForMode("car"), "driving");
+  assert.equal(mapboxProfileForMode("suv"), "driving");
+  assert.equal(mapboxProfileForMode("other"), "driving");
+  assert.equal(mapboxProfileForMode("bike"), "cycling");
+  assert.equal(mapboxProfileForMode("scooter"), "cycling");
+  // Unknown modes are rejected rather than silently driving.
+  assert.equal(mapboxProfileForMode("walking"), null);
+  assert.equal(mapboxProfileForMode(""), null);
+  // The default keeps existing (profile-less) callers on driving.
+  assert.equal(DEFAULT_MAPBOX_PROFILE, "driving");
+});
 
 test("normalizeDirections maps the Mapbox Directions shape", () => {
   const routes = normalizeDirections({
@@ -95,4 +115,22 @@ test("normalizeCategorySearch defaults a missing name and category", () => {
   });
   assert.equal(places?.[0]?.name, "Unnamed place");
   assert.equal(places?.[0]?.category, null);
+});
+
+test("attachDetours attaches only the detours that were measured", () => {
+  const places: NormalizedPlace[] = [
+    { id: "a", name: "A", lat: 1, lng: 1, category: null },
+    { id: "b", name: "B", lat: 2, lng: 2, category: null },
+    { id: "c", name: "C", lat: 3, lng: 3, category: null },
+  ];
+
+  // A failed or skipped measurement arrives as null and leaves no `detour`.
+  attachDetours(places, [
+    { durationSeconds: 720, distanceMeters: 12875 },
+    null,
+  ]);
+
+  assert.deepEqual(places[0]?.detour, { durationSeconds: 720, distanceMeters: 12875 });
+  assert.equal(places[1]?.detour, undefined);
+  assert.equal(places[2]?.detour, undefined);
 });

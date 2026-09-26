@@ -1,8 +1,11 @@
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../models/profile.dart';
+import '../models/stop_proposal.dart';
 import '../models/trip.dart';
 import '../models/trip_expense.dart';
+import '../models/trip_leg.dart';
 import '../models/trip_stats.dart';
 import '../models/trip_stats_rollup.dart';
 import '../models/trip_stop.dart';
@@ -16,18 +19,21 @@ class TripRepository {
   /// extended by 0006_trip_route_planning.sql for origin/destination/route),
   /// so a failure can't leave a trip with no members.
   Future<Trip> createTrip(Trip trip) async {
-    final data = await _client.rpc('create_trip', params: {
-      'p_title': trip.title,
-      'p_group_id': trip.groupId,
-      'p_scheduled_start': trip.scheduledStart?.toIso8601String(),
-      'p_origin_name': trip.originName,
-      'p_origin_lat': trip.originPoint?.lat,
-      'p_origin_lng': trip.originPoint?.lng,
-      'p_destination_name': trip.destinationName,
-      'p_destination_lat': trip.destinationPoint?.lat,
-      'p_destination_lng': trip.destinationPoint?.lng,
-      'p_route_polyline': trip.routePolyline,
-    });
+    final data = await _client.rpc(
+      'create_trip',
+      params: {
+        'p_title': trip.title,
+        'p_group_id': trip.groupId,
+        'p_scheduled_start': trip.scheduledStart?.toIso8601String(),
+        'p_origin_name': trip.originName,
+        'p_origin_lat': trip.originPoint?.lat,
+        'p_origin_lng': trip.originPoint?.lng,
+        'p_destination_name': trip.destinationName,
+        'p_destination_lat': trip.destinationPoint?.lat,
+        'p_destination_lng': trip.destinationPoint?.lng,
+        'p_route_polyline': trip.routePolyline,
+      },
+    );
     final row = data is List
         ? data.first as Map<String, dynamic>
         : data as Map<String, dynamic>;
@@ -44,23 +50,29 @@ class TripRepository {
     required LatLngPoint destinationPoint,
     required String routePolyline,
   }) async {
-    final data = await _client.rpc('update_trip_route', params: {
-      'p_trip': tripId,
-      'p_origin_name': originName,
-      'p_origin_lat': originPoint.lat,
-      'p_origin_lng': originPoint.lng,
-      'p_destination_name': destinationName,
-      'p_destination_lat': destinationPoint.lat,
-      'p_destination_lng': destinationPoint.lng,
-      'p_route_polyline': routePolyline,
-    });
+    final data = await _client.rpc(
+      'update_trip_route',
+      params: {
+        'p_trip': tripId,
+        'p_origin_name': originName,
+        'p_origin_lat': originPoint.lat,
+        'p_origin_lng': originPoint.lng,
+        'p_destination_name': destinationName,
+        'p_destination_lat': destinationPoint.lat,
+        'p_destination_lng': destinationPoint.lng,
+        'p_route_polyline': routePolyline,
+      },
+    );
     final row = data is List
         ? data.first as Map<String, dynamic>
         : data as Map<String, dynamic>;
     return Trip.fromJson(row);
   }
 
-  Future<void> inviteMember({required String tripId, required String userId}) async {
+  Future<void> inviteMember({
+    required String tripId,
+    required String userId,
+  }) async {
     await _client.from('trip_members').insert({
       'trip_id': tripId,
       'user_id': userId,
@@ -70,7 +82,10 @@ class TripRepository {
 
   /// Looks up a profile by exact username and invites them. Throws
   /// [StateError] if no such username exists.
-  Future<void> inviteByUsername({required String tripId, required String username}) async {
+  Future<void> inviteByUsername({
+    required String tripId,
+    required String username,
+  }) async {
     final profileRow = await _client
         .from('profiles')
         .select('id')
@@ -82,7 +97,10 @@ class TripRepository {
     await inviteMember(tripId: tripId, userId: profileRow['id'] as String);
   }
 
-  Future<void> respondToInvite({required String tripId, required bool accept}) async {
+  Future<void> respondToInvite({
+    required String tripId,
+    required bool accept,
+  }) async {
     final uid = SupabaseService.currentUserId;
     if (accept) {
       await _client
@@ -96,7 +114,11 @@ class TripRepository {
     } else {
       // Remove the row rather than parking it at 'declined', so the creator can
       // invite this user again later (the row is unique per trip+user).
-      await _client.from('trip_members').delete().eq('trip_id', tripId).eq('user_id', uid);
+      await _client
+          .from('trip_members')
+          .delete()
+          .eq('trip_id', tripId)
+          .eq('user_id', uid);
     }
   }
 
@@ -113,7 +135,9 @@ class TripRepository {
         .eq('trip_members.invite_status', 'accepted')
         .order('created_at', ascending: false)
         .limit(200);
-    return (rows as List).map((r) => Trip.fromJson(r as Map<String, dynamic>)).toList();
+    return (rows as List)
+        .map((r) => Trip.fromJson(r as Map<String, dynamic>))
+        .toList();
   }
 
   /// Trip invites sent to the current user that are still pending, with the
@@ -134,7 +158,9 @@ class TripRepository {
   Future<List<Map<String, dynamic>>> membersFor(String tripId) async {
     final rows = await _client
         .from('trip_members')
-        .select('user_id, invite_status, joined_at, profiles($kProfilePublicColumns)')
+        .select(
+          'user_id, invite_status, joined_at, profiles($kProfilePublicColumns)',
+        )
         .eq('trip_id', tripId);
     return (rows as List).cast<Map<String, dynamic>>();
   }
@@ -142,7 +168,10 @@ class TripRepository {
   Future<void> startTrip(String tripId) async {
     await _client
         .from('trips')
-        .update({'status': 'active', 'started_at': DateTime.now().toIso8601String()})
+        .update({
+          'status': 'active',
+          'started_at': DateTime.now().toIso8601String(),
+        })
         .eq('id', tripId);
   }
 
@@ -153,7 +182,10 @@ class TripRepository {
     await recomputeStats(tripId);
     await _client
         .from('trips')
-        .update({'status': 'completed', 'ended_at': DateTime.now().toIso8601String()})
+        .update({
+          'status': 'completed',
+          'ended_at': DateTime.now().toIso8601String(),
+        })
         .eq('id', tripId);
   }
 
@@ -180,7 +212,10 @@ class TripRepository {
   /// Latest ping per member for a trip (one row per user), fetched via RPC so
   /// the client never streams the whole ping history.
   Future<List<Map<String, dynamic>>> memberLocations(String tripId) async {
-    final data = await _client.rpc('trip_member_locations', params: {'p_trip': tripId});
+    final data = await _client.rpc(
+      'trip_member_locations',
+      params: {'p_trip': tripId},
+    );
     return (data as List).cast<Map<String, dynamic>>();
   }
 
@@ -194,7 +229,9 @@ class TripRepository {
         .order('sort_order', ascending: false)
         .limit(1)
         .maybeSingle();
-    final nextSortOrder = existing == null ? 0 : (existing['sort_order'] as num).toInt() + 1;
+    final nextSortOrder = existing == null
+        ? 0
+        : (existing['sort_order'] as num).toInt() + 1;
 
     final payload = {
       ...stop.toInsertJson(),
@@ -202,12 +239,16 @@ class TripRepository {
       'id': ?id,
     };
     final row = id == null
-        ? await _client.from('trip_stops').insert(payload).select().maybeSingle()
+        ? await _client
+              .from('trip_stops')
+              .insert(payload)
+              .select()
+              .maybeSingle()
         : await _client
-            .from('trip_stops')
-            .upsert(payload, onConflict: 'id', ignoreDuplicates: true)
-            .select()
-            .maybeSingle();
+              .from('trip_stops')
+              .upsert(payload, onConflict: 'id', ignoreDuplicates: true)
+              .select()
+              .maybeSingle();
     return row == null ? null : TripStop.fromJson(row);
   }
 
@@ -220,7 +261,9 @@ class TripRepository {
         .eq('trip_id', tripId)
         .order('sort_order')
         .limit(200);
-    return (rows as List).map((r) => TripStop.fromJson(r as Map<String, dynamic>)).toList();
+    return (rows as List)
+        .map((r) => TripStop.fromJson(r as Map<String, dynamic>))
+        .toList();
   }
 
   Future<void> deleteStop(String stopId) async {
@@ -229,11 +272,122 @@ class TripRepository {
 
   /// Persists a full reorder: [orderedStopIds] must be every stop id for
   /// [tripId], in their new order.
-  Future<void> reorderStops({required String tripId, required List<String> orderedStopIds}) async {
-    await _client.rpc('reorder_trip_stops', params: {
-      'p_trip': tripId,
-      'p_stop_ids': orderedStopIds,
-    });
+  Future<void> reorderStops({
+    required String tripId,
+    required List<String> orderedStopIds,
+  }) async {
+    await _client.rpc(
+      'reorder_trip_stops',
+      params: {'p_trip': tripId, 'p_stop_ids': orderedStopIds},
+    );
+  }
+
+  /// Every leg of a trip, ordered by their position along the waypoint chain
+  /// (the trip origin, then the stops in order — see 0016_trip_legs.sql).
+  Future<List<TripLeg>> fetchTripLegs(String tripId) async {
+    final rows = await _client
+        .from('trip_legs')
+        .select()
+        .eq('trip_id', tripId)
+        .order('seq')
+        .limit(200);
+    return (rows as List)
+        .map((r) => TripLeg.fromJson(r as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Records one leg of a trip — the segment travelling to the stop at [seq].
+  /// [toStopId] is the stop the leg arrives at (null for a whole-trip
+  /// origin→destination leg), so the leg follows that stop through reorders and
+  /// is removed with it (see 0016_trip_legs.sql).
+  /// [distanceM] / [durationS] / [polyline] are only set when a real route was
+  /// measured; otherwise the leg is stored with the chosen [mode] and a null
+  /// measurement (never an invented one).
+  ///
+  /// Upserts on `(trip_id, seq)` so re-recording a position (e.g. after a stop
+  /// was removed and a new one appended at the same index) replaces the stale
+  /// leg instead of failing the unique constraint.
+  Future<TripLeg?> createTripLeg({
+    required String tripId,
+    required int seq,
+    required String mode,
+    String? toStopId,
+    double? distanceM,
+    double? durationS,
+    String? polyline,
+  }) async {
+    final row = await _client
+        .from('trip_legs')
+        .upsert({
+          'trip_id': tripId,
+          'created_by': SupabaseService.currentUserId,
+          'seq': seq,
+          'to_stop_id': toStopId,
+          'mode': mode,
+          'distance_m': distanceM,
+          'duration_s': durationS,
+          'route_polyline': polyline,
+        }, onConflict: 'trip_id,seq')
+        .select()
+        .maybeSingle();
+    return row == null ? null : TripLeg.fromJson(row);
+  }
+
+  Future<void> deleteTripLeg(String id) async {
+    await _client.from('trip_legs').delete().eq('id', id);
+  }
+
+  /// Removes every leg of a trip. Used by the itinerary resync before the legs
+  /// are recreated along a new waypoint order: delete-then-recreate sidesteps
+  /// the `unique (trip_id, seq)` constraint that renumbering in place would hit
+  /// (a renumber to the new order transiently collides with rows not yet moved).
+  Future<void> deleteTripLegs(String tripId) async {
+    await _client.from('trip_legs').delete().eq('trip_id', tripId);
+  }
+
+  /// Every convoy stop proposal on a trip, newest first, each with its live
+  /// approvals / rejections / the caller's own vote / the member count (see
+  /// the `trip_proposals` RPC in 0015_stop_proposals.sql).
+  Future<List<StopProposal>> fetchTripProposals(String tripId) async {
+    final data = await _client.rpc(
+      'trip_proposals',
+      params: {'p_trip': tripId},
+    );
+    return (data as List)
+        .map((r) => StopProposal.fromJson(r as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Records the caller's approve/reject vote on a proposal. Once a majority of
+  /// the trip's members approve, the DB promotes the proposal into a real
+  /// `trip_stops` row — refresh with [stopsFor] / [fetchTripProposals] to see
+  /// the result.
+  Future<void> voteStopProposal(String proposalId, bool approve) async {
+    await _client.rpc(
+      'vote_stop_proposal',
+      params: {'p_proposal': proposalId, 'p_approve': approve},
+    );
+  }
+
+  /// Proposes a stop for the convoy to vote on, rather than adding it to the
+  /// itinerary directly. Optional [lat]/[lng] carry the proposed location.
+  Future<void> proposeStop({
+    required String tripId,
+    required String name,
+    String? note,
+    double? lat,
+    double? lng,
+  }) async {
+    await _client.rpc(
+      'propose_stop',
+      params: {
+        'p_trip': tripId,
+        'p_name': name,
+        'p_note': note,
+        'p_lat': lat,
+        'p_lng': lng,
+      },
+    );
   }
 
   /// Logs an expense. When [id] is supplied (offline-capable path) the insert
@@ -241,12 +395,16 @@ class TripRepository {
   Future<TripExpense?> logExpense(TripExpense expense, {String? id}) async {
     final payload = {...expense.toInsertJson(), 'id': ?id};
     final row = id == null
-        ? await _client.from('trip_expenses').insert(payload).select().maybeSingle()
+        ? await _client
+              .from('trip_expenses')
+              .insert(payload)
+              .select()
+              .maybeSingle()
         : await _client
-            .from('trip_expenses')
-            .upsert(payload, onConflict: 'id', ignoreDuplicates: true)
-            .select()
-            .maybeSingle();
+              .from('trip_expenses')
+              .upsert(payload, onConflict: 'id', ignoreDuplicates: true)
+              .select()
+              .maybeSingle();
     return row == null ? null : TripExpense.fromJson(row);
   }
 
@@ -255,13 +413,31 @@ class TripRepository {
   Future<void> replayExpense(String id, Map<String, dynamic> insertJson) async {
     await _client
         .from('trip_expenses')
-        .upsert({'id': id, ...insertJson}, onConflict: 'id', ignoreDuplicates: true);
+        .upsert(
+          {'id': id, ...insertJson},
+          onConflict: 'id',
+          ignoreDuplicates: true,
+        );
   }
 
   /// Replays an offline-queued stop, appending it to the trip's current order.
   /// Idempotent via the client-supplied [id].
+  ///
+  /// A stop queued offline also carries its planned travel mode under
+  /// `leg_mode` (see AddStopScreen); once the stop is saved, the leg arriving at
+  /// it is recorded too — with that mode and a null measurement, since there was
+  /// no route to measure while offline (never an invented one).
+  ///
+  /// The leg is recorded best-effort: a leg failure must not throw, which would
+  /// otherwise leave the stop's outbox entry queued (or drop it as failed) even
+  /// though the stop itself saved.
   Future<void> replayStop(String id, Map<String, dynamic> insertJson) async {
     final tripId = insertJson['trip_id'] as String;
+    // `leg_mode` travels alongside the stop's own columns but is not a
+    // `trip_stops` column, so strip it before the insert and use it for the leg.
+    final legMode = insertJson['leg_mode'] as String?;
+    final stopInsert = {...insertJson}..remove('leg_mode');
+
     final existing = await _client
         .from('trip_stops')
         .select('sort_order')
@@ -269,11 +445,36 @@ class TripRepository {
         .order('sort_order', ascending: false)
         .limit(1)
         .maybeSingle();
-    final nextSortOrder = existing == null ? 0 : (existing['sort_order'] as num).toInt() + 1;
-    await _client
+    final nextSortOrder = existing == null
+        ? 0
+        : (existing['sort_order'] as num).toInt() + 1;
+    final inserted = await _client
         .from('trip_stops')
-        .upsert({'id': id, ...insertJson, 'sort_order': nextSortOrder},
-            onConflict: 'id', ignoreDuplicates: true);
+        .upsert(
+          {'id': id, ...stopInsert, 'sort_order': nextSortOrder},
+          onConflict: 'id',
+          ignoreDuplicates: true,
+        )
+        .select()
+        .maybeSingle();
+
+    // Only record the leg when this replay actually created the stop. A
+    // duplicate replay (a lost response from an earlier attempt, which the
+    // idempotent upsert absorbs) must not re-create or clobber a leg at a
+    // computed seq that has since moved on.
+    if (legMode != null && inserted != null) {
+      try {
+        await createTripLeg(
+          tripId: tripId,
+          seq: nextSortOrder,
+          mode: legMode,
+          toStopId: id,
+        );
+      } catch (error) {
+        // Best-effort: the stop is saved; a leg failure must not re-queue it.
+        debugPrint('replayStop: leg for stop $id failed: $error');
+      }
+    }
   }
 
   Future<List<TripExpense>> expensesFor(String tripId) async {
@@ -283,7 +484,9 @@ class TripRepository {
         .eq('trip_id', tripId)
         .order('logged_at')
         .limit(500);
-    return (rows as List).map((r) => TripExpense.fromJson(r as Map<String, dynamic>)).toList();
+    return (rows as List)
+        .map((r) => TripExpense.fromJson(r as Map<String, dynamic>))
+        .toList();
   }
 
   Future<void> deleteExpense(String expenseId) async {
@@ -293,7 +496,11 @@ class TripRepository {
   /// Leave a trip you were invited to (removes your own membership).
   Future<void> leaveTrip(String tripId) async {
     final uid = SupabaseService.currentUserId;
-    await _client.from('trip_members').delete().eq('trip_id', tripId).eq('user_id', uid);
+    await _client
+        .from('trip_members')
+        .delete()
+        .eq('trip_id', tripId)
+        .eq('user_id', uid);
   }
 
   /// Cancel/delete a trip you created.
@@ -317,7 +524,10 @@ class TripRepository {
     return (rows as List).cast<Map<String, dynamic>>();
   }
 
-  Future<TripStats?> statsFor({required String tripId, required String userId}) async {
+  Future<TripStats?> statsFor({
+    required String tripId,
+    required String userId,
+  }) async {
     final row = await _client
         .from('trip_stats')
         .select()
@@ -345,9 +555,12 @@ class TripRepository {
       tripId: tripId,
       userId: uid,
       pings: samples,
-      distanceMeters: (a, b) => Geolocator.distanceBetween(a.lat, a.lng, b.lat, b.lng),
+      distanceMeters: (a, b) =>
+          Geolocator.distanceBetween(a.lat, a.lng, b.lat, b.lng),
     );
-    await _client.from('trip_stats').upsert(stats.toUpsertJson(), onConflict: 'trip_id,user_id');
+    await _client
+        .from('trip_stats')
+        .upsert(stats.toUpsertJson(), onConflict: 'trip_id,user_id');
     return stats;
   }
 }

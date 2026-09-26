@@ -5,22 +5,25 @@ import 'package:intl/intl.dart' show NumberFormat;
 import 'package:purchases_flutter/purchases_flutter.dart' show Package;
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/constants/avatars.dart';
+import '../../core/constants/env.dart';
 import '../../core/constants/plan_limits.dart';
 import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/avatar_view.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/brand/brand_tag.dart';
+import '../trip/trip_providers.dart';
 import 'premium_providers.dart';
 import 'premium_purchaser.dart';
 import 'revenuecat.dart';
 
-/// Legal pages linked from the paywall. Replace with your real, hosted URLs —
-/// app-store review requires these links to be functional.
-const _termsUrl = 'https://ranmap.app/terms';
-const _privacyUrl = 'https://ranmap.app/privacy';
+/// Legal links are configured via env (see .env.example); a link is omitted
+/// when its URL isn't set, rather than pointing somewhere that may not exist.
 
 /// Opens [url] in the external browser, reporting failure instead of no-opping.
 Future<void> _openExternal(BuildContext context, String url) async {
@@ -135,8 +138,16 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     final monthlyPrice = monthly?.storeProduct.priceString ?? '—';
     final trial = _trialLabel(annual);
 
-    final isAnnual = _plan == PaywallPlan.annual;
-    final ctaLabel = isAnnual
+    // Offer only what the store actually sells; derive any saving from its own
+    // prices rather than asserting one.
+    final hasPricing = annual != null || monthly != null;
+    final savePercent = _savePercent(annual, monthly);
+    final annualIsBest = _annualIsBest(annual, monthly);
+
+    final isAnnual = _plan == PaywallPlan.annual && annual != null;
+    final ctaLabel = !hasPricing
+        ? 'Purchases unavailable right now'
+        : isAnnual
         ? (trial != null
               ? 'Start $trial & Unlock Pro'
               : 'Subscribe & Unlock Pro')
@@ -158,31 +169,34 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
           const SizedBox(height: BrandSpace.lg),
           _Benefits(),
           const SizedBox(height: BrandSpace.lg),
-          _PlanSelector(
-            plan: _plan,
-            annualTotal: annualTotal,
-            annualPerMonth: annualPerMonth,
-            monthlyPrice: monthlyPrice,
-            trial: trial,
-            onSelect: (p) => setState(() => _plan = p),
-          ),
+          if (hasPricing)
+            _PlanSelector(
+              plan: _plan,
+              annualTotal: annualTotal,
+              annualPerMonth: annualPerMonth,
+              monthlyPrice: monthlyPrice,
+              trial: trial,
+              showAnnual: annual != null,
+              showMonthly: monthly != null,
+              savePercent: savePercent,
+              annualIsBest: annualIsBest,
+              onSelect: (p) => setState(() => _plan = p),
+            )
+          else
+            const _PricingUnavailable(),
           const SizedBox(height: BrandSpace.lg),
           BrandPrimaryButton(
             label: ctaLabel,
             leadingIcon: Icons.bolt_rounded,
             trailingIcon: null,
             loading: _busy,
-            onPressed: _purchase,
+            onPressed: hasPricing ? _purchase : null,
           ),
           const SizedBox(height: 10),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.lock_rounded,
-                size: 15,
-                color: BrandColors.primary,
-              ),
+              Icon(Icons.lock_rounded, size: 15, color: BrandColors.primary),
               const SizedBox(width: 6),
               Flexible(
                 child: Text(
@@ -251,6 +265,25 @@ String? _trialLabel(Package? pkg) {
     _ => 'day',
   };
   return '$n-$unit free trial';
+}
+
+/// The real saving (%) of the annual pass vs paying monthly for a year — or
+/// null when a package is missing or there's genuinely no saving. Never a
+/// hard-coded marketing number.
+int? _savePercent(Package? annual, Package? monthly) {
+  if (annual == null || monthly == null) return null;
+  final yearly = annual.storeProduct.price;
+  final perYearAtMonthly = monthly.storeProduct.price * 12;
+  if (yearly <= 0 || perYearAtMonthly <= 0 || yearly >= perYearAtMonthly) {
+    return null;
+  }
+  return ((1 - yearly / perYearAtMonthly) * 100).round();
+}
+
+/// Whether annual is genuinely cheaper per month than monthly.
+bool _annualIsBest(Package? annual, Package? monthly) {
+  if (annual == null || monthly == null) return false;
+  return annual.storeProduct.price / 12 < monthly.storeProduct.price;
 }
 
 /// The top bar carries only the design's "other" affordances: a back button,
@@ -459,11 +492,23 @@ class _Hero extends StatelessWidget {
   }
 }
 
-class _AmbientTripCard extends StatelessWidget {
+class _AmbientTripCard extends ConsumerWidget {
   const _AmbientTripCard();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Shows the user's *real* convoy when one is live — never sample data. With
+    // no active trip it falls back to a neutral brand line.
+    final trip = ref.watch(activeTripProvider).valueOrNull;
+    final members = trip == null
+        ? const <Map<String, dynamic>>[]
+        : ref.watch(tripMembersProvider(trip.id)).valueOrNull ??
+              const <Map<String, dynamic>>[];
+    final avatars = <String>[
+      for (final m in members)
+        (m['profiles'] as Map<String, dynamic>?)?['avatar_id'] as String? ??
+            kDefaultAvatarSeed,
+    ];
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -494,31 +539,35 @@ class _AmbientTripCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Container(
-                      height: 8,
-                      width: 8,
-                      decoration: BoxDecoration(
-                        color: BrandColors.primaryContainer,
-                        shape: BoxShape.circle,
+                    if (trip != null) ...[
+                      Container(
+                        height: 8,
+                        width: 8,
+                        decoration: BoxDecoration(
+                          color: BrandColors.primaryContainer,
+                          shape: BoxShape.circle,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 6),
+                      const SizedBox(width: 6),
+                    ],
                     Flexible(
                       child: Text(
-                        'CONVOY SYNC ACTIVE',
+                        trip != null ? 'CONVOY SYNC ACTIVE' : 'RANMAP CONVOY',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: BrandText.weight(
-                          BrandText.labelSm,
-                          700,
-                        ).copyWith(color: BrandColors.primary),
+                        style: BrandText.weight(BrandText.labelSm, 700)
+                            .copyWith(
+                              color: trip != null
+                                  ? BrandColors.primary
+                                  : BrandColors.textMuted,
+                            ),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Pacific Coast Highway Run',
+                  trip?.title ?? 'Your crew, one map',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: BrandText.labelMd.copyWith(
@@ -526,7 +575,7 @@ class _AmbientTripCard extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '5 vehicles synced via LiveKit',
+                  trip != null ? '${members.length} in convoy' : 'Live location, voice and stops sync for everyone on the trip.',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: BrandText.bodySm.copyWith(color: BrandColors.textBody),
@@ -534,44 +583,67 @@ class _AmbientTripCard extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          const _AvatarStack(),
+          if (avatars.isNotEmpty) ...[
+            const SizedBox(width: 8),
+            _AvatarStack(avatars: avatars),
+          ],
         ],
       ),
     );
   }
 }
 
+/// The real convoy members' avatars (up to 3, then `+N`).
 class _AvatarStack extends StatelessWidget {
-  const _AvatarStack();
+  const _AvatarStack({required this.avatars});
+
+  final List<String> avatars;
 
   @override
   Widget build(BuildContext context) {
-    final items = [
-      ('TL', BrandColors.accentPeach, BrandColors.onTertiaryFixedVariant),
-      ('SK', BrandColors.secondaryFixed, BrandColors.onSecondaryFixed),
-      ('+8', BrandColors.primaryContainer, BrandColors.onPrimary),
-    ];
+    final shown = avatars.take(3).toList();
+    final extra = avatars.length - shown.length;
+    final slots = shown.length + (extra > 0 ? 1 : 0);
     return SizedBox(
       height: 28,
-      width: 28 + 18 * (items.length - 1),
+      width: 28 + 18.0 * (slots - 1),
       child: Stack(
         children: [
-          for (var i = 0; i < items.length; i++)
+          for (var i = 0; i < shown.length; i++)
             Positioned(
               left: 18.0 * i,
               child: Container(
                 height: 28,
                 width: 28,
+                padding: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  color: BrandColors.surface,
+                  shape: BoxShape.circle,
+                ),
+                child: AvatarView(
+                  seed: shown[i],
+                  size: 24,
+                  background: BrandColors.surfaceContainerLow,
+                ),
+              ),
+            ),
+          if (extra > 0)
+            Positioned(
+              left: 18.0 * shown.length,
+              child: Container(
+                height: 28,
+                width: 28,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: items[i].$2,
+                  color: BrandColors.primaryContainer,
                   shape: BoxShape.circle,
                   border: Border.all(color: BrandColors.surface, width: 2),
                 ),
                 child: Text(
-                  items[i].$1,
-                  style: BrandText.labelSm.copyWith(color: items[i].$3),
+                  '+$extra',
+                  style: BrandText.labelSm.copyWith(
+                    color: BrandColors.onPrimary,
+                  ),
                 ),
               ),
             ),
@@ -891,6 +963,34 @@ class _BenefitCard extends StatelessWidget {
   }
 }
 
+/// Shown when the store has no offering to sell — no invented prices.
+class _PricingUnavailable extends StatelessWidget {
+  const _PricingUnavailable();
+
+  @override
+  Widget build(BuildContext context) {
+    return BrandCard(
+      padding: const EdgeInsets.all(BrandSpace.md),
+      child: Row(
+        children: [
+          Icon(
+            Icons.info_outline_rounded,
+            size: 18,
+            color: BrandColors.textMuted,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Plans aren’t available right now. Please try again later.',
+              style: BrandText.bodySm.copyWith(color: BrandColors.textBody),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PlanSelector extends StatelessWidget {
   const _PlanSelector({
     required this.plan,
@@ -898,13 +998,26 @@ class _PlanSelector extends StatelessWidget {
     required this.annualPerMonth,
     required this.monthlyPrice,
     required this.trial,
+    required this.showAnnual,
+    required this.showMonthly,
     required this.onSelect,
+    this.savePercent,
+    this.annualIsBest = false,
   });
   final PaywallPlan plan;
   final String annualTotal;
   final String annualPerMonth;
   final String monthlyPrice;
   final String? trial;
+
+  /// Which plans the store actually sells.
+  final bool showAnnual;
+  final bool showMonthly;
+
+  /// Real saving (%) of annual vs 12× monthly, or null when it can't be
+  /// derived — then no saving claim is shown.
+  final int? savePercent;
+  final bool annualIsBest;
   final ValueChanged<PaywallPlan> onSelect;
 
   @override
@@ -927,27 +1040,31 @@ class _PlanSelector extends StatelessWidget {
             ],
           ),
         ),
-        _PlanCard(
-          selected: plan == PaywallPlan.annual,
-          title: 'Annual Pro Pass',
-          badge: 'BEST VALUE',
-          ribbon: 'SAVE 40%',
-          subtitle: trial != null
-              ? '$trial, then $annualTotal/year'
-              : '$annualTotal/year',
-          figure: annualPerMonth,
-          term: '/month',
-          onTap: () => onSelect(PaywallPlan.annual),
-        ),
-        const SizedBox(height: 12),
-        _PlanCard(
-          selected: plan == PaywallPlan.monthly,
-          title: 'Monthly Pass',
-          subtitle: 'Flexible pay-as-you-go',
-          figure: monthlyPrice,
-          term: '/month',
-          onTap: () => onSelect(PaywallPlan.monthly),
-        ),
+        if (showAnnual)
+          _PlanCard(
+            selected: plan == PaywallPlan.annual,
+            title: 'Annual Pro Pass',
+            // Only claim "best value"/savings when the store's own prices bear
+            // it out.
+            badge: annualIsBest ? 'BEST VALUE' : null,
+            ribbon: savePercent != null ? 'SAVE $savePercent%' : null,
+            subtitle: trial != null
+                ? '$trial, then $annualTotal/year'
+                : '$annualTotal/year',
+            figure: annualPerMonth,
+            term: '/month',
+            onTap: () => onSelect(PaywallPlan.annual),
+          ),
+        if (showAnnual && showMonthly) const SizedBox(height: 12),
+        if (showMonthly)
+          _PlanCard(
+            selected: plan == PaywallPlan.monthly,
+            title: 'Monthly Pass',
+            subtitle: 'Flexible pay-as-you-go',
+            figure: monthlyPrice,
+            term: '/month',
+            onTap: () => onSelect(PaywallPlan.monthly),
+          ),
       ],
     );
   }
@@ -1114,6 +1231,34 @@ class _LegalFooter extends StatelessWidget {
 
   final VoidCallback onManage;
 
+  /// Only the links that are actually configured, then the store action.
+  List<Widget> _items(BuildContext context, TextStyle link) {
+    final terms = Env.termsUrl;
+    final privacy = Env.privacyUrl;
+    return [
+      if (terms != null)
+        GestureDetector(
+          onTap: () => _openExternal(context, terms),
+          behavior: HitTestBehavior.opaque,
+          child: Text('Terms of Service', style: link),
+        ),
+      if (privacy != null)
+        GestureDetector(
+          onTap: () => _openExternal(context, privacy),
+          behavior: HitTestBehavior.opaque,
+          child: Text('Privacy Policy', style: link),
+        ),
+      GestureDetector(
+        onTap: onManage,
+        behavior: HitTestBehavior.opaque,
+        child: Text(
+          'Manage Subscription',
+          style: BrandText.labelSm.copyWith(color: BrandColors.primary),
+        ),
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final link = BrandText.labelSm.copyWith(color: BrandColors.outline);
@@ -1124,26 +1269,10 @@ class _LegalFooter extends StatelessWidget {
           crossAxisAlignment: WrapCrossAlignment.center,
           spacing: 10,
           children: [
-            GestureDetector(
-              onTap: () => _openExternal(context, _termsUrl),
-              behavior: HitTestBehavior.opaque,
-              child: Text('Terms of Service', style: link),
-            ),
-            Text('•', style: link),
-            GestureDetector(
-              onTap: () => _openExternal(context, _privacyUrl),
-              behavior: HitTestBehavior.opaque,
-              child: Text('Privacy Policy', style: link),
-            ),
-            Text('•', style: link),
-            GestureDetector(
-              onTap: onManage,
-              behavior: HitTestBehavior.opaque,
-              child: Text(
-                'Manage Subscription',
-                style: BrandText.labelSm.copyWith(color: BrandColors.primary),
-              ),
-            ),
+            for (final (i, item) in _items(context, link).indexed) ...[
+              if (i > 0) Text('•', style: link),
+              item,
+            ],
           ],
         ),
         const SizedBox(height: 10),

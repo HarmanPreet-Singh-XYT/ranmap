@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 
+import '../../core/providers/settings_provider.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/theme/nav_palette.dart';
 import '../../core/util/error_text.dart';
+import '../../core/util/units.dart';
 import '../../data/models/route_option.dart';
 import '../../data/services/google_maps_api_service.dart';
 import 'map_engine/map_engine.dart';
@@ -14,6 +18,13 @@ const _kPlaceTypes = [
   ('lodging', 'Lodging', Icons.hotel_rounded),
   ('tourist_attraction', 'Sights', Icons.landscape_rounded),
 ];
+
+/// The "how much a stop adds" line, e.g. `~12 min · 8.0 mi`, in the user's
+/// distance unit.
+String _detourLabel(PlaceDetour detour, DistanceUnit unit) {
+  final minutes = (detour.durationSeconds / 60).round();
+  return '~$minutes min · ${formatDistance(detour.distanceMeters / 1000, unit)}';
+}
 
 /// Search for nearby shops/POIs around [center]. When [routePolyline] is
 /// supplied, the user can also search along that route. Tapping a result opens
@@ -33,17 +44,17 @@ Future<NearbyPlace?> showNearbyPlacesSheet(
   );
 }
 
-class _NearbyPlacesSheet extends StatefulWidget {
+class _NearbyPlacesSheet extends ConsumerStatefulWidget {
   final Position center;
   final String? routePolyline;
 
   const _NearbyPlacesSheet({required this.center, this.routePolyline});
 
   @override
-  State<_NearbyPlacesSheet> createState() => _NearbyPlacesSheetState();
+  ConsumerState<_NearbyPlacesSheet> createState() => _NearbyPlacesSheetState();
 }
 
-class _NearbyPlacesSheetState extends State<_NearbyPlacesSheet> {
+class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
   String _type = _kPlaceTypes.first.$1;
   bool _alongRoute = false;
   List<NearbyPlace> _places = const [];
@@ -69,6 +80,8 @@ class _NearbyPlacesSheetState extends State<_NearbyPlacesSheet> {
       final places = _alongRoute && polyline != null && polyline.isNotEmpty
           ? await GoogleMapsApiService.placesAlongRoute(
               routePolyline: polyline,
+              // Anchor the detour figures: the server measures from here.
+              origin: widget.center,
               category: _type,
             )
           : await GoogleMapsApiService.nearbyPlaces(
@@ -95,6 +108,7 @@ class _NearbyPlacesSheetState extends State<_NearbyPlacesSheet> {
   @override
   Widget build(BuildContext context) {
     final c = NavColors.of(context);
+    final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
 
     return DraggableScrollableSheet(
       initialChildSize: 0.6,
@@ -187,12 +201,23 @@ class _NearbyPlacesSheetState extends State<_NearbyPlacesSheet> {
                       itemCount: _places.length,
                       itemBuilder: (context, i) {
                         final place = _places[i];
+                        final detour = place.detour;
                         return FTile(
                           prefix: Icon(
                             Icons.place_outlined,
                             color: c.activeRoute,
                           ),
                           title: Text(place.name),
+                          // Only rendered when the server measured a detour;
+                          // no placeholder when it didn't.
+                          subtitle: detour == null
+                              ? null
+                              : Text(
+                                  _detourLabel(detour, unit),
+                                  style: BrandText.bodySm.copyWith(
+                                    color: c.mutedForeground,
+                                  ),
+                                ),
                           onPress: () => _openDetails(place),
                         );
                       },

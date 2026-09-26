@@ -186,6 +186,12 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
     events.on<lk.RoomDisconnectedEvent>((_) {
       if (!_leaving && mounted) _scheduleReconnect();
     });
+    // LiveKit emits this as members start/stop speaking (with fresh
+    // `audioLevel`s). Without it the speaking highlight would be frozen at
+    // whatever it was when the list was first built.
+    events.on<lk.ActiveSpeakersChangedEvent>((_) {
+      if (mounted) setState(() {});
+    });
     _events = events;
   }
 
@@ -477,12 +483,51 @@ class _ParticipantRow extends StatelessWidget {
           : participant.identity,
       subtitle: isLocal ? 'You' : 'In voice',
       showChevron: false,
-      trailing: Icon(
-        participant.isMuted ? Icons.mic_off_rounded : Icons.mic_rounded,
-        size: 20,
-        color: participant.isMuted
-            ? BrandColors.textMuted
-            : BrandColors.primary,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Real live level from LiveKit, shown only while they're speaking.
+          if (participant.isSpeaking && !participant.isMuted) ...[
+            _LevelMeter(level: participant.audioLevel),
+            const SizedBox(width: 8),
+          ],
+          Icon(
+            participant.isMuted ? Icons.mic_off_rounded : Icons.mic_rounded,
+            size: 20,
+            color: participant.isMuted
+                ? BrandColors.textMuted
+                : BrandColors.primary,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A tiny level meter driven by LiveKit's real `audioLevel` (0..1).
+class _LevelMeter extends StatelessWidget {
+  const _LevelMeter({required this.level});
+
+  final double level;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 4,
+      height: 18,
+      alignment: Alignment.bottomCenter,
+      decoration: BoxDecoration(
+        color: BrandColors.surfaceContainerHigh,
+        borderRadius: BrandRadii.pill,
+      ),
+      child: FractionallySizedBox(
+        heightFactor: level.clamp(0.0, 1.0),
+        child: Container(
+          decoration: BoxDecoration(
+            color: BrandColors.primaryContainer,
+            borderRadius: BrandRadii.pill,
+          ),
+        ),
       ),
     );
   }

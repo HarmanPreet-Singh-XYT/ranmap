@@ -55,6 +55,7 @@ flutter:
     - assets/images/onboarding/
     - assets/images/tour/
     - assets/images/paywall/
+    - assets/images/scenic/
   fonts:
     # "Convoy Clean Modern" brand typeface. Shipped as a variable font, so the
     # weight axis is selected per-style via `fontVariations` (see
