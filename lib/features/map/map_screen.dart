@@ -21,14 +21,18 @@ import '../../core/util/error_text.dart';
 import '../../core/util/geo_distance.dart';
 import '../../core/util/units.dart';
 import '../../core/widgets/avatar_view.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_sheet_surface.dart';
 import '../../core/widgets/nav_surface.dart';
 import '../../data/models/map_post.dart';
 import '../../data/models/route_option.dart';
+import '../../data/models/saved_place.dart';
 import '../../data/models/trip.dart';
 import '../../data/models/trip_leg.dart';
 import '../../data/models/trip_stop.dart';
 import '../../data/services/google_maps_api_service.dart';
+import '../trip/new_trip_screen.dart';
 import '../trip/trip_providers.dart';
 import 'add_map_post_screen.dart';
 import 'live_sync_providers.dart';
@@ -37,6 +41,7 @@ import 'map_post_providers.dart';
 import 'map_post_viewer_sheet.dart';
 import 'nearby_places_sheet.dart';
 import 'navigate_to_member_sheet.dart';
+import 'saved_place_providers.dart';
 
 /// A teammate shown in the live-teammates sheet.
 typedef _Teammate = ({
@@ -91,6 +96,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
   PointAnnotationManager? _photoPoints;
   PointAnnotationManager? _placePoints;
+  PointAnnotationManager? _savedPlacePoints;
   PolylineAnnotationManager? _routeLines;
   Cancelable? _photoTapCancel;
 
@@ -105,6 +111,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
   Uint8List? _photoPin;
   Uint8List? _placePin;
+  Uint8List? _savedPlacePin;
 
   /// Bumped on every style load so a slow load can discard its work if another
   /// load started (or the screen went away) meanwhile.
@@ -159,6 +166,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
   }
 
   // Guards so overlays are only rebuilt when their data actually changes.
+  List<String>? _renderedSavedPlaceIds;
   List<String>? _renderedPostIds;
   String? _renderedRoutePolyline;
   String? _renderedPlaceId;
@@ -183,6 +191,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
     _photoTapCancel = null;
     _photoPoints = null;
     _placePoints = null;
+    _savedPlacePoints = null;
     _routeLines = null;
   }
 
@@ -197,17 +206,21 @@ class _MapScreenState extends ConsumerState<MapScreen>
     _vehicles.reset();
     _postByAnnotationId.clear();
     _renderedPostIds = null;
+    _renderedSavedPlaceIds = null;
     _renderedRoutePolyline = null;
     _renderedPlaceId = null;
 
     final photoPoints = await map.annotations.createPointAnnotationManager();
     final routeLines = await map.annotations.createPolylineAnnotationManager();
+    final savedPlacePoints = await map.annotations
+        .createPointAnnotationManager();
     if (generation != _styleGeneration || !mounted) return;
 
     _photoTapCancel = photoPoints.tapEvents(onTap: _onPhotoTap);
     setState(() {
       _photoPoints = photoPoints;
       _routeLines = routeLines;
+      _savedPlacePoints = savedPlacePoints;
     });
   }
 
@@ -402,6 +415,11 @@ class _MapScreenState extends ConsumerState<MapScreen>
         : ref.watch(tripMapPostsProvider(activeTrip.id));
     final mapPosts = mapPostsAsync?.valueOrNull ?? const <MapPost>[];
 
+    // The AI copilot's saved places are independent of any trip, so they're
+    // fetched — and pinned — whether or not a convoy is active.
+    final savedPlaces =
+        ref.watch(savedPlacesProvider).valueOrNull ?? const <SavedPlace>[];
+
     // The overlay is decorative — the map still works if it fails — but the
     // user should know it's stale rather than assume nobody is on the trip.
     final liveError = memberLocationsAsync?.error ?? mapPostsAsync?.error;
@@ -415,6 +433,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
     if (map != null) {
       unawaited(_vehicles.sync(map, poses));
       unawaited(_syncPhotoPins(mapPosts, devicePixelRatio));
+      unawaited(_syncSavedPlacePins(savedPlaces, devicePixelRatio));
       unawaited(_syncRoute(routePolyline));
       unawaited(_syncSelectedPlace(devicePixelRatio));
     }
@@ -643,65 +662,70 @@ class _MapScreenState extends ConsumerState<MapScreen>
                       ),
                     const SizedBox(height: BrandSpace.sm),
                   ],
-                  GestureDetector(
-                    onTap: teammates.isEmpty
-                        ? null
-                        : () => _showTeammates(teammates),
-                    behavior: HitTestBehavior.opaque,
-                    child: Row(
-                      children: [
-                        Container(
-                          height: 38,
-                          width: 38,
-                          decoration: BoxDecoration(
-                            color: BrandColors.secondaryFixed.withValues(
-                              alpha: 0.5,
+                  if (activeTrip == null)
+                    _buildGetStartedCard(
+                      context,
+                      deviceLat,
+                      deviceLng,
+                      unit,
+                      savedPlaces,
+                    )
+                  else
+                    GestureDetector(
+                      onTap: teammates.isEmpty
+                          ? null
+                          : () => _showTeammates(teammates),
+                      behavior: HitTestBehavior.opaque,
+                      child: Row(
+                        children: [
+                          Container(
+                            height: 38,
+                            width: 38,
+                            decoration: BoxDecoration(
+                              color: BrandColors.secondaryFixed.withValues(
+                                alpha: 0.5,
+                              ),
+                              shape: BoxShape.circle,
                             ),
-                            shape: BoxShape.circle,
+                            child: Icon(
+                              Icons.directions_car_filled_rounded,
+                              color: BrandColors.primary,
+                              size: 20,
+                            ),
                           ),
-                          child: Icon(
-                            Icons.directions_car_filled_rounded,
-                            color: BrandColors.primary,
-                            size: 20,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                activeTrip == null
-                                    ? 'No active trip'
-                                    : activeTrip.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: BrandText.weight(
-                                  BrandText.titleSm,
-                                  700,
-                                ).copyWith(color: BrandColors.textHeadline),
-                              ),
-                              Text(
-                                activeTrip == null
-                                    ? 'Start a trip to roll together'
-                                    : '${memberLocations.length} teammate${memberLocations.length == 1 ? '' : 's'} live now',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: BrandText.bodySm.copyWith(
-                                  color: BrandColors.textMuted,
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  activeTrip.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: BrandText.weight(
+                                    BrandText.titleSm,
+                                    700,
+                                  ).copyWith(color: BrandColors.textHeadline),
                                 ),
-                              ),
-                            ],
+                                Text(
+                                  '${memberLocations.length} teammate${memberLocations.length == 1 ? '' : 's'} live now',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: BrandText.bodySm.copyWith(
+                                    color: BrandColors.textMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                        if (teammates.isNotEmpty)
-                          Icon(
-                            Icons.chevron_right_rounded,
-                            color: BrandColors.textMuted,
-                          ),
-                      ],
+                          if (teammates.isNotEmpty)
+                            Icon(
+                              Icons.chevron_right_rounded,
+                              color: BrandColors.textMuted,
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -709,6 +733,138 @@ class _MapScreenState extends ConsumerState<MapScreen>
         ],
       ),
     );
+  }
+
+  /// Shown in the map's bottom card when there's no active convoy. The map is
+  /// the landing tab, so with nothing live it still has to say what to do next
+  /// rather than sit empty. When the user has AI-saved places, their real list
+  /// is surfaced here so the map doesn't read as empty.
+  Widget _buildGetStartedCard(
+    BuildContext context,
+    double deviceLat,
+    double deviceLng,
+    DistanceUnit unit,
+    List<SavedPlace> savedPlaces,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              height: 38,
+              width: 38,
+              decoration: BoxDecoration(
+                color: BrandColors.secondaryFixed.withValues(alpha: 0.5),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.groups_rounded,
+                color: BrandColors.primary,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'No convoy yet',
+                    style: BrandText.weight(
+                      BrandText.titleSm,
+                      700,
+                    ).copyWith(color: BrandColors.textHeadline),
+                  ),
+                  Text(
+                    'Plan a trip and your crew rolls together — live location, voice and shared stops.',
+                    style: BrandText.bodySm.copyWith(
+                      color: BrandColors.textMuted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        // The copilot's real saved places, when there are any. With none, the
+        // card renders exactly as the plain empty state it's always been.
+        if (savedPlaces.isNotEmpty) ...[
+          const SizedBox(height: BrandSpace.md),
+          _SavedPlacesList(
+            places: savedPlaces,
+            deviceLat: deviceLat,
+            deviceLng: deviceLng,
+            unit: unit,
+            onTap: _flyToSavedPlace,
+          ),
+        ],
+        const SizedBox(height: BrandSpace.md),
+        BrandPrimaryButton(
+          label: 'Plan your first trip',
+          leadingIcon: Icons.add_rounded,
+          onPressed: () => Navigator.of(context)
+              .push(MaterialPageRoute(builder: (_) => const NewTripScreen())),
+        ),
+      ],
+    );
+  }
+
+  /// Moves the camera to a saved place's stored coordinates. A place without
+  /// coordinates has nothing to fly to, so it's a no-op (and its card row is
+  /// left non-tappable).
+  void _flyToSavedPlace(SavedPlace place) {
+    final point = place.point;
+    if (point == null) return;
+    unawaited(
+      _mapKey.currentState?.flyTo(
+        Geo.pos(point.lat, point.lng),
+        zoom: kPlaceZoom,
+      ),
+    );
+  }
+
+  /// Renders the user's saved places as bookmark pins, reusing the same marker
+  /// plumbing (and change-guard) as [MapMarkers.pin] photo pins. Places with no
+  /// stored coordinates can't be pinned and are skipped silently.
+  Future<void> _syncSavedPlacePins(
+    List<SavedPlace> places,
+    double devicePixelRatio,
+  ) async {
+    final manager = _savedPlacePoints;
+    if (manager == null) return;
+    final located = [
+      for (final place in places)
+        if (place.hasLocation) place,
+    ];
+    final ids = [for (final place in located) place.id];
+    if (listEquals(ids, _renderedSavedPlaceIds)) return;
+
+    try {
+      _savedPlacePin ??= await MapMarkers.pin(
+        BrandColors.primary,
+        Icons.bookmark_rounded,
+        devicePixelRatio: devicePixelRatio,
+      );
+      final image = _savedPlacePin!;
+
+      await manager.deleteAll();
+      if (located.isNotEmpty) {
+        await manager.createMulti([
+          for (final place in located)
+            PointAnnotationOptions(
+              geometry: Geo.point(place.point!.lat, place.point!.lng),
+              image: image,
+              iconAnchor: IconAnchor.BOTTOM,
+            ),
+        ]);
+      }
+      // Commit the guard only after the work succeeded, so a failure is retried
+      // on the next rebuild instead of being permanently suppressed.
+      _renderedSavedPlaceIds = ids;
+    } catch (_) {
+      // A failed overlay sync must not take the map down.
+    }
   }
 
   Future<void> _syncPhotoPins(
@@ -819,44 +975,47 @@ class _MapScreenState extends ConsumerState<MapScreen>
     final selected = await showFSheet<_Teammate>(
       context: context,
       side: FLayout.btt,
-      builder: (context) => ListView(
-        shrinkWrap: true,
-        children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: Text(
-              'Live teammates',
-              style: TextStyle(fontWeight: FontWeight.bold),
+      builder: (context) => BrandSheetSurface(
+        padding: const EdgeInsets.only(top: BrandSpace.md),
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Text(
+                'Live teammates',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
-          ),
-          FTileGroup(
-            children: [
-              for (final teammate in teammates)
-                FTile(
-                  prefix: Container(
-                    height: 40,
-                    width: 40,
-                    decoration: BoxDecoration(
-                      color: c.surfaceAlt,
-                      shape: BoxShape.circle,
+            FTileGroup(
+              children: [
+                for (final teammate in teammates)
+                  FTile(
+                    prefix: Container(
+                      height: 40,
+                      width: 40,
+                      decoration: BoxDecoration(
+                        color: c.surfaceAlt,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.directions_car_filled_rounded,
+                        color: c.activeRoute,
+                        size: 20,
+                      ),
                     ),
-                    child: Icon(
-                      Icons.directions_car_filled_rounded,
-                      color: c.activeRoute,
-                      size: 20,
+                    title: Text(
+                      teammate.username != null
+                          ? '@${teammate.username}'
+                          : 'Teammate',
                     ),
+                    suffix: const Icon(Icons.navigation_rounded),
+                    onPress: () => Navigator.of(context).pop(teammate),
                   ),
-                  title: Text(
-                    teammate.username != null
-                        ? '@${teammate.username}'
-                        : 'Teammate',
-                  ),
-                  suffix: const Icon(Icons.navigation_rounded),
-                  onPress: () => Navigator.of(context).pop(teammate),
-                ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
     if (selected == null || !mounted) return;
@@ -1114,6 +1273,157 @@ class _LiveSyncErrorChip extends StatelessWidget {
             child: const Text('Retry'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The AI copilot's saved places, rendered as a compact real list in the
+/// no-convoy card: a heading and one row per place (name + distance). Kept
+/// short so the card stays a card; the rest are summarised with a real count.
+class _SavedPlacesList extends StatelessWidget {
+  const _SavedPlacesList({
+    required this.places,
+    required this.deviceLat,
+    required this.deviceLng,
+    required this.unit,
+    required this.onTap,
+  });
+
+  final List<SavedPlace> places;
+  final double deviceLat;
+  final double deviceLng;
+  final DistanceUnit unit;
+  final ValueChanged<SavedPlace> onTap;
+
+  /// How many rows to show before collapsing the remainder into a count — the
+  /// card must not grow with the user's saved-places backlog.
+  static const _maxRows = 3;
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = places.take(_maxRows).toList();
+    final hidden = places.length - shown.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.bookmark_rounded, size: 14, color: BrandColors.primary),
+            const SizedBox(width: 6),
+            Text(
+              'Saved places',
+              style: BrandText.weight(
+                BrandText.labelSm,
+                700,
+              ).copyWith(color: BrandColors.textMuted),
+            ),
+          ],
+        ),
+        const SizedBox(height: BrandSpace.xs),
+        for (final place in shown)
+          _SavedPlaceRow(
+            place: place,
+            deviceLat: deviceLat,
+            deviceLng: deviceLng,
+            unit: unit,
+            // Only a place with real coordinates has somewhere to fly to;
+            // a name-only place stays a plainly non-tappable row.
+            onTap: place.hasLocation ? () => onTap(place) : null,
+          ),
+        if (hidden > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: BrandSpace.xs),
+            child: Text(
+              '+$hidden more',
+              style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// One saved place in the card: a bookmark pod, the place name and how far away
+/// it is from the device. Tapping flies the map camera to it.
+class _SavedPlaceRow extends StatelessWidget {
+  const _SavedPlaceRow({
+    required this.place,
+    required this.deviceLat,
+    required this.deviceLng,
+    required this.unit,
+    required this.onTap,
+  });
+
+  final SavedPlace place;
+  final double deviceLat;
+  final double deviceLng;
+  final DistanceUnit unit;
+
+  /// Null when the place has no stored coordinates, leaving the row inert.
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final point = place.point;
+    final distanceLabel = point == null
+        ? 'No location saved'
+        : formatShortDistance(
+            haversineMeters(deviceLat, deviceLng, point.lat, point.lng),
+            unit,
+          );
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            Container(
+              height: 30,
+              width: 30,
+              decoration: BoxDecoration(
+                color: BrandColors.secondaryFixed.withValues(alpha: 0.5),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.bookmark_rounded,
+                size: 16,
+                color: BrandColors.primary,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    place.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: BrandText.labelLg.copyWith(
+                      color: BrandColors.textHeadline,
+                    ),
+                  ),
+                  Text(
+                    distanceLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: BrandText.bodySm.copyWith(
+                      color: BrandColors.textMuted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (onTap != null)
+              Icon(
+                Icons.my_location_rounded,
+                size: 18,
+                color: BrandColors.textMuted,
+              ),
+          ],
+        ),
       ),
     );
   }

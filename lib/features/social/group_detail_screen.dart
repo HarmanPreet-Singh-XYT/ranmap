@@ -16,6 +16,7 @@ import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_data.dart';
 import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_sheet_surface.dart';
 import '../../core/widgets/brand/brand_text_field.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/group.dart';
@@ -141,12 +142,11 @@ class GroupDetailScreen extends ConsumerWidget {
     final selected = await showFSheet<Map<String, dynamic>>(
       context: context,
       side: FLayout.btt,
-      builder: (context) => ListView(
-        shrinkWrap: true,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(BrandSpace.md),
-            child: BrandCard(
+      builder: (context) => BrandSheetSurface(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            BrandCard(
               padding: const EdgeInsets.symmetric(
                 horizontal: BrandSpace.md,
                 vertical: BrandSpace.xs,
@@ -165,8 +165,8 @@ class GroupDetailScreen extends ConsumerWidget {
                 ],
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
 

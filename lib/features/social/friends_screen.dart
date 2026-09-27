@@ -54,7 +54,7 @@ class _FriendsTab extends ConsumerWidget {
             child: BrandEmptyState(
               icon: Icons.person_add_alt_1_rounded,
               title: 'No friends yet',
-              message: 'Find people in the next tab.',
+              message: 'Friends are the people you can invite to trips and group chats. Add them by username in the "Find people" tab.',
             ),
           );
         }
@@ -240,6 +240,7 @@ class _RequestsTab extends ConsumerWidget {
               return const BrandEmptyState(
                 icon: Icons.inbox_rounded,
                 title: 'No pending requests',
+                message: 'When someone asks to be your friend, their request lands here to accept or decline.',
               );
             }
             return Column(
@@ -266,6 +267,8 @@ class _RequestsTab extends ConsumerWidget {
               return const BrandEmptyState(
                 icon: Icons.outbox_rounded,
                 title: 'No outgoing requests',
+                message:
+                    'Friend requests you send stay here until they accept.',
               );
             }
             return BrandCard(
@@ -383,15 +386,17 @@ class _FindPeopleTabState extends ConsumerState<_FindPeopleTab> {
                   child: BrandEmptyState(
                     icon: Icons.person_search_rounded,
                     title: 'Find your crew',
-                    message: 'Type at least 2 characters to search.',
+                    message: 'Type at least 2 characters to search for someone by username, then send a friend request.',
                   ),
                 );
               }
               if (results.isEmpty) {
-                return const Center(
+                return Center(
                   child: BrandEmptyState(
                     icon: Icons.search_off_rounded,
                     title: 'No matches',
+                    message:
+                        'No one matches "$_query". Check the spelling or try a different username.',
                   ),
                 );
               }

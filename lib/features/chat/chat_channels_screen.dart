@@ -3,11 +3,13 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/brand_palette.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_skeleton.dart';
 import '../../core/widgets/error_retry.dart';
 import '../social/social_providers.dart';
+import '../trip/new_trip_screen.dart';
 import '../trip/trip_providers.dart';
 import 'chat_providers.dart';
 import 'chat_screen.dart';
@@ -45,11 +47,18 @@ class ChatChannelsScreen extends ConsumerWidget {
     final groups = groupsAsync.valueOrNull ?? const [];
 
     if (trips.isEmpty && groups.isEmpty) {
-      return const Center(
+      return Center(
         child: BrandEmptyState(
           icon: Icons.forum_outlined,
           title: 'No channels yet',
-          message: 'Join a trip or group to start chatting.',
+          message: 'Every trip and group gets its own chat channel. Plan a trip to open your first one.',
+          action: BrandPrimaryButton(
+            label: 'Plan a trip',
+            trailingIcon: Icons.add_rounded,
+            expand: false,
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const NewTripScreen())),
+          ),
         ),
       );
     }

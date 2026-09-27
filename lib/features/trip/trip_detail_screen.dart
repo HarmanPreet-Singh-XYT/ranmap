@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'package:intl/intl.dart';
 
 import '../../core/constants/avatars.dart';
+import '../../core/constants/invite_links.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../core/router/auth_state_provider.dart';
 import '../../core/theme/brand_palette.dart';
@@ -14,11 +16,14 @@ import '../../core/util/geo_distance.dart';
 import '../../core/util/units.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/avatar_view.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_data.dart';
 import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_sheet_surface.dart';
+import '../../core/widgets/brand/brand_text_field.dart';
 import '../../core/widgets/brand/brand_timeline.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/stop_proposal.dart';
@@ -32,6 +37,7 @@ import '../../data/services/supabase_service.dart';
 import '../map/live_sync_providers.dart';
 import '../map/map_engine/geo.dart';
 import '../map/trip_photos_screen.dart';
+import '../social/social_providers.dart';
 import 'add_expense_screen.dart';
 import 'add_stop_screen.dart';
 import 'trip_ledger.dart';
@@ -42,6 +48,22 @@ class TripDetailScreen extends ConsumerWidget {
   const TripDetailScreen({super.key, required this.trip});
 
   final Trip trip;
+
+  Future<void> _startTrip(BuildContext context, WidgetRef ref) async {
+    try {
+      await ref.read(tripRepositoryProvider).startTrip(trip.id);
+      ref.invalidate(myTripsProvider);
+      ref.invalidate(activeTripProvider);
+      if (!context.mounted) return;
+      showAppToast(
+        context,
+        'Trip started — your crew can follow you live.',
+      );
+      Navigator.of(context).maybePop();
+    } catch (e) {
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
 
   Future<void> _completeTrip(BuildContext context, WidgetRef ref) async {
     final confirmed = await _confirm(
@@ -120,8 +142,7 @@ class TripDetailScreen extends ConsumerWidget {
     await showFSheet<void>(
       context: context,
       side: FLayout.btt,
-      builder: (sheetContext) => Padding(
-        padding: const EdgeInsets.all(BrandSpace.md),
+      builder: (sheetContext) => BrandSheetSurface(
         child: BrandCard(
           padding: const EdgeInsets.symmetric(
             horizontal: BrandSpace.md,
@@ -174,6 +195,16 @@ class TripDetailScreen extends ConsumerWidget {
                 ),
               ),
               const Spacer(),
+              if (trip.status == TripStatus.planned) ...[
+                BrandPrimaryButton(
+                  label: 'Start',
+                  trailingIcon: null,
+                  glow: false,
+                  expand: false,
+                  onPressed: () => _startTrip(context, ref),
+                ),
+                const SizedBox(width: BrandSpace.sm),
+              ],
               if (trip.status == TripStatus.active) ...[
                 BrandPrimaryButton(
                   label: 'Complete',
@@ -207,6 +238,14 @@ class TripDetailScreen extends ConsumerWidget {
                   child: _StopsTab(
                     tripId: trip.id,
                     originPoint: trip.originPoint,
+                  ),
+                ),
+                FTabEntry(
+                  label: const Text('Crew'),
+                  child: _CrewTab(
+                    tripId: trip.id,
+                    createdBy: trip.createdBy,
+                    tripTitle: trip.title,
                   ),
                 ),
                 FTabEntry(
@@ -1197,6 +1236,465 @@ class _StopCard extends StatelessWidget {
             ),
           ),
           Icon(Icons.drag_handle_rounded, color: BrandColors.textMuted),
+        ],
+      ),
+    );
+  }
+}
+
+/// The trip's crew: everyone invited or on board, plus affordances to invite
+/// someone *after* the trip exists (not only at creation time) and to copy an
+/// invite for someone who isn't a Ranmap user yet.
+class _CrewTab extends ConsumerWidget {
+  const _CrewTab({
+    required this.tripId,
+    required this.createdBy,
+    required this.tripTitle,
+  });
+
+  final String tripId;
+  final String createdBy;
+  final String tripTitle;
+
+  Future<void> _shareInvite(BuildContext context, WidgetRef ref) async {
+    final handle = ref.read(myProfileProvider).valueOrNull?.username;
+    if (handle == null) {
+      showAppToast(context, 'Set a username before inviting people.');
+      return;
+    }
+    // Until the invite domain is live, inviteLinkFor returns the app's custom
+    // scheme — which most messaging apps won't render as a tappable link and
+    // which does nothing for someone without the app. Share just the handle
+    // then; once the domain is configured, include the real web link.
+    final text = kInviteHostConfigured
+        ? 'Join me on Ranmap for "$tripTitle" — add me as a friend, my '
+              'username is @$handle.\n${inviteLinkFor(handle)}'
+        : 'Join me on Ranmap for "$tripTitle" — add me as a friend, my '
+              'username is @$handle.';
+    try {
+      await SharePlus.instance.share(
+        ShareParams(subject: 'Join me on Ranmap', text: text),
+      );
+    } catch (_) {
+      if (context.mounted) {
+        showAppToast(context, 'Could not open sharing.', error: true);
+      }
+    }
+  }
+
+  Future<void> _addMember(
+    BuildContext context,
+    List<Map<String, dynamic>> members,
+  ) {
+    final existing = <String>{
+      for (final m in members)
+        (m['profiles'] as Map<String, dynamic>?)?['username'] as String? ?? '',
+    };
+    return showFSheet<void>(
+      context: context,
+      side: FLayout.btt,
+      builder: (_) => _AddMemberSheet(
+        tripId: tripId,
+        existingUsernames: existing,
+      ),
+    );
+  }
+
+  /// Removes a member (or cancels a pending invite). Only shown to the trip's
+  /// creator — RLS permits the creator (or the member themselves) to delete.
+  Future<void> _removeMember(
+    BuildContext context,
+    WidgetRef ref,
+    Map<String, dynamic> member,
+  ) async {
+    final username =
+        (member['profiles'] as Map<String, dynamic>?)?['username'] as String? ??
+        'this member';
+    final confirmed = await showAppConfirmDialog(
+      context,
+      title: 'Remove from trip?',
+      message: 'Remove @$username from this trip?',
+      confirmLabel: 'Remove',
+      destructive: true,
+    );
+    if (!confirmed) return;
+    try {
+      await ref
+          .read(tripRepositoryProvider)
+          .removeMember(tripId: tripId, userId: member['user_id'] as String);
+      ref.invalidate(tripMembersProvider(tripId));
+    } catch (e) {
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final membersAsync = ref.watch(tripMembersProvider(tripId));
+    final members = membersAsync.valueOrNull ?? const <Map<String, dynamic>>[];
+    final myUid = SupabaseService.currentUser?.id;
+    final isCreator = myUid != null && myUid == createdBy;
+
+    return Stack(
+      children: [
+        membersAsync.when(
+          data: (fetched) {
+            // Accepted members first; pending invites trail.
+            final sorted = [...fetched]..sort((a, b) {
+              final aAccepted = a['invite_status'] == 'accepted' ? 0 : 1;
+              final bAccepted = b['invite_status'] == 'accepted' ? 0 : 1;
+              return aAccepted.compareTo(bAccepted);
+            });
+            return RefreshIndicator(
+              onRefresh: () async =>
+                  ref.invalidate(tripMembersProvider(tripId)),
+              child: ListView(
+                padding: const EdgeInsets.only(top: BrandSpace.md, bottom: 96),
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: [
+                  BrandCard(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: BrandSpace.md,
+                      vertical: BrandSpace.xs,
+                    ),
+                    child: BrandListRow(
+                      icon: Icons.ios_share_rounded,
+                      iconColor: BrandColors.primary,
+                      title: 'Share invite',
+                      subtitle: 'Send a link so they can add you as a friend',
+                      onTap: () => _shareInvite(context, ref),
+                    ),
+                  ),
+                  const SizedBox(height: BrandSpace.md),
+                  if (sorted.isEmpty)
+                    const BrandEmptyState(
+                      icon: Icons.groups_outlined,
+                      title: 'No crew yet',
+                      message:
+                          'Invite friends to follow your trip on the live map.',
+                    )
+                  else ...[
+                    BrandSectionHeader(
+                      icon: Icons.groups_rounded,
+                      title: 'Crew',
+                      trailing: BrandPill(label: '${sorted.length}'),
+                    ),
+                    const SizedBox(height: BrandSpace.sm),
+                    BrandCard(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: BrandSpace.md,
+                        vertical: BrandSpace.xs,
+                      ),
+                      child: Column(
+                        children: [
+                          for (final member in sorted)
+                            _CrewMemberRow(
+                              member: member,
+                              isOrganizer: member['user_id'] == createdBy,
+                              // Never offer to remove the organizer: dropping
+                              // the creator's own membership would orphan the
+                              // trip.
+                              onRemove: isCreator &&
+                                      member['user_id'] != createdBy
+                                  ? () => _removeMember(context, ref, member)
+                                  : null,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            );
+          },
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => ErrorRetry(
+            error: e,
+            onRetry: () => ref.invalidate(tripMembersProvider(tripId)),
+          ),
+        ),
+        Positioned(
+          right: BrandSpace.md,
+          bottom: BrandSpace.md,
+          child: BrandPrimaryButton(
+            label: 'Add member',
+            leadingIcon: Icons.person_add_alt_1_rounded,
+            trailingIcon: null,
+            expand: false,
+            onPressed: () => _addMember(context, members),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// One row in a crew roster: a member's real avatar, their handle, and either
+/// their invite status or a caller-supplied trailing action.
+class _CrewMemberRow extends StatelessWidget {
+  const _CrewMemberRow({
+    required this.member,
+    this.isOrganizer = false,
+    this.trailing,
+    this.onTap,
+    this.onRemove,
+  });
+
+  final Map<String, dynamic> member;
+  final bool isOrganizer;
+
+  /// Overrides the status pill (e.g. an "add" glyph in the friend picker).
+  final Widget? trailing;
+  final VoidCallback? onTap;
+
+  /// When set, a remove affordance is shown (for the trip creator).
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final profile = member['profiles'] as Map<String, dynamic>?;
+    final username = profile?['username'] as String? ?? 'member';
+    final seed = profile?['avatar_id'] as String? ?? kDefaultAvatarSeed;
+    final accepted = member['invite_status'] == 'accepted';
+
+    final Widget status =
+        trailing ??
+        (isOrganizer
+            ? const BrandPill(label: 'Organizer', bold: true)
+            : accepted
+            ? const BrandPill(
+                label: 'Going',
+                icon: Icons.check_rounded,
+                bold: true,
+              )
+            : const BrandPill(
+                label: 'Invited',
+                icon: Icons.hourglass_empty_rounded,
+              ));
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            AvatarView(
+              seed: seed,
+              size: 40,
+              background: BrandColors.surfaceContainerLow,
+              accentColor: BrandColors.primary,
+            ),
+            const SizedBox(width: BrandSpace.gutterSm),
+            Expanded(
+              child: Text(
+                '@$username',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: BrandText.titleSm.copyWith(
+                  color: BrandColors.textHeadline,
+                ),
+              ),
+            ),
+            const SizedBox(width: BrandSpace.sm),
+            status,
+            if (onRemove != null) ...[
+              const SizedBox(width: BrandSpace.xs),
+              GestureDetector(
+                onTap: onRemove,
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Icon(
+                    Icons.remove_circle_outline_rounded,
+                    size: 20,
+                    color: BrandColors.textMuted,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The "add to crew" sheet: invite by exact username, or tap a friend. Each
+/// invite fires immediately so the roster behind the sheet updates.
+class _AddMemberSheet extends ConsumerStatefulWidget {
+  const _AddMemberSheet({
+    required this.tripId,
+    required this.existingUsernames,
+  });
+
+  final String tripId;
+  final Set<String> existingUsernames;
+
+  @override
+  ConsumerState<_AddMemberSheet> createState() => _AddMemberSheetState();
+}
+
+class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
+  final _ctrl = TextEditingController();
+  final Set<String> _invited = {};
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  bool _isOnTrip(String username) =>
+      widget.existingUsernames.contains(username) ||
+      _invited.contains(username);
+
+  Future<void> _invite(String raw) async {
+    final username = raw.trim();
+    if (username.isEmpty || _busy) return;
+    if (_isOnTrip(username)) {
+      showAppToast(context, '@$username is already in your crew.');
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      final invited = await ref
+          .read(tripRepositoryProvider)
+          .inviteByUsername(tripId: widget.tripId, username: username);
+      if (!invited) {
+        if (mounted) {
+          showAppToast(
+            context,
+            'No user found with username "$username".',
+            error: true,
+          );
+        }
+        return;
+      }
+      ref.invalidate(tripMembersProvider(widget.tripId));
+      if (!mounted) return;
+      setState(() {
+        _invited.add(username);
+        _ctrl.clear();
+      });
+      showAppToast(context, '@$username invited.');
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final friendsAsync = ref.watch(friendsProvider);
+
+    return BrandSheetSurface(
+      child: ListView(
+        shrinkWrap: true,
+        children: [
+          Text(
+            'Add to crew',
+            style: BrandText.titleMd.copyWith(color: BrandColors.textHeadline),
+          ),
+          const SizedBox(height: BrandSpace.xs),
+          Text(
+            'Everyone you add can follow the trip on the live map.',
+            style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
+          ),
+          const SizedBox(height: BrandSpace.md),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: BrandTextField(
+                  controller: _ctrl,
+                  hint: 'theirname',
+                  onSubmitted: _invite,
+                ),
+              ),
+              const SizedBox(width: BrandSpace.sm),
+              BrandPrimaryButton(
+                label: 'Add',
+                trailingIcon: null,
+                glow: false,
+                expand: false,
+                loading: _busy,
+                onPressed: _busy ? null : () => _invite(_ctrl.text),
+              ),
+            ],
+          ),
+          const SizedBox(height: BrandSpace.lg),
+          friendsAsync.when(
+            data: (rows) {
+              final myUid = SupabaseService.currentUser?.id;
+              final friends = rows
+                  .map((row) {
+                    final isRequester = row['requester_id'] == myUid;
+                    return (isRequester ? row['addressee'] : row['requester'])
+                        as Map<String, dynamic>?;
+                  })
+                  .whereType<Map<String, dynamic>>()
+                  .where(
+                    (p) => !_isOnTrip(p['username'] as String? ?? ''),
+                  )
+                  .toList();
+
+              if (friends.isEmpty) {
+                return Text(
+                  'No more friends to add here — share an invite for anyone '
+                  'else.',
+                  style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'From your friends',
+                    style: BrandText.labelMd.copyWith(
+                      color: BrandColors.textBody,
+                    ),
+                  ),
+                  const SizedBox(height: BrandSpace.xs),
+                  BrandCard(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: BrandSpace.md,
+                      vertical: BrandSpace.xs,
+                    ),
+                    child: Column(
+                      children: [
+                        for (final profile in friends)
+                          _CrewMemberRow(
+                            member: {
+                              'invite_status': 'invited',
+                              'profiles': profile,
+                            },
+                            trailing: Icon(
+                              Icons.add_circle_outline_rounded,
+                              size: 22,
+                              color: BrandColors.primary,
+                            ),
+                            onTap: () =>
+                                _invite(profile['username'] as String? ?? ''),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+            loading: () => const Padding(
+              padding: EdgeInsets.symmetric(vertical: BrandSpace.md),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+            error: (e, _) => Text(
+              "Couldn't load your friends.",
+              style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
+            ),
+          ),
         ],
       ),
     );

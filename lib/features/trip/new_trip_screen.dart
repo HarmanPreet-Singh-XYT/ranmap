@@ -15,6 +15,7 @@ import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_sheet_surface.dart';
 import '../../core/widgets/brand/brand_text_field.dart';
 import '../../data/models/trip.dart';
 import '../../data/services/supabase_service.dart';
@@ -107,42 +108,45 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
     final selected = await showFSheet<String>(
       context: context,
       side: FLayout.btt,
-      builder: (context) => ListView(
-        shrinkWrap: true,
-        padding: const EdgeInsets.all(BrandSpace.md),
-        children: [
-          BrandCard(
-            padding: const EdgeInsets.symmetric(
-              horizontal: BrandSpace.md,
-              vertical: BrandSpace.xs,
+      builder: (context) => BrandSheetSurface(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            BrandCard(
+              padding: const EdgeInsets.symmetric(
+                horizontal: BrandSpace.md,
+                vertical: BrandSpace.xs,
+              ),
+              child: Column(
+                children: [
+                  for (final profile in friends)
+                    _CrewRow(
+                      seed:
+                          profile['avatar_id'] as String? ?? kDefaultAvatarSeed,
+                      username: profile['username'] as String,
+                      onTap: _invitees.contains(profile['username'] as String)
+                          ? null
+                          : () =>
+                                Navigator.of(context)
+                                    .pop(profile['username'] as String),
+                      trailing:
+                          _invitees.contains(profile['username'] as String)
+                          ? const BrandPill(
+                              label: 'Invited',
+                              icon: Icons.check_rounded,
+                              bold: true,
+                            )
+                          : Icon(
+                              Icons.chevron_right_rounded,
+                              size: 20,
+                              color: BrandColors.textMuted,
+                            ),
+                    ),
+                ],
+              ),
             ),
-            child: Column(
-              children: [
-                for (final profile in friends)
-                  _CrewRow(
-                    seed: profile['avatar_id'] as String? ?? kDefaultAvatarSeed,
-                    username: profile['username'] as String,
-                    onTap: _invitees.contains(profile['username'] as String)
-                        ? null
-                        : () =>
-                              Navigator.of(context)
-                                  .pop(profile['username'] as String),
-                    trailing: _invitees.contains(profile['username'] as String)
-                        ? const BrandPill(
-                            label: 'Invited',
-                            icon: Icons.check_rounded,
-                            bold: true,
-                          )
-                        : Icon(
-                            Icons.chevron_right_rounded,
-                            size: 20,
-                            color: BrandColors.textMuted,
-                          ),
-                  ),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
 
@@ -235,7 +239,11 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
       final failedInvites = <String>[];
       for (final username in _invitees) {
         try {
-          await repo.inviteByUsername(tripId: trip.id, username: username);
+          final invited = await repo.inviteByUsername(
+            tripId: trip.id,
+            username: username,
+          );
+          if (!invited) failedInvites.add(username);
         } catch (_) {
           failedInvites.add(username);
         }
@@ -245,11 +253,12 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
 
       if (!mounted) return;
       if (failedInvites.isNotEmpty) {
-        showAppToast(
-          context,
-          'Trip created. Could not find: ${failedInvites.join(', ')}',
-        );
+        // Don't drop this in a toast that vanishes with the screen: name the
+        // handles that failed and point at the trip's Crew tab, where they can
+        // be retried once the spelling is right.
+        await _showInviteFailures(failedInvites);
       }
+      if (!mounted) return;
       Navigator.of(context).pop(trip);
     } catch (e) {
       if (!mounted) return;
@@ -262,6 +271,50 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// The trip was created, but some handles couldn't be found. Names them and
+  /// explains where to retry, rather than a toast that disappears with the
+  /// screen.
+  Future<void> _showInviteFailures(List<String> failed) {
+    final handles = failed.map((u) => '@$u').join(', ');
+    return showFSheet<void>(
+      context: context,
+      side: FLayout.btt,
+      builder: (sheetContext) => BrandSheetSurface(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.person_off_rounded, color: BrandColors.primary),
+                const SizedBox(width: BrandSpace.gutterSm),
+                Expanded(
+                  child: Text(
+                    'Some invites didn\'t send',
+                    style: BrandText.titleMd.copyWith(
+                      color: BrandColors.textHeadline,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: BrandSpace.md),
+            Text(
+              'Your trip is ready, but we couldn\'t find $handles. Check the '
+              'spelling, then invite them again from the trip\'s Crew tab.',
+              style: BrandText.bodyMd.copyWith(color: BrandColors.textBody),
+            ),
+            const SizedBox(height: BrandSpace.lg),
+            BrandPrimaryButton(
+              label: 'Got it',
+              onPressed: () => Navigator.of(sheetContext).pop(),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override

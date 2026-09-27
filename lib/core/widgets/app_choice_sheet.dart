@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:forui/forui.dart';
 
+import 'brand/brand_sheet_surface.dart';
+import '../theme/brand_palette.dart';
 import '../theme/nav_palette.dart';
 
 /// A bottom sheet listing mutually exclusive [options]; returns the chosen
@@ -17,8 +19,8 @@ Future<T?> showAppChoiceSheet<T>(
     side: FLayout.btt,
     builder: (context) {
       final c = NavColors.of(context);
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 8),
+      return BrandSheetSurface(
+        padding: const EdgeInsets.only(top: BrandSpace.md),
         child: ListView(
           shrinkWrap: true,
           children: [
@@ -26,7 +28,11 @@ Future<T?> showAppChoiceSheet<T>(
               padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
               child: Text(
                 title,
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.foreground),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: c.foreground,
+                ),
               ),
             ),
             Padding(

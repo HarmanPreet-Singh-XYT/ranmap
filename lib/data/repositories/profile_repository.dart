@@ -53,18 +53,51 @@ class ProfileRepository {
     return Profile.fromJson(row);
   }
 
+  /// Fuzzy username search. Prefers the `search_profiles` RPC (substring +
+  /// trigram similarity, so a typo still finds the handle — see
+  /// 0017_profile_search.sql), and falls back to a plain substring match when
+  /// the RPC isn't there, so the app works before the migration is applied.
   Future<List<Profile>> searchByUsername(String query) async {
-    if (query.trim().length < 2) return const [];
+    final trimmed = query.trim();
+    if (trimmed.length < 2) return const [];
+    try {
+      final data = await _client.rpc(
+        'search_profiles',
+        params: {'p_query': trimmed},
+      );
+      return (data as List)
+          .map((r) => Profile.fromJson(r as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return _searchByUsernameSubstring(trimmed);
+    }
+  }
+
+  /// A single profile by its exact handle, or null when no such user exists.
+  /// Used where the handle is already known (e.g. an invite link's inviter) and
+  /// a fuzzy search would be wasteful and could return a near-match.
+  Future<Profile?> fetchByUsername(String username) async {
+    final row = await _client
+        .from('profiles')
+        .select(kProfilePublicColumns)
+        .eq('username', username)
+        .maybeSingle();
+    return row == null ? null : Profile.fromJson(row);
+  }
+
+  Future<List<Profile>> _searchByUsernameSubstring(String query) async {
     final myUid = SupabaseService.currentUser?.id;
     final rows = await _client
         .from('profiles')
         .select(kProfilePublicColumns)
-        .ilike('username', '%${_escapeLike(query.trim())}%')
+        .ilike('username', '%${_escapeLike(query)}%')
         // Exclude yourself: adding yourself would be rejected anyway, and the
         // "Add" button on your own row is confusing.
         .neq('id', myUid ?? '')
         .limit(20);
-    return (rows as List).map((r) => Profile.fromJson(r as Map<String, dynamic>)).toList();
+    return (rows as List)
+        .map((r) => Profile.fromJson(r as Map<String, dynamic>))
+        .toList();
   }
 
   /// The current user's private fields (phone_number / socials /

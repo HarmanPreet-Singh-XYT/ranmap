@@ -11,6 +11,7 @@ import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/error_retry.dart';
 import '../premium/paywall.dart';
 import '../premium/premium_providers.dart';
+import '../trip/new_trip_screen.dart';
 import '../trip/trip_providers.dart';
 
 class TripHistoryScreen extends ConsumerWidget {
@@ -83,11 +84,19 @@ class TripHistoryScreen extends ConsumerWidget {
         ),
         data: (rows) {
           if (rows.isEmpty) {
-            return const Center(
+            return Center(
               child: BrandEmptyState(
                 icon: Icons.route_rounded,
                 title: 'No trip stats yet',
-                message: 'Once you finish a trip, your distance, speed and duration show up here.',
+                message: 'Each finished trip adds its distance, top speed and time to your history here.',
+                action: BrandPrimaryButton(
+                  label: 'Plan a trip',
+                  trailingIcon: Icons.add_rounded,
+                  expand: false,
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const NewTripScreen()),
+                  ),
+                ),
               ),
             );
           }

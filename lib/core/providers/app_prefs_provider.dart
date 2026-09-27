@@ -15,6 +15,7 @@ final sharedPreferencesProvider = Provider<SharedPreferences>(
 const _kIntroV1SeenKey = 'intro_seen_v1';
 const _kIntroV2SeenKey = 'intro_seen_v2';
 const _kPaywallLastShownKey = 'paywall_last_shown_v1';
+const _kPendingInviteKey = 'pending_invite_v1';
 const _kIntroFlagsVersionKey = 'intro_flags_version';
 
 /// Bump when the *meaning* of the intro flags changes, so existing installs
@@ -72,6 +73,17 @@ class AppPrefs {
   /// cooldown.
   Future<void> markPaywallShown(DateTime at) =>
       _prefs.setInt(_kPaywallLastShownKey, at.millisecondsSinceEpoch);
+
+  /// The handle from an invite link that hasn't been accepted or declined yet,
+  /// or null. Persisted so it survives the sign-up round trip — OAuth and email
+  /// confirmation can both restart the process.
+  String? get pendingInvite => _prefs.getString(_kPendingInviteKey);
+
+  /// Records (or clears, when [username] is null) the pending invite handle.
+  Future<void> setPendingInvite(String? username) {
+    if (username == null) return _prefs.remove(_kPendingInviteKey);
+    return _prefs.setString(_kPendingInviteKey, username);
+  }
 }
 
 final appPrefsProvider = Provider<AppPrefs>(

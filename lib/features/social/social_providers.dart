@@ -35,6 +35,14 @@ final usernameSearchProvider = FutureProvider.autoDispose
           .searchByUsername(query.trim());
     });
 
+/// A single profile by its exact handle (null when there's no such user). Used
+/// to resolve a known handle — such as an invite link's inviter — without the
+/// fuzzy search.
+final profileByUsernameProvider = FutureProvider.autoDispose
+    .family<Profile?, String>((ref, username) {
+      return ref.watch(profileRepositoryProvider).fetchByUsername(username);
+    });
+
 final myGroupsProvider = FutureProvider.autoDispose<List<Group>>(
   (ref) => ref.watch(groupRepositoryProvider).myGroups(),
 );

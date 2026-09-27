@@ -24,6 +24,12 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<!-- Deep links (invites) are handled explicitly in Dart via the app_links
+	     package (lib/app/app.dart); turn off Flutter's own deep-link router so
+	     a link isn't handled twice. Universal-link (https) invites additionally
+	     need an Associated Domains entitlement once a real domain exists. -->
+	<key>FlutterDeepLinkingEnabled</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<!-- OAuth callback scheme; must match kAuthRedirectUrl in

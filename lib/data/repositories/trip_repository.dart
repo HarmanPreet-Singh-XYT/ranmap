@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../../core/network/backend_client.dart';
 import '../models/profile.dart';
 import '../models/stop_proposal.dart';
 import '../models/trip.dart';
@@ -80,9 +83,10 @@ class TripRepository {
     });
   }
 
-  /// Looks up a profile by exact username and invites them. Throws
-  /// [StateError] if no such username exists.
-  Future<void> inviteByUsername({
+  /// Looks up a profile by exact username and invites them. Returns false when
+  /// no such username exists (so callers can distinguish "not found" from a
+  /// real failure without inspecting an exception); other errors still throw.
+  Future<bool> inviteByUsername({
     required String tripId,
     required String username,
   }) async {
@@ -91,10 +95,29 @@ class TripRepository {
         .select('id')
         .eq('username', username)
         .maybeSingle();
-    if (profileRow == null) {
-      throw StateError('No user found with username "$username"');
+    if (profileRow == null) return false;
+    final inviteeId = profileRow['id'] as String;
+    await inviteMember(tripId: tripId, userId: inviteeId);
+    // Best-effort push so the invitee hears about it (the server verifies the
+    // caller is the trip's creator before sending). Fired without awaiting so a
+    // slow or unconfigured backend can't delay the invite itself.
+    unawaited(_notifyInvitee(tripId: tripId, userId: inviteeId));
+    return true;
+  }
+
+  Future<void> _notifyInvitee({
+    required String tripId,
+    required String userId,
+  }) async {
+    try {
+      await BackendClient.postJson(
+        '/notifications/trip-invite',
+        {'tripId': tripId, 'userId': userId},
+        fallbackMessage: 'Could not send the invite notification',
+      );
+    } catch (_) {
+      // Best-effort: the invite already succeeded, so a push failure is silent.
     }
-    await inviteMember(tripId: tripId, userId: profileRow['id'] as String);
   }
 
   Future<void> respondToInvite({
@@ -501,6 +524,19 @@ class TripRepository {
         .delete()
         .eq('trip_id', tripId)
         .eq('user_id', uid);
+  }
+
+  /// Removes another member from a trip (or cancels their pending invite).
+  /// Permitted by RLS for the trip's creator, or the member themselves.
+  Future<void> removeMember({
+    required String tripId,
+    required String userId,
+  }) async {
+    await _client
+        .from('trip_members')
+        .delete()
+        .eq('trip_id', tripId)
+        .eq('user_id', userId);
   }
 
   /// Cancel/delete a trip you created.

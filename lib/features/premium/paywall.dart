@@ -6,6 +6,7 @@ import '../../core/theme/nav_palette.dart';
 import '../../core/widgets/app_spinner.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/brand/brand_sheet_surface.dart';
 import 'premium_providers.dart';
 import 'premium_purchaser.dart';
 import 'revenuecat.dart';
@@ -116,7 +117,9 @@ class _PaywallSheetState extends ConsumerState<_PaywallSheet> {
   @override
   Widget build(BuildContext context) {
     final c = NavColors.of(context);
-    return SafeArea(
+    return BrandSheetSurface(
+      handle: false,
+      padding: EdgeInsets.zero,
       child: SingleChildScrollView(
         padding: EdgeInsets.fromLTRB(
           24,

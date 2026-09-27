@@ -119,7 +119,7 @@ directly from the code (real limits, real copy, real field names).
 - Non-Pro: paywall prompt — "Trip stats & history are a Ranmap Pro feature. Unlock your full distance, speed and duration history across every trip."
 - Pro: summary card (trip count, total distance, total time) + per-trip rollup tiles.
 - Duration formatted as `"{h}h {m}m"` or just `"{m}m"` under an hour.
-- Empty state: "No trip stats yet. Once you finish a trip, your distance, speed and duration show up here."
+- Empty state: "No trip stats yet. Each finished trip adds its distance, top speed and time to your history here." + "Plan a trip" → NewTripScreen.
 
 ### Settings screen
 - **Preferences**: theme (System/Light/Dark), distance units (km/mi), map style, 3D buildings toggle, terrain toggle — all persisted and live-applied to the map.
@@ -196,7 +196,7 @@ directly from the code (real limits, real copy, real field names).
 - Declining a request deletes the row (not a soft "blocked" state), so a future re-request is possible.
 
 ### Groups
-- Empty state: "No groups yet. Create one to start planning trips together."
+- Empty state: "No groups yet. Groups are shared crews you plan and take trips with. Create one and invite friends by username." + "New group" action (opens the same create dialog).
 - "New group" dialog, name ≤60 chars.
 - Group detail: owner can remove members (confirm dialog); non-owners see a "leave group" action.
 - "Add member" hits the free-tier group-size cap → shows the Pro paywall instead of an error.

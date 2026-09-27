@@ -57,6 +57,31 @@ class _TourScreenState extends ConsumerState<TourScreen> {
     return BrandScaffold(
       child: Column(
         children: [
+          // Skip sits top-right — the conventional spot — rather than as a
+          // muted link below the primary CTA, so a returning user can get past
+          // the tour without hunting for it. Hidden on the final page, which is
+          // CTA-only.
+          if (!last)
+            Align(
+              alignment: Alignment.centerRight,
+              child: GestureDetector(
+                onTap: _leaving ? null : _finish,
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 8,
+                  ),
+                  child: Text(
+                    'Skip',
+                    style: BrandText.weight(
+                      BrandText.labelMd,
+                      700,
+                    ).copyWith(color: BrandColors.primary),
+                  ),
+                ),
+              ),
+            ),
           const SizedBox(height: BrandSpace.sm),
           TourProgressHeader(
             step: page.step,
@@ -80,27 +105,6 @@ class _TourScreenState extends ConsumerState<TourScreen> {
             label: page.nextLabel,
             onPressed: _leaving ? null : _next,
           ),
-          // The final page is deliberately CTA-only; earlier pages let the
-          // user jump straight to the welcome screen.
-          if (!last)
-            Center(
-              child: GestureDetector(
-                onTap: _leaving ? null : _finish,
-                behavior: HitTestBehavior.opaque,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  child: Text(
-                    'Skip',
-                    style: BrandText.labelMd.copyWith(
-                      color: BrandColors.textMuted,
-                    ),
-                  ),
-                ),
-              ),
-            ),
           const SizedBox(height: BrandSpace.sm),
         ],
       ),

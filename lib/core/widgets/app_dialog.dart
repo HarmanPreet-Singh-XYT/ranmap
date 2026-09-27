@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:forui/forui.dart';
 
+import 'brand/brand_sheet_surface.dart';
 import '../theme/nav_palette.dart';
 
 /// A ForUI-styled confirmation dialog.
@@ -18,12 +19,14 @@ Future<bool> showAppConfirmDialog(
     context: context,
     builder: (context, style, animation) => FDialog(
       animation: animation,
-      builder: (context, style) => _ConfirmContent(
-        title: title,
-        message: message,
-        confirmLabel: confirmLabel,
-        cancelLabel: cancelLabel,
-        destructive: destructive,
+      builder: (context, style) => BrandSheetSurface.dialog(
+        child: _ConfirmContent(
+          title: title,
+          message: message,
+          confirmLabel: confirmLabel,
+          cancelLabel: cancelLabel,
+          destructive: destructive,
+        ),
       ),
     ),
   );
@@ -46,13 +49,15 @@ Future<String?> showAppTextDialog(
     context: context,
     builder: (context, style, animation) => FDialog(
       animation: animation,
-      builder: (context, style) => _TextContent(
-        title: title,
-        label: label,
-        hint: hint,
-        confirmLabel: confirmLabel,
-        initialValue: initialValue,
-        maxLength: maxLength,
+      builder: (context, style) => BrandSheetSurface.dialog(
+        child: _TextContent(
+          title: title,
+          label: label,
+          hint: hint,
+          confirmLabel: confirmLabel,
+          initialValue: initialValue,
+          maxLength: maxLength,
+        ),
       ),
     ),
   );
@@ -80,7 +85,9 @@ class _TextContent extends StatefulWidget {
 }
 
 class _TextContentState extends State<_TextContent> {
-  late final TextEditingController _controller = TextEditingController(text: widget.initialValue);
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initialValue,
+  );
 
   @override
   void dispose() {
@@ -99,7 +106,11 @@ class _TextContentState extends State<_TextContent> {
         children: [
           Text(
             widget.title,
-            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700, color: c.foreground),
+            style: TextStyle(
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
+              color: c.foreground,
+            ),
           ),
           const SizedBox(height: 16),
           FTextField(
@@ -123,7 +134,8 @@ class _TextContentState extends State<_TextContent> {
               const SizedBox(width: 10),
               Expanded(
                 child: FButton(
-                  onPress: () => Navigator.of(context).pop(_controller.text.trim()),
+                  onPress: () =>
+                      Navigator.of(context).pop(_controller.text.trim()),
                   child: Text(widget.confirmLabel),
                 ),
               ),
@@ -161,11 +173,18 @@ class _ConfirmContent extends StatelessWidget {
         children: [
           Text(
             title,
-            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700, color: c.foreground),
+            style: TextStyle(
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
+              color: c.foreground,
+            ),
           ),
           if (message != null) ...[
             const SizedBox(height: 8),
-            Text(message!, style: TextStyle(color: c.mutedForeground, height: 1.35)),
+            Text(
+              message!,
+              style: TextStyle(color: c.mutedForeground, height: 1.35),
+            ),
           ],
           const SizedBox(height: 22),
           Row(

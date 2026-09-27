@@ -1,19 +1,71 @@
+import 'dart:async';
+
+import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 
+import '../core/constants/invite_links.dart';
 import '../core/providers/settings_provider.dart';
 import '../core/router/app_router.dart';
 import '../core/theme/brand_palette.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/forui_theme.dart';
 import '../core/widgets/offline_banner.dart';
+import '../features/social/invite_providers.dart';
 
-class RanmapApp extends ConsumerWidget {
+class RanmapApp extends ConsumerStatefulWidget {
   const RanmapApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<RanmapApp> createState() => _RanmapAppState();
+}
+
+class _RanmapAppState extends ConsumerState<RanmapApp> {
+  final _links = AppLinks();
+  StreamSubscription<Uri>? _linkSub;
+
+  @override
+  void initState() {
+    super.initState();
+    // The link that launched the app, then every link that arrives while it's
+    // running. Both are routed to the invite screen (and remembered so a
+    // signed-out recipient is offered it again after sign-up).
+    unawaited(_handleInitialLink());
+    _linkSub = _links.uriLinkStream.listen(
+      _handleUri,
+      onError: (_) {
+        // An unparseable/unsupported link must not take the app down.
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    unawaited(_linkSub?.cancel());
+    super.dispose();
+  }
+
+  Future<void> _handleInitialLink() async {
+    try {
+      final uri = await _links.getInitialLink();
+      if (uri != null) _handleUri(uri);
+    } catch (_) {
+      // No link / platform without deep-link support — nothing to do.
+    }
+  }
+
+  void _handleUri(Uri uri) {
+    final username = inviteUsernameFromUri(uri);
+    if (username == null || username.isEmpty) return;
+    // Persist before navigating: the value must outlive this process for the
+    // sign-up round trip.
+    unawaited(ref.read(pendingInviteProvider.notifier).set(username));
+    ref.read(goRouterProvider).go('/invite/$username');
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final router = ref.watch(goRouterProvider);
     final themeMode = ref.watch(appSettingsProvider.select((s) => s.themeMode));
 

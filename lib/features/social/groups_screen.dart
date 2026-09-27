@@ -57,8 +57,15 @@ class GroupsScreen extends ConsumerWidget {
                   child: BrandEmptyState(
                     icon: Icons.groups_rounded,
                     title: 'No groups yet',
-                    message: 'Create one to start planning trips together.',
+                    message: 'Groups are shared crews you plan and take trips with. Create one and invite friends by username.',
                     tint: BrandColors.accentSky,
+                    action: BrandPrimaryButton(
+                      label: 'New group',
+                      leadingIcon: Icons.add_rounded,
+                      trailingIcon: null,
+                      expand: false,
+                      onPressed: () => _createGroup(context, ref),
+                    ),
                   ),
                 );
               }

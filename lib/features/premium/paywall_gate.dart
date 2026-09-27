@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/providers/app_prefs_provider.dart';
 import '../../core/router/auth_state_provider.dart';
+import '../trip/trip_providers.dart';
 import 'paywall_policy.dart';
 import 'premium_providers.dart';
 
@@ -30,6 +31,11 @@ final paywallShownAtProvider =
 /// Requires a signed-in user with a profile, a *resolved* plan lookup, and a
 /// non-Pro plan. Waiting for the lookup to resolve means an in-flight or failed
 /// fetch never nags a Pro user.
+///
+/// It also waits for the user to have at least one trip: selling Pro in the
+/// seconds after onboarding, before the product has done anything for them,
+/// is the wrong moment. Nothing is due while trips load or after a failed
+/// fetch, so neither can trigger a nag.
 final paywallDueProvider = Provider<bool>((ref) {
   if (ref.watch(authStateProvider).valueOrNull?.session == null) return false;
   if (ref.watch(myProfileProvider).valueOrNull == null) return false;
@@ -37,6 +43,10 @@ final paywallDueProvider = Provider<bool>((ref) {
   final entitlements = ref.watch(entitlementsProvider);
   if (entitlements.isLoading || entitlements.hasError) return false;
   if (ref.watch(isProProvider)) return false;
+
+  final trips = ref.watch(myTripsProvider);
+  if (trips.isLoading || trips.hasError) return false;
+  if ((trips.valueOrNull ?? const []).isEmpty) return false;
 
   return isPaywallDue(
     lastShown: ref.watch(paywallShownAtProvider),

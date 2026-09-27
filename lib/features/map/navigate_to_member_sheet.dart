@@ -12,6 +12,7 @@ import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/units.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_sheet_surface.dart';
 // `LocationSettings` collides with mapbox's; hide it so geolocator's is used.
 import 'map_engine/map_engine.dart' hide LocationSettings;
 
@@ -131,62 +132,59 @@ class _NavigateToMemberSheetState
   Widget build(BuildContext context) {
     final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
 
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(BrandSpace.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Container(
-                  height: 52,
-                  width: 52,
-                  decoration: BoxDecoration(
-                    color: BrandColors.accentMint,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.directions_car_filled_rounded,
-                    color: BrandColors.primary,
-                  ),
+    return BrandSheetSurface(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                height: 52,
+                width: 52,
+                decoration: BoxDecoration(
+                  color: BrandColors.accentMint,
+                  shape: BoxShape.circle,
                 ),
-                const SizedBox(width: BrandSpace.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.username != null
-                            ? '@${widget.username}'
-                            : 'Teammate',
-                        style: BrandText.titleMd.copyWith(
-                          color: BrandColors.textHeadline,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _bearingDegrees == null
-                            ? _distanceLabel(unit)
-                            : '${_distanceLabel(unit)} · $_directionLabel',
-                        style: BrandText.bodyMd.copyWith(
-                          color: BrandColors.textMuted,
-                        ),
-                      ),
-                    ],
-                  ),
+                child: Icon(
+                  Icons.directions_car_filled_rounded,
+                  color: BrandColors.primary,
                 ),
-              ],
-            ),
-            const SizedBox(height: BrandSpace.lg),
-            BrandPrimaryButton(
-              label: 'Navigate to them',
-              leadingIcon: Icons.navigation_rounded,
-              onPressed: _openTurnByTurn,
-            ),
-          ],
-        ),
+              ),
+              const SizedBox(width: BrandSpace.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.username != null
+                          ? '@${widget.username}'
+                          : 'Teammate',
+                      style: BrandText.titleMd.copyWith(
+                        color: BrandColors.textHeadline,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _bearingDegrees == null
+                          ? _distanceLabel(unit)
+                          : '${_distanceLabel(unit)} · $_directionLabel',
+                      style: BrandText.bodyMd.copyWith(
+                        color: BrandColors.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: BrandSpace.lg),
+          BrandPrimaryButton(
+            label: 'Navigate to them',
+            leadingIcon: Icons.navigation_rounded,
+            onPressed: _openTurnByTurn,
+          ),
+        ],
       ),
     );
   }

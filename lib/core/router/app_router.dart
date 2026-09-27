@@ -8,6 +8,7 @@ import '../../features/home/home_shell.dart';
 import '../../features/onboarding/onboarding_screen.dart';
 import '../../features/onboarding/phone_verification_screen.dart';
 import '../../features/premium/paywall_screen.dart';
+import '../../features/social/invite_landing_screen.dart';
 import '../../features/splash/splash_screen.dart';
 import '../../features/tour/tour_screen.dart';
 import '../../features/welcome/welcome_screen.dart';
@@ -39,11 +40,19 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       final onboardingRoute = loc == '/onboarding';
       final verifyRoute = loc == '/verify-phone';
       final splashRoute = loc == '/splash';
+      // An invite link lands here. It must survive a signed-out (and
+      // auth-still-loading) state, so the recipient can see who invited them
+      // before signing up.
+      final inviteRoute = loc.startsWith('/invite/');
 
       // Until the session is known, hold on the splash instead of treating
       // "loading" as "signed out" — which would flash the tour/welcome at a
-      // returning user, or strand a signed-in user on a pre-auth screen.
-      if (authAsync.isLoading) return splashRoute ? null : '/splash';
+      // returning user, or strand a signed-in user on a pre-auth screen. An
+      // invite stays put rather than bouncing through the splash (which would
+      // lose it).
+      if (authAsync.isLoading) {
+        return (splashRoute || inviteRoute) ? null : '/splash';
+      }
 
       final signedIn = authAsync.valueOrNull?.session != null;
 
@@ -52,7 +61,9 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         // forward/back navigation between them (landing → welcome → auth) is
         // never bounced. From the splash, land on the correct intro step.
         if (splashRoute) return prefs.introV1Seen ? '/welcome' : '/tour';
-        if (tourRoute || welcomeRoute || loggingInRoute) return null;
+        if (tourRoute || welcomeRoute || loggingInRoute || inviteRoute) {
+          return null;
+        }
 
         // Signed out, the landing is the feature tour until it's been walked,
         // and the welcome after that — so relaunching once the features are
@@ -126,6 +137,14 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/paywall',
         builder: (context, state) => const PaywallScreen(),
+      ),
+      // Opened by a shared invite link (`https://<host>/invite/<username>` or
+      // `com.ranmap.app://invite/<username>`). Reachable signed in or out.
+      GoRoute(
+        path: '/invite/:username',
+        builder: (context, state) => InviteLandingScreen(
+          username: state.pathParameters['username'] ?? '',
+        ),
       ),
     ],
   );

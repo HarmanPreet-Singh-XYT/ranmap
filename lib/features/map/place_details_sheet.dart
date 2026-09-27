@@ -6,6 +6,7 @@ import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_sheet_surface.dart';
 import '../../data/models/place_details.dart';
 import '../../data/models/route_option.dart';
 import '../../data/services/google_maps_api_service.dart';
@@ -42,34 +43,31 @@ class _PlaceDetailsSheetState extends State<_PlaceDetailsSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(BrandSpace.marginMobile),
-        child: FutureBuilder<PlaceDetails>(
-          future: _future,
-          builder: (context, snapshot) {
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  snapshot.data?.name ?? widget.place.name,
-                  style: BrandText.headlineMd.copyWith(
-                    color: BrandColors.textHeadline,
-                  ),
+    return BrandSheetSurface(
+      child: FutureBuilder<PlaceDetails>(
+        future: _future,
+        builder: (context, snapshot) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                snapshot.data?.name ?? widget.place.name,
+                style: BrandText.headlineMd.copyWith(
+                  color: BrandColors.textHeadline,
                 ),
-                const SizedBox(height: BrandSpace.sm),
-                _buildBody(context, snapshot),
-                const SizedBox(height: BrandSpace.lg),
-                BrandPrimaryButton(
-                  label: 'Pin on map',
-                  leadingIcon: Icons.place_rounded,
-                  onPressed: () => Navigator.of(context).pop(true),
-                ),
-              ],
-            );
-          },
-        ),
+              ),
+              const SizedBox(height: BrandSpace.sm),
+              _buildBody(context, snapshot),
+              const SizedBox(height: BrandSpace.lg),
+              BrandPrimaryButton(
+                label: 'Pin on map',
+                leadingIcon: Icons.place_rounded,
+                onPressed: () => Navigator.of(context).pop(true),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

@@ -51,6 +51,30 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="com.ranmap.app" android:host="login-callback"/>
             </intent-filter>
+            <!-- Shareable invite links. The host must match kInviteHost in
+                 lib/core/constants/invite_links.dart, and autoVerify only
+                 succeeds once the domain serves
+                 https://<host>/.well-known/assetlinks.json. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="ranmap.app" android:pathPrefix="/invite"/>
+            </intent-filter>
+            <!-- Custom-scheme invites: works without a domain (the scheme is
+                 already registered above for OAuth). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="com.ranmap.app" android:host="invite"/>
+            </intent-filter>
+            <!-- Deep links are handled explicitly in Dart via the app_links
+                 package (lib/app/app.dart); turn off Flutter's own deep-link
+                 router so a link isn't handled twice. -->
+            <meta-data
+                android:name="flutter_deeplinking_enabled"
+                android:value="false" />
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

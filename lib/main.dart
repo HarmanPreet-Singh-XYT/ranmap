@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/app.dart';
 import 'core/providers/app_prefs_provider.dart';
+import 'core/push/push_service.dart';
 import 'data/services/supabase_service.dart';
 import 'features/premium/revenuecat.dart';
 
@@ -19,10 +20,16 @@ Future<void> main() async {
   await SupabaseService.initialize();
   // Billing must not block startup; failures are swallowed inside.
   await configureRevenueCat();
+  // Push must not block startup either: it initializes Firebase when the build
+  // is configured and otherwise becomes a no-op. It never prompts for
+  // permission here — that waits until the user asks (Settings → Notifications).
+  await configurePush();
   // Keep RevenueCat's identity in lockstep with Supabase auth, so a purchase is
-  // attributed to the right profile (and the webhook can find it).
+  // attributed to the right profile (and the webhook can find it). On sign-in,
+  // also refresh this device's push token for the new user.
   SupabaseService.auth.onAuthStateChange.listen((state) {
     unawaited(identifyRevenueCatUser(state.session?.user.id));
+    if (state.session != null) unawaited(syncPushRegistration());
   });
   runApp(
     ProviderScope(

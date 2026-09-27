@@ -87,12 +87,12 @@ class _TripListScreenState extends ConsumerState<TripListScreen> {
                     if (trips.isEmpty) {
                       return _TripsEmptyState(onPlan: _newTrip);
                     }
-                    // The filter only earns its space when the list actually
-                    // spans more than one status.
-                    final hasMixedStatuses =
-                        trips.map((t) => t.status).toSet().length > 1;
+                    // The filter appears once there's more than one trip and
+                    // then stays put, so it no longer flickers in and out as
+                    // the status mix changes under the user.
+                    final showFilter = trips.length > 1;
                     // Ignore a stale selection if the filter is hidden.
-                    final activeFilter = hasMixedStatuses ? _filter : null;
+                    final activeFilter = showFilter ? _filter : null;
                     final visible = activeFilter == null
                         ? trips
                         : trips.where((t) => t.status == activeFilter).toList();
@@ -104,7 +104,7 @@ class _TripListScreenState extends ConsumerState<TripListScreen> {
                               title: 'Your trips',
                               trailing: BrandPill(label: '${trips.length}'),
                             ),
-                            if (hasMixedStatuses) ...[
+                            if (showFilter) ...[
                               const SizedBox(height: BrandSpace.sm),
                               _TripStatusFilter(
                                 trips: trips,

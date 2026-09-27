@@ -41,6 +41,10 @@ dependencies:
   multiavatar_plus: ^0.2.0+1
   flutter_svg: ^2.3.0
   package_info_plus: ^10.2.1
+  app_links: ^7.2.1
+  share_plus: ^13.3.0
+  firebase_core: ^4.15.0
+  firebase_messaging: ^16.7.0
 
 dev_dependencies:
   flutter_test:

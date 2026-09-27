@@ -8,6 +8,7 @@ import '../../core/constants/avatars.dart';
 import '../../core/constants/vehicle_display.dart';
 import '../../core/offline/outbox_providers.dart';
 import '../../core/providers/settings_provider.dart';
+import '../../core/push/push_service.dart';
 import '../../core/router/auth_state_provider.dart';
 import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
@@ -57,6 +58,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
     if (!confirmed) return;
     try {
+      // Forget this device's push token while the session is still valid, so a
+      // signed-out device stops receiving this account's notifications.
+      await unregisterPush();
       await SupabaseService.auth.signOut();
     } catch (e) {
       if (mounted) showAppToast(context, friendlyError(e), error: true);

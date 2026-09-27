@@ -94,8 +94,14 @@ server/           # ranmap-server: Node/TS backend for secret-holding operations
    `0004_stop_ordering.sql`, `0005_phone_verification.sql`,
    `0006_trip_route_planning.sql`, `0007_security_fixes.sql`,
    `0008_hardening_followups.sql`, `0009_plans.sql`, `0010_plan_limits.sql`,
-   then `0011_notifications.sql` and `0012_text_length_limits.sql` (either paste
-   them into the SQL editor in that order, or `supabase db push`). `0011`
+   `0011_notifications.sql`, `0012_text_length_limits.sql`,
+   `0013_ai_message_tools.sql`, `0014_trip_schedule_autostart.sql`,
+   `0015_stop_proposals.sql`, `0016_trip_legs.sql` and
+   `0017_profile_search.sql` (either paste
+   them into the SQL editor in that order, or `supabase db push`). `0017`
+   enables `pg_trgm` and adds the `search_profiles` RPC (typo-tolerant username
+   search; the app falls back to a plain substring search if it's absent).
+   `0011`
    adds `device_tokens` (written only by ranmap-server; no client access) and
    `notification_prefs` (owner-managed) for push notifications. `0001`
    creates all tables (profiles,
@@ -212,6 +218,7 @@ ANTHROPIC_API_KEY=your-anthropic-api-key
 # LIVEKIT_URL=wss://your-project.livekit.cloud               # LiveKit Cloud (or a self-hosted server)
 # LIVEKIT_API_KEY=your-livekit-api-key
 # LIVEKIT_API_SECRET=your-livekit-api-secret
+# FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}   # push delivery (FCM); whole service-account JSON on one line
 # CORS_ORIGIN=https://app.example.com             # optional; only needed for Flutter web
 ```
 
@@ -273,7 +280,30 @@ the two public keys in `.env` and the two server keys in `server/.env`, and poin
 the RevenueCat webhook at `/billing/revenuecat`. With no keys set the app runs
 normally and the paywall reports billing as unavailable.
 
-### 5. Install & run
+### 5. Firebase (push notifications — optional)
+
+Push is optional: without it the app runs normally and Settings → Notifications
+shows "Push unavailable". To enable delivery:
+
+1. Create a Firebase project at https://console.firebase.google.com.
+2. **Android** — add an app with package `com.ranmap.app`, drop the downloaded
+   `google-services.json` into `android/app/`, and apply the Google Services
+   Gradle plugin (`com.google.gms.google-services`) in
+   `android/settings.gradle.kts` and `android/app/build.gradle.kts`.
+   (`minSdk` is already 23 for `firebase_messaging`.)
+3. **iOS** — add an app with bundle id `com.ranmap.app`, drop
+   `GoogleService-Info.plist` into `ios/Runner/`, then in Xcode enable the
+   **Push Notifications** capability and **Background Modes → Remote
+   notifications** for the Runner target. Upload your APNs key under Firebase →
+   Project settings → Cloud Messaging.
+4. **Server** — set `FIREBASE_SERVICE_ACCOUNT_JSON` in `server/.env` (the whole
+   service-account JSON on one line).
+5. Run the app and tap **Settings → Notifications → Turn on notifications**.
+   That asks for the OS permission and registers the device's FCM token; a trip
+   invite then delivers a push. The token is refreshed on rotation and on
+   sign-in, and forgotten on sign-out.
+
+### 6. Install & run
 
 ```
 flutter pub get
@@ -432,17 +462,19 @@ picks it up automatically (and both files are gitignored).
   account** (Settings → Account, double-confirmed) calls `POST /account/delete`
   on ranmap-server, which best-effort removes the user's storage files and then
   deletes the auth user — every row cascades from `auth.users → profiles`.
-- **Push notifications (server-ready)**: `0011_notifications.sql` adds
-  `device_tokens` (server-only) and owner-managed `notification_prefs`; the
-  server registers tokens via `POST /notifications/register` and delivers
-  through FCM (`lib/push.ts`, opt-out aware, dead tokens pruned) when
-  `FIREBASE_SERVICE_ACCOUNT_JSON` is set — it sends on trip invitations today
-  (via the AI assistant's `invite_friend_to_trip`), and reports `push: false`
-  so the app can be honest when unconfigured. Settings → Notifications manages
-  the opt-outs. **The Flutter client doesn't yet obtain an FCM token** (that
-  needs `firebase_messaging` + your Firebase project); until it does, nothing
-  is delivered. Chat-message pushes also need a DB webhook/trigger, since
-  messages are written by the client, not the server.
+- **Push notifications**: `0011_notifications.sql` adds `device_tokens`
+  (server-only) and owner-managed `notification_prefs`. The app registers its
+  FCM token via `POST /notifications/register`
+  (`lib/core/push/push_service.dart`, `firebase_messaging`); it asks for the OS
+  permission only when the user taps Settings → Notifications → "Turn on
+  notifications", refreshes on token rotation and sign-in, and forgets the token
+  on sign-out. The server delivers through FCM (`lib/push.ts`, opt-out aware,
+  dead tokens pruned) when `FIREBASE_SERVICE_ACCOUNT_JSON` is set, and reports
+  `push: false` so the app can be honest when unconfigured. It sends on trip
+  invitations — from the app's own invite path (`POST /notifications/trip-invite`,
+  creator-scoped) and from the AI assistant's `invite_friend_to_trip`. See
+  "Firebase" in Setup. Chat-message pushes still need a DB webhook/trigger,
+  since messages are written by the client, not the server.
 - **Settings**: a `SettingsScreen` (gear in the Profile header) with
   Preferences (theme light/dark/system, distance units km/miles, default map
   style + 3D buildings + terrain — all persisted and applied to the live map),

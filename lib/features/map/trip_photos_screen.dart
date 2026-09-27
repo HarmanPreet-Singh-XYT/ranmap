@@ -62,8 +62,7 @@ class TripPhotosScreen extends ConsumerWidget {
                             child: BrandEmptyState(
                               icon: Icons.photo_library_outlined,
                               title: 'No photos yet',
-                              message:
-                                  'Capture one from the map during a trip.',
+                              message: 'Photos you pin from the map during this trip collect here.',
                             ),
                           )
                         : GridView.builder(

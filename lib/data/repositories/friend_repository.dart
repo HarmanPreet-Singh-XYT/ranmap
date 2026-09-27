@@ -13,6 +13,20 @@ class FriendRepository {
     });
   }
 
+  /// Sends a friend request to the owner of [username] (used when someone opens
+  /// that user's invite link). Returns false when no such username exists; other
+  /// errors still throw.
+  Future<bool> sendRequestByUsername(String username) async {
+    final row = await _client
+        .from('profiles')
+        .select('id')
+        .eq('username', username)
+        .maybeSingle();
+    if (row == null) return false;
+    await sendRequest(row['id'] as String);
+    return true;
+  }
+
   /// Accept an incoming request, or delete it (decline). Declining removes the
   /// row rather than setting a permanent `blocked` status, so the other party
   /// can request again later.

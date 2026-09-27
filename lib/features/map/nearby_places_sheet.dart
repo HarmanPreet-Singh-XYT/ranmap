@@ -7,6 +7,7 @@ import '../../core/theme/brand_typography.dart';
 import '../../core/theme/nav_palette.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/units.dart';
+import '../../core/widgets/brand/brand_sheet_surface.dart';
 import '../../data/models/route_option.dart';
 import '../../data/services/google_maps_api_service.dart';
 import 'map_engine/map_engine.dart';
@@ -39,8 +40,14 @@ Future<NearbyPlace?> showNearbyPlacesSheet(
     context: context,
     side: FLayout.btt,
     mainAxisMaxRatio: null,
-    builder: (_) =>
-        _NearbyPlacesSheet(center: center, routePolyline: routePolyline),
+    // The sheet already draws its own grab handle and manages its own layout
+    // (a DraggableScrollableSheet), so the surface adds only the opaque
+    // background, top rounding and bottom safe-area inset.
+    builder: (_) => BrandSheetSurface(
+      handle: false,
+      padding: EdgeInsets.zero,
+      child: _NearbyPlacesSheet(center: center, routePolyline: routePolyline),
+    ),
   );
 }
 

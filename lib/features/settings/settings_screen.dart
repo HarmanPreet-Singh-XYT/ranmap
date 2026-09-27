@@ -6,9 +6,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/offline/outbox_providers.dart';
 import '../../core/providers/settings_provider.dart';
+import '../../core/push/push_service.dart';
 import '../../core/router/auth_state_provider.dart';
 import '../../core/theme/brand_palette.dart';
-import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/app_choice_sheet.dart';
 import '../../core/widgets/app_dialog.dart';
@@ -430,23 +430,77 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
     }
   }
 
+  /// Requests the OS notification permission (a user gesture) and registers
+  /// this device on success, then refreshes the status row.
+  Future<void> _enablePush() async {
+    final granted = await requestPushPermission();
+    ref.invalidate(pushStatusProvider);
+    if (!mounted) return;
+    showAppToast(
+      context,
+      granted
+          ? 'Notifications turned on for this device.'
+          : 'Notifications are off — you can enable them in system settings.',
+      error: !granted,
+    );
+  }
+
+  /// The device-level push affordance, above the per-category preferences: it
+  /// reflects the OS permission (and reports honestly when the build has no
+  /// push configuration), so the toggles below aren't the only signal.
+  Widget _deviceStatusCard() {
+    return ref
+        .watch(pushStatusProvider)
+        .maybeWhen(
+          orElse: () => const SizedBox.shrink(),
+          data: (status) => _Card(
+            children: [
+              switch (status) {
+                PushStatus.unsupported => const BrandListRow(
+                  icon: Icons.notifications_off_outlined,
+                  title: 'Push unavailable',
+                  subtitle: 'This build has no push configuration.',
+                  showChevron: false,
+                ),
+                PushStatus.denied => BrandListRow(
+                  icon: Icons.notifications_active_outlined,
+                  title: 'Turn on notifications',
+                  subtitle:
+                      'Allow Ranmap to notify you about invites and messages',
+                  onTap: _enablePush,
+                ),
+                PushStatus.authorized => const BrandListRow(
+                  icon: Icons.notifications_active_rounded,
+                  title: 'Notifications on',
+                  subtitle: 'This device can receive push notifications',
+                  showChevron: false,
+                ),
+              },
+            ],
+          ),
+        );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return ref
-        .watch(notificationPreferencesProvider)
-        .when(
-          loading: () => const Padding(
-            padding: EdgeInsets.symmetric(vertical: 16),
-            child: Center(child: FCircularProgress(size: .sm)),
-          ),
-          error: (e, _) =>
-              const BrandAlert(message: "Couldn't load notification settings."),
-          data: (server) {
-            final prefs = _local ?? server;
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _Card(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _deviceStatusCard(),
+        const SizedBox(height: 10),
+        ref
+            .watch(notificationPreferencesProvider)
+            .when(
+              loading: () => const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Center(child: FCircularProgress(size: .sm)),
+              ),
+              error: (e, _) => const BrandAlert(
+                message: "Couldn't load notification settings.",
+              ),
+              data: (server) {
+                final prefs = _local ?? server;
+                return _Card(
                   children: [
                     BrandListRow(
                       icon: Icons.mail_outline_rounded,
@@ -490,17 +544,10 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
                       ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Push delivery turns on once this build registers a device token with the server.',
-                  style: BrandText.bodySm.copyWith(
-                    color: BrandColors.textMuted,
-                  ),
-                ),
-              ],
-            );
-          },
-        );
+                );
+              },
+            ),
+      ],
+    );
   }
 }
