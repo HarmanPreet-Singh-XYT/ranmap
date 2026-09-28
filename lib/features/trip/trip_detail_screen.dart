@@ -812,10 +812,15 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
             if (fetched.isEmpty) {
               // Nothing to reorder yet — still surface any open votes.
               if (voteCards.isEmpty) {
-                return const Center(
-                  child: BrandEmptyState(
-                    icon: Icons.place_outlined,
-                    title: 'No stops planned yet.',
+                return Center(
+                  child: SingleChildScrollView(
+                    child: BrandEmptyState(
+                      imageAsset: 'assets/images/onboarding/welcome_pitstop.jpg',
+                      icon: Icons.place_rounded,
+                      title: 'Map your route stops',
+                      message:
+                          'Add scenic overlooks, coffee spots, and fuel stops. Your convoy will vote on stops and sync route ETAs in real-time.',
+                    ),
                   ),
                 );
               }
@@ -828,8 +833,11 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
                   ...voteCards,
                   const SizedBox(height: BrandSpace.xl),
                   const BrandEmptyState(
-                    icon: Icons.place_outlined,
-                    title: 'No stops planned yet.',
+                    imageAsset: 'assets/images/onboarding/welcome_pitstop.jpg',
+                    icon: Icons.place_rounded,
+                    title: 'Map your route stops',
+                    message:
+                        'Add scenic overlooks, coffee spots, and fuel stops. Your convoy will vote on stops and sync route ETAs in real-time.',
                   ),
                 ],
               );
@@ -1437,10 +1445,11 @@ class _CrewTab extends ConsumerWidget {
                   const SizedBox(height: BrandSpace.md),
                   if (sorted.isEmpty)
                     const BrandEmptyState(
-                      icon: Icons.groups_outlined,
-                      title: 'No crew yet',
+                      imageAsset: 'assets/images/scenic/friends_crew_scenic.jpg',
+                      icon: Icons.groups_rounded,
+                      title: 'Invite your convoy crew',
                       message:
-                          'Invite friends to follow your trip on the live map.',
+                          'Share an invite link so your friends can track the live map, broadcast GPS, and talk hands-free.',
                     )
                   else ...[
                     BrandSectionHeader(
@@ -1815,10 +1824,16 @@ class _ExpensesTab extends ConsumerWidget {
         expensesAsync.when(
           data: (expenses) {
             if (expenses.isEmpty) {
-              return const Center(
-                child: BrandEmptyState(
-                  icon: Icons.receipt_long_outlined,
-                  title: 'No expenses logged yet.',
+              return Center(
+                child: SingleChildScrollView(
+                  child: BrandEmptyState(
+                    imageAsset:
+                        'assets/images/scenic/passport_journal_scenic.jpg',
+                    icon: Icons.receipt_long_rounded,
+                    title: 'Shared Trip Ledger',
+                    message:
+                        'Log fuel, park passes, tolls, and coffee. RanMap automatically balances the math and settles up evenly.',
+                  ),
                 ),
               );
             }

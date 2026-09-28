@@ -96,6 +96,10 @@ class BrandEmptyState extends StatelessWidget {
     this.message,
     this.action,
     this.tint,
+    this.imageAsset,
+    this.imageHeight,
+    this.heroVisual,
+    this.quickChips,
   });
 
   final IconData icon;
@@ -107,26 +111,59 @@ class BrandEmptyState extends StatelessWidget {
   /// the default can follow light/dark).
   final Color? tint;
 
+  /// Optional scenic photo header displayed above the empty state.
+  final String? imageAsset;
+  final double? imageHeight;
+
+  /// Optional custom graphic widget displayed in place of the icon pod.
+  final Widget? heroVisual;
+
+  /// Optional interactive suggestion chips (e.g. AI prompt starters).
+  final List<Widget>? quickChips;
+
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: BrandSpace.lg,
-        vertical: BrandSpace.xl,
+        vertical: BrandSpace.md,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            height: 72,
-            width: 72,
-            decoration: BoxDecoration(
-              color: (tint ?? BrandColors.accentMint).withValues(alpha: 0.35),
-              borderRadius: BrandRadii.cardRadius,
+          if (imageAsset != null) ...[
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BrandRadii.cardRadius,
+                boxShadow: BrandShadows.subtle,
+              ),
+              child: ClipRRect(
+                borderRadius: BrandRadii.cardRadius,
+                child: Image.asset(
+                  imageAsset!,
+                  height: imageHeight ?? 140,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                ),
+              ),
             ),
-            child: Icon(icon, size: 34, color: BrandColors.primary),
-          ),
-          const SizedBox(height: BrandSpace.md),
+            const SizedBox(height: BrandSpace.lg),
+          ] else if (heroVisual != null) ...[
+            heroVisual!,
+            const SizedBox(height: BrandSpace.md),
+          ] else ...[
+            Container(
+              height: 72,
+              width: 72,
+              decoration: BoxDecoration(
+                color: (tint ?? BrandColors.accentMint).withValues(alpha: 0.35),
+                borderRadius: BrandRadii.cardRadius,
+              ),
+              child: Icon(icon, size: 34, color: BrandColors.primary),
+            ),
+            const SizedBox(height: BrandSpace.md),
+          ],
           Text(
             title,
             textAlign: TextAlign.center,
@@ -135,12 +172,21 @@ class BrandEmptyState extends StatelessWidget {
           if (message != null) ...[
             const SizedBox(height: 6),
             ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 280),
+              constraints: const BoxConstraints(maxWidth: 300),
               child: Text(
                 message!,
                 textAlign: TextAlign.center,
                 style: BrandText.bodyMd.copyWith(color: BrandColors.textBody),
               ),
+            ),
+          ],
+          if (quickChips != null && quickChips!.isNotEmpty) ...[
+            const SizedBox(height: BrandSpace.md),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: quickChips!,
             ),
           ],
           if (action != null) ...[

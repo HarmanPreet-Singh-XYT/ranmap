@@ -96,16 +96,21 @@ class TripHistoryScreen extends ConsumerWidget {
         data: (rows) {
           if (rows.isEmpty) {
             return Center(
-              child: BrandEmptyState(
-                icon: Icons.route_rounded,
-                title: 'No trip stats yet',
-                message: 'Each finished trip adds its distance, top speed and time to your history here.',
-                action: BrandPrimaryButton(
-                  label: 'Plan a trip',
-                  trailingIcon: Icons.add_rounded,
-                  expand: false,
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const NewTripScreen()),
+              child: SingleChildScrollView(
+                child: BrandEmptyState(
+                  imageAsset:
+                      'assets/images/scenic/passport_journal_scenic.jpg',
+                  icon: Icons.auto_stories_rounded,
+                  title: 'Your road trip passport',
+                  message:
+                      'Completed trips automatically record odometer distance, elevation milestones, and top speeds in your personal pilot logbook.',
+                  action: BrandPrimaryButton(
+                    label: 'Plan your first trip',
+                    trailingIcon: Icons.add_rounded,
+                    expand: false,
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const NewTripScreen()),
+                    ),
                   ),
                 ),
               ),

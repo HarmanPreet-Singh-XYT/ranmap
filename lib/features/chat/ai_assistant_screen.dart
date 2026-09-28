@@ -129,6 +129,39 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
     });
   }
 
+  Widget _promptChip(String text, IconData icon) {
+    return GestureDetector(
+      onTap: () {
+        _inputController.text = text;
+        _send();
+      },
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: BrandColors.surface,
+          borderRadius: BrandRadii.pill,
+          border: Border.all(color: BrandColors.hairline),
+          boxShadow: BrandShadows.subtle,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: BrandColors.primary),
+            const SizedBox(width: 6),
+            Text(
+              text,
+              style: BrandText.labelSm.copyWith(
+                color: BrandColors.textHeadline,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final remoteMessages = _conversationId == kNewConversationId
@@ -171,15 +204,21 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
                   ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
                 if (all.isEmpty) {
-                  return const Center(
-                    child: BrandEmptyState(
-                      icon: Icons.smart_toy_outlined,
-                      title: 'Ask the trip assistant',
-                      message:
-                          'Remember a place, plan a new trip, or schedule one — '
-                          'e.g. "save Joshua Tree as a stop", "create a trip '
-                          'called Road Trip", or "schedule Road Trip for next '
-                          'Friday at 8am".',
+                  return Center(
+                    child: SingleChildScrollView(
+                      child: BrandEmptyState(
+                        imageAsset: 'assets/images/scenic/ai_copilot_scenic.jpg',
+                        icon: Icons.auto_awesome_rounded,
+                        title: 'RanMap AI Co-Pilot',
+                        message:
+                            'Your intelligent route scout. Tap a prompt below or ask anything about stops, EV range, and convoy routing.',
+                        quickChips: [
+                          _promptChip('☕ Coffee stops ahead', Icons.local_cafe_rounded),
+                          _promptChip('⚡ EV chargers on route', Icons.ev_station_rounded),
+                          _promptChip('🌄 Find scenic overlooks', Icons.landscape_rounded),
+                          _promptChip('📍 Save a waypoint', Icons.bookmark_add_rounded),
+                        ],
+                      ),
                     ),
                   );
                 }

@@ -51,10 +51,14 @@ class _FriendsTab extends ConsumerWidget {
       data: (rows) {
         if (rows.isEmpty) {
           return const Center(
-            child: BrandEmptyState(
-              icon: Icons.person_add_alt_1_rounded,
-              title: 'No friends yet',
-              message: 'Friends are the people you can invite to trips and group chats. Add them by username in the "Find people" tab.',
+            child: SingleChildScrollView(
+              child: BrandEmptyState(
+                imageAsset: 'assets/images/scenic/friends_crew_scenic.jpg',
+                icon: Icons.person_add_alt_1_rounded,
+                title: 'Build your road trip crew',
+                message:
+                    'Connect with friends to invite them to live convoys, share routes, and sync pitstops. Search by username in the Find People tab.',
+              ),
             ),
           );
         }

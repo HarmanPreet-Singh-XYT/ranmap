@@ -13,8 +13,11 @@ import 'package:ranmap/core/widgets/nav_surface.dart';
 import 'package:ranmap/features/auth/sign_in_screen.dart';
 import 'package:ranmap/features/auth/sign_up_screen.dart';
 import 'package:ranmap/features/onboarding/onboarding_screen.dart';
+import 'package:ranmap/data/models/ai_conversation.dart';
 import 'package:ranmap/data/models/profile.dart';
 import 'package:ranmap/data/models/trip.dart';
+import 'package:ranmap/features/chat/ai_conversations_screen.dart';
+import 'package:ranmap/features/chat/ai_providers.dart';
 import 'package:ranmap/data/repositories/notification_repository.dart';
 import 'package:ranmap/features/onboarding/phone_verification_screen.dart';
 import 'package:ranmap/features/premium/paywall_screen.dart';
@@ -430,5 +433,35 @@ void main() {
     expect(find.textContaining('Purchases unavailable'), findsOneWidget);
     expect(find.textContaining('free trial'), findsNothing);
     expect(find.text('Monthly Pass'), findsNothing);
+  });
+
+  // Regression: the AI Assistant tab of the Chat hub. Its rows are swipeable
+  // (`Dismissible`), and the background Container once set both `color:` and
+  // `decoration:`, which asserts at layout ("Cannot provide both a color and a
+  // decoration"). A non-empty list is required to build that background.
+  testWidgets('brand AI conversations list builds its dismissible rows', (
+    tester,
+  ) async {
+    _useTallSurface(tester);
+    await tester.pumpWidget(
+      _app(
+        const AiConversationsScreen(),
+        overrides: [
+          aiConversationsProvider.overrideWith(
+            (ref) async => [
+              AiConversation(
+                id: 'c1',
+                title: 'Weekend plan',
+                createdAt: DateTime(2026, 1, 1),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Weekend plan'), findsOneWidget);
   });
 }

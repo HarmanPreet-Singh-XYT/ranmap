@@ -60,9 +60,10 @@ class TripPhotosScreen extends ConsumerWidget {
                     child: posts.isEmpty
                         ? const Center(
                             child: BrandEmptyState(
+                              imageAsset: 'assets/images/onboarding/welcome_memories.jpg',
                               icon: Icons.photo_library_outlined,
-                              title: 'No photos yet',
-                              message: 'Photos you pin from the map during this trip collect here.',
+                              title: 'No photos pinned yet',
+                              message: 'Capture memories and pin photos from the map during your drive to build your trip gallery.',
                             ),
                           )
                         : GridView.builder(

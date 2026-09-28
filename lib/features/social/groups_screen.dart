@@ -12,6 +12,7 @@ import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_tag.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/group.dart';
 import '../../data/services/supabase_service.dart';
@@ -116,27 +117,48 @@ class GroupsScreen extends ConsumerWidget {
             data: (groups) {
               if (groups.isEmpty) {
                 return Center(
-                  child: BrandEmptyState(
-                    icon: Icons.groups_rounded,
-                    title: 'No groups yet',
-                    message: 'Groups are shared crews you plan and take trips with. Create one, or join with an invite code.',
-                    tint: BrandColors.accentSky,
-                    action: Column(
-                      children: [
-                        BrandPrimaryButton(
-                          label: 'New group',
-                          leadingIcon: Icons.add_rounded,
-                          trailingIcon: null,
-                          expand: false,
-                          onPressed: () => _createGroup(context, ref),
+                  child: SingleChildScrollView(
+                    child: BrandEmptyState(
+                      imageAsset: 'assets/images/scenic/convoy_pack_scenic.jpg',
+                      icon: Icons.groups_rounded,
+                      title: 'Build your convoy pack',
+                      message:
+                          'Groups are persistent crews that roll together. Track live member GPS positions, send emergency SOS alerts, and voice chat on the open road.',
+                      tint: BrandColors.accentSky,
+                      quickChips: [
+                        BrandTag(
+                          icon: Icons.satellite_alt_rounded,
+                          label: 'Live Group Radar',
+                          background: BrandColors.surfaceContainerLow,
                         ),
-                        const SizedBox(height: BrandSpace.sm),
-                        BrandSecondaryButton(
-                          label: 'Join with a code',
-                          expand: false,
-                          onPressed: () => _joinWithCode(context, ref),
+                        BrandTag(
+                          icon: Icons.cell_tower_rounded,
+                          label: 'PTT Voice Mesh',
+                          background: BrandColors.surfaceContainerLow,
+                        ),
+                        BrandTag(
+                          icon: Icons.campaign_rounded,
+                          label: 'Instant SOS Alerts',
+                          background: BrandColors.surfaceContainerLow,
                         ),
                       ],
+                      action: Column(
+                        children: [
+                          BrandPrimaryButton(
+                            label: 'Create a group',
+                            leadingIcon: Icons.add_rounded,
+                            trailingIcon: null,
+                            expand: false,
+                            onPressed: () => _createGroup(context, ref),
+                          ),
+                          const SizedBox(height: BrandSpace.sm),
+                          BrandSecondaryButton(
+                            label: 'Join with invite code',
+                            expand: false,
+                            onPressed: () => _joinWithCode(context, ref),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 );

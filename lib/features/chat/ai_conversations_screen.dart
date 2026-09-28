@@ -59,10 +59,10 @@ class AiConversationsScreen extends ConsumerWidget {
               key: ValueKey(conversation.id),
               direction: DismissDirection.endToStart,
               background: Container(
-                color: BrandColors.error,
                 alignment: Alignment.centerRight,
                 padding: const EdgeInsets.symmetric(horizontal: BrandSpace.lg),
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
+                  color: BrandColors.error,
                   borderRadius: BrandRadii.podRadius,
                 ),
                 child: Icon(

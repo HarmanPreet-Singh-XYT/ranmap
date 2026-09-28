@@ -48,16 +48,20 @@ class ChatChannelsScreen extends ConsumerWidget {
 
     if (trips.isEmpty && groups.isEmpty) {
       return Center(
-        child: BrandEmptyState(
-          icon: Icons.forum_outlined,
-          title: 'No channels yet',
-          message: 'Every trip and group gets its own chat channel. Plan a trip to open your first one.',
-          action: BrandPrimaryButton(
-            label: 'Plan a trip',
-            trailingIcon: Icons.add_rounded,
-            expand: false,
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const NewTripScreen())),
+        child: SingleChildScrollView(
+          child: BrandEmptyState(
+            imageAsset: 'assets/images/onboarding/welcome_voice.jpg',
+            icon: Icons.forum_rounded,
+            title: 'Convoy channels & walkie-talkie',
+            message:
+                'Every trip and group gets its own dedicated voice and chat channel. Plan a trip or join a group to start broadcasting.',
+            action: BrandPrimaryButton(
+              label: 'Plan a trip',
+              trailingIcon: Icons.add_rounded,
+              expand: false,
+              onPressed: () => Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const NewTripScreen())),
+            ),
           ),
         ),
       );

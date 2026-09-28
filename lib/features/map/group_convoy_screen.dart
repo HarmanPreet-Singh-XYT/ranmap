@@ -234,9 +234,11 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
             data: (_) {
               if (activeMembers.isEmpty) {
                 return const BrandEmptyState(
+                  imageAsset: 'assets/images/scenic/convoy_pack_scenic.jpg',
                   icon: Icons.groups_outlined,
-                  title: 'No crew yet',
-                  message: 'Add members to this group to see them live.',
+                  title: 'Assemble your convoy crew',
+                  message:
+                      'Invite members to this group to track live road positions and telemetry on the map.',
                 );
               }
               final rows = [

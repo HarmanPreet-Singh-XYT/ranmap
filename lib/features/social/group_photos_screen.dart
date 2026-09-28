@@ -39,12 +39,14 @@ class GroupPhotosScreen extends ConsumerWidget {
         data: (posts) {
           if (posts.isEmpty) {
             return Center(
-              child: BrandEmptyState(
-                icon: Icons.photo_library_outlined,
-                title: 'No shared photos yet',
-                message:
-                    'Photos shared with $groupName will show up here. Share '
-                    'one from any photo on the map.',
+              child: SingleChildScrollView(
+                child: BrandEmptyState(
+                  imageAsset: 'assets/images/onboarding/welcome_memories.jpg',
+                  icon: Icons.photo_library_rounded,
+                  title: 'Crew Photo Vault',
+                  message:
+                      'Photos shared with $groupName will appear in this collaborative road trip album. Snap moments directly on the live map.',
+                ),
               ),
             );
           }
