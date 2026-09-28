@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { NextFunction, Request, Response } from "express";
-import { requirePro, requireProOrTrial } from "./require-plan.js";
+import { requirePro, requireProOrTrial, requireWithinAllowance } from "./require-plan.js";
 
 /** Minimal Express req/res/next for exercising middleware directly. */
 function harness(userId = "user-1") {
@@ -118,6 +118,72 @@ test("requireProOrTrial forwards a metering failure to next", async () => {
   );
 
   await mw(req, res, next);
+  assert.equal(state.nextCalls, 1);
+  assert.equal(state.statusCode, 200, "not a paywall");
+});
+
+// --- requireWithinAllowance (token metering: check up front, record later) ---
+
+const allowanceOpts = { max: 100, windowMs: 60_000, message: "out of tokens" };
+
+test("requireWithinAllowance lets an under-limit user through and reads usage", async () => {
+  const { req, res, state, next } = harness();
+  let reads = 0;
+  await requireWithinAllowance(
+    "ai_assistant",
+    allowanceOpts,
+    async () => false,
+    async () => {
+      reads += 1;
+      return 99;
+    },
+  )(req, res, next);
+
+  assert.equal(state.nextCalls, 1);
+  assert.equal(reads, 1, "usage is read to decide the cap");
+});
+
+test("requireWithinAllowance paywalls at the limit", async () => {
+  const { req, res, state, next } = harness();
+  await requireWithinAllowance(
+    "ai_assistant",
+    allowanceOpts,
+    async () => false,
+    async () => 100,
+  )(req, res, next);
+
+  assert.equal(state.nextCalls, 0);
+  assert.equal(state.statusCode, 402);
+});
+
+test("requireWithinAllowance lets Pro through without reading usage", async () => {
+  const { req, res, state, next } = harness();
+  let reads = 0;
+  await requireWithinAllowance(
+    "ai_assistant",
+    allowanceOpts,
+    async () => true,
+    async () => {
+      reads += 1;
+      return 999;
+    },
+  )(req, res, next);
+
+  assert.equal(state.nextCalls, 1);
+  assert.equal(reads, 0, "a Pro user's usage is never consulted");
+});
+
+test("requireWithinAllowance forwards a usage-read failure to next", async () => {
+  const { req, res, state, next } = harness("user-err");
+  await requireWithinAllowance(
+    "ai_assistant",
+    allowanceOpts,
+    async () => false,
+    async () => {
+      throw new Error("db down");
+    },
+  )(req, res, next);
+
   assert.equal(state.nextCalls, 1);
   assert.equal(state.statusCode, 200, "not a paywall");
 });

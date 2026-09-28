@@ -29,3 +29,28 @@ class PendingInviteNotifier extends Notifier<String?> {
 final pendingInviteProvider = NotifierProvider<PendingInviteNotifier, String?>(
   PendingInviteNotifier.new,
 );
+
+/// The group invite code from a deep-link awaiting redemption, if any.
+///
+/// Mirror of [PendingInviteNotifier] for group links: a signed-out recipient
+/// who signs up from `/join/<code>` is returned to the join screen once home,
+/// rather than losing the group.
+class PendingGroupJoinNotifier extends Notifier<String?> {
+  @override
+  String? build() => ref.watch(appPrefsProvider).pendingGroupCode;
+
+  Future<void> set(String code) async {
+    state = code;
+    await ref.read(appPrefsProvider).setPendingGroupCode(code);
+  }
+
+  Future<void> clear() async {
+    state = null;
+    await ref.read(appPrefsProvider).setPendingGroupCode(null);
+  }
+}
+
+final pendingGroupJoinProvider =
+    NotifierProvider<PendingGroupJoinNotifier, String?>(
+      PendingGroupJoinNotifier.new,
+    );

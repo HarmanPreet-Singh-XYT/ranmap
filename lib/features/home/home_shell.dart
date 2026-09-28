@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/router/auth_state_provider.dart';
 import '../../core/util/error_text.dart';
@@ -64,6 +65,23 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _maybeShowPendingInvite(),
     );
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _maybeResumeGroupJoin(),
+    );
+  }
+
+  /// Re-opens a group join link the user tapped before signing up. The code is
+  /// persisted across the auth round trip, so once they're home with a profile
+  /// we push the join screen; it clears the pending code on entry.
+  Future<void> _maybeResumeGroupJoin() async {
+    if (!mounted) return;
+    final code = ref.read(pendingGroupJoinProvider);
+    if (code == null) return;
+    if (ref.read(authStateProvider).valueOrNull?.session == null) return;
+    if (ref.read(myProfileProvider).valueOrNull == null) return;
+    // Don't stack it on top of another route (e.g. the paywall).
+    if (ModalRoute.of(context)?.isCurrent != true) return;
+    await context.push('/join/$code');
   }
 
   /// Offers a deep-link invite once the user is signed in with a profile. A
@@ -148,10 +166,16 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // A pending invite can arrive (or the profile resolve) after the first
     // frame; offer it once both are ready.
     ref.listen(myProfileProvider, (_, next) {
-      if (next.valueOrNull != null) _maybeShowPendingInvite();
+      if (next.valueOrNull != null) {
+        _maybeShowPendingInvite();
+        _maybeResumeGroupJoin();
+      }
     });
     ref.listen(pendingInviteProvider, (_, next) {
       if (next != null) _maybeShowPendingInvite();
+    });
+    ref.listen(pendingGroupJoinProvider, (_, next) {
+      if (next != null) _maybeResumeGroupJoin();
     });
 
     // Inbound signals had no home: a trip invite or friend request sat unseen

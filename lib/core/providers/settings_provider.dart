@@ -24,6 +24,7 @@ class AppSettings {
     this.mapThreeD = true,
     this.mapTerrain = true,
     this.photoVisibility = 'group',
+    this.shareLocation = true,
   });
 
   final ThemeMode themeMode;
@@ -37,6 +38,11 @@ class AppSettings {
   /// Default visibility for a newly pinned photo: `private` | `group` | `public`.
   final String photoVisibility;
 
+  /// Whether this device broadcasts its position to the active trip's members.
+  /// When false the local GPS stream still runs (the map needs it) but no ping
+  /// is written and background sharing is disabled.
+  final bool shareLocation;
+
   AppSettings copyWith({
     ThemeMode? themeMode,
     DistanceUnit? distanceUnit,
@@ -44,6 +50,7 @@ class AppSettings {
     bool? mapThreeD,
     bool? mapTerrain,
     String? photoVisibility,
+    bool? shareLocation,
   }) => AppSettings(
     themeMode: themeMode ?? this.themeMode,
     distanceUnit: distanceUnit ?? this.distanceUnit,
@@ -51,6 +58,7 @@ class AppSettings {
     mapThreeD: mapThreeD ?? this.mapThreeD,
     mapTerrain: mapTerrain ?? this.mapTerrain,
     photoVisibility: photoVisibility ?? this.photoVisibility,
+    shareLocation: shareLocation ?? this.shareLocation,
   );
 }
 
@@ -60,6 +68,7 @@ const _kMapStyle = 'settings_map_style';
 const _kMapThreeD = 'settings_map_3d';
 const _kMapTerrain = 'settings_map_terrain';
 const _kPhotoVisibility = 'settings_photo_visibility';
+const _kShareLocation = 'settings_share_location';
 
 /// Owns [AppSettings]; every setter persists immediately and updates state so
 /// the UI (including the app's theme) reacts at once.
@@ -76,6 +85,7 @@ class AppSettingsNotifier extends Notifier<AppSettings> {
       mapThreeD: prefs.getBool(_kMapThreeD) ?? true,
       mapTerrain: prefs.getBool(_kMapTerrain) ?? true,
       photoVisibility: prefs.getString(_kPhotoVisibility) ?? 'group',
+      shareLocation: prefs.getBool(_kShareLocation) ?? true,
     );
   }
 
@@ -107,6 +117,11 @@ class AppSettingsNotifier extends Notifier<AppSettings> {
   void setPhotoVisibility(String visibility) {
     unawaited(_prefs.setString(_kPhotoVisibility, visibility));
     state = state.copyWith(photoVisibility: visibility);
+  }
+
+  void setShareLocation(bool enabled) {
+    unawaited(_prefs.setBool(_kShareLocation, enabled));
+    state = state.copyWith(shareLocation: enabled);
   }
 }
 

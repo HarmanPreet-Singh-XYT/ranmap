@@ -111,6 +111,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               _ProfileHeaderCard(profile: profile),
               const SizedBox(height: BrandSpace.md),
               _ProCard(isPro: ref.watch(isProProvider)),
+              const SizedBox(height: BrandSpace.md),
+              const _PlanUsageCard(),
               const SizedBox(height: BrandSpace.lg),
               _VehicleGarage(
                 profile: profile,
@@ -658,6 +660,70 @@ class _ProCard extends ConsumerWidget {
         ),
       ),
     );
+  }
+}
+
+class _PlanUsageCard extends ConsumerWidget {
+  const _PlanUsageCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Pro has no metered limits, and a loading or failed meter isn't worth a
+    // placeholder on the profile — render nothing rather than flicker.
+    if (ref.watch(isProProvider)) return const SizedBox.shrink();
+
+    return ref
+        .watch(usageQuotaProvider)
+        .maybeWhen(
+          orElse: () => const SizedBox.shrink(),
+          data: (report) {
+            if (report.isPro || report.quotas.isEmpty) {
+              return const SizedBox.shrink();
+            }
+            final exhausted = report.quotas.where((q) => q.exhausted).toList();
+            return BrandCard(
+              padding: const EdgeInsets.all(BrandSpace.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const BrandSectionHeader(
+                    icon: Icons.data_usage_rounded,
+                    title: 'Free plan usage',
+                  ),
+                  const SizedBox(height: BrandSpace.md),
+                  for (final (i, q) in report.quotas.indexed) ...[
+                    if (i > 0) const SizedBox(height: BrandSpace.md),
+                    BrandBreakdownRow(
+                      label: '${q.label} · ${q.cadence}',
+                      fraction: q.fraction,
+                      valueLabel: '${q.usedLabel} / ${q.limitLabel}${q.unitSuffix}',
+                      color: _quotaColor(q.fraction),
+                    ),
+                  ],
+                  const SizedBox(height: BrandSpace.sm),
+                  Text(
+                    exhausted.isEmpty
+                        ? 'Resets automatically. Pro removes these limits.'
+                        : "You've used your free ${exhausted.map((q) => q.label.toLowerCase()).join(' and ')}. Upgrade for unlimited.",
+                    style: BrandText.bodySm.copyWith(
+                      color: exhausted.isEmpty
+                          ? BrandColors.textMuted
+                          : BrandColors.error,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+  }
+
+  /// Green-ish under 80% of the allowance, amber approaching it, red once
+  /// exhausted.
+  static Color _quotaColor(double fraction) {
+    if (fraction >= 1) return BrandColors.error;
+    if (fraction >= 0.8) return BrandColors.accentPeach;
+    return BrandColors.primaryContainer;
   }
 }
 

@@ -14,10 +14,32 @@ type Options = {
   key?: (req: Request) => string | undefined;
 };
 
-// Fixed-window-per-key hit log, in memory. Good enough for a single-instance
-// backend; swap for Redis (or a shared store) if this ever scales out.
-const hits = new Map<string, number[]>();
+/** The limiter's verdict for one hit. */
+export interface RateLimitDecision {
+  allowed: boolean;
+  /** Seconds until the bucket resets; set only when [allowed] is false. */
+  retryAfterSeconds?: number;
+}
 
+/**
+ * Where bucket state lives. Injected so the limiter stays I/O-free and
+ * unit-testable, and so a multi-instance deployment can swap the default
+ * in-memory store for a shared one (see `rate-limit-store.ts`).
+ */
+export interface RateLimitStore {
+  hit(
+    bucket: string,
+    windowMs: number,
+    max: number,
+    now: number,
+  ): Promise<RateLimitDecision>;
+}
+
+// --- Default store: in-memory sliding window -------------------------------
+// Correct for a single instance and for tests; NOT shared across processes.
+// A multi-instance deployment calls `usePostgresRateLimit()` at startup.
+
+const hits = new Map<string, number[]>();
 const MAX_RETENTION_MS = 60 * 60 * 1000;
 
 // Drop stale buckets so the map doesn't grow unbounded.
@@ -30,29 +52,58 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000).unref();
 
-/**
- * Per-user (falling back to per-IP) rate limit. Apply after `requireAuth` so
- * `req.userId` is available. Guards the paid/abusable endpoints — sending SMS
- * via Twilio, calling the Anthropic API, and the Google Maps proxy all cost
- * money per request.
- */
-export function rateLimit({ name, windowMs, max, message, key }: Options) {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const subject = key?.(req) ?? req.userId ?? req.ip ?? "unknown";
-    const bucket = `${name}:${subject}`;
-    const now = Date.now();
-
+export const memoryRateLimitStore: RateLimitStore = {
+  async hit(bucket, windowMs, max, now) {
     const times = (hits.get(bucket) ?? []).filter((t) => now - t < windowMs);
     const oldest = times[0];
     if (times.length >= max && oldest !== undefined) {
-      const retryAfter = Math.max(1, Math.ceil((oldest + windowMs - now) / 1000));
+      return {
+        allowed: false,
+        retryAfterSeconds: Math.max(1, Math.ceil((oldest + windowMs - now) / 1000)),
+      };
+    }
+    times.push(now);
+    hits.set(bucket, times);
+    return { allowed: true };
+  },
+};
+
+let store: RateLimitStore = memoryRateLimitStore;
+
+/** Swaps the store backing every limiter (call once at startup). */
+export function setRateLimitStore(next: RateLimitStore): void {
+  store = next;
+}
+
+/**
+ * Per-user (falling back to per-IP) rate limit. Apply after `requireAuth` so
+ * `req.userId` is available. Guards the paid/abusable endpoints — sending SMS
+ * via Twilio, calling the Gemini API, and the Google Maps proxy all cost
+ * money per request.
+ */
+export function rateLimit({ name, windowMs, max, message, key }: Options) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const subject = key?.(req) ?? req.userId ?? req.ip ?? "unknown";
+    const bucket = `${name}:${subject}`;
+
+    let decision: RateLimitDecision;
+    try {
+      decision = await store.hit(bucket, windowMs, max, Date.now());
+    } catch (err) {
+      // Fail open: a store outage must not take down every request (the
+      // backing database being down breaks the request anyway). Log loudly.
+      console.error(`rate-limit(${name}): store failed, allowing request:`, err);
+      next();
+      return;
+    }
+
+    if (!decision.allowed) {
+      const retryAfter = decision.retryAfterSeconds ?? 1;
       res.setHeader("Retry-After", String(retryAfter));
       res.status(429).json({ error: message ?? "Too many requests — please slow down." });
       return;
     }
 
-    times.push(now);
-    hits.set(bucket, times);
     next();
   };
 }

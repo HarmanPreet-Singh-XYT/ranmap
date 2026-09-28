@@ -30,6 +30,13 @@ const tripInviteLimit = rateLimit({
   message: "Too many invite notifications — try again later.",
 });
 
+const groupInviteLimit = rateLimit({
+  name: "notifications-group-invite",
+  windowMs: 60 * 60 * 1000,
+  max: 300,
+  message: "Too many group notifications — try again later.",
+});
+
 // Supabase ids are UUIDs; validate before querying so a malformed id can't
 // reach the database as an invalid-input cast error.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -166,6 +173,264 @@ notificationsRouter.post(
 
     // `push` mirrors /register: the client can be honest when FCM isn't
     // configured server-side even though nothing is delivered.
+    res.json({ ok: true, push: pushConfigured() });
+  }),
+);
+
+/** Whether [userId] owns or actively administers [groupId]. */
+async function isGroupAdmin(groupId: string, userId: string): Promise<boolean> {
+  const { data: group } = await supabaseAdmin
+    .from("groups")
+    .select("owner_id")
+    .eq("id", groupId)
+    .maybeSingle();
+  if (group?.owner_id === userId) return true;
+
+  const { data: member } = await supabaseAdmin
+    .from("group_members")
+    .select("role")
+    .eq("group_id", groupId)
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .maybeSingle();
+  return member?.role === "admin" || member?.role === "owner";
+}
+
+/**
+ * POST /notifications/group-invite  { groupId, userId }
+ *
+ * Pushes a "Group invite" after an admin adds someone to a group — the app's
+ * own add-member path would otherwise be silent (unlike trip invites).
+ *
+ * Abusable without a guard, so it's scoped: only an admin of the group may
+ * trigger it, and only for someone actually on the group's member list.
+ */
+notificationsRouter.post(
+  "/group-invite",
+  groupInviteLimit,
+  asyncHandler(async (req, res) => {
+    const groupId = String(req.body?.groupId ?? "").trim();
+    const userId = String(req.body?.userId ?? "").trim();
+    if (!UUID_RE.test(groupId) || !UUID_RE.test(userId)) {
+      res.status(400).json({ error: "groupId and userId (uuids) are required" });
+      return;
+    }
+
+    const { data: group, error: groupError } = await supabaseAdmin
+      .from("groups")
+      .select("id, name")
+      .eq("id", groupId)
+      .maybeSingle();
+    if (groupError) {
+      fail(res, groupError, 500, "Could not look up that group.", "notifications: group-invite group");
+      return;
+    }
+    if (!group) {
+      res.status(404).json({ error: "Group not found" });
+      return;
+    }
+    if (!(await isGroupAdmin(groupId, req.userId))) {
+      res.status(403).json({ error: "Only a group admin can notify members." });
+      return;
+    }
+
+    const { data: member } = await supabaseAdmin
+      .from("group_members")
+      .select("user_id")
+      .eq("group_id", groupId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!member) {
+      res.status(404).json({ error: "That user is not in this group." });
+      return;
+    }
+
+    await notifyUsers(
+      [userId],
+      {
+        title: "Group invite",
+        body: `You've been added to "${group.name}"`,
+        data: { type: "group_invite", groupId },
+      },
+      "group_invites",
+    );
+
+    res.json({ ok: true, push: pushConfigured() });
+  }),
+);
+
+/**
+ * POST /notifications/group-request  { groupId }
+ *
+ * Pushes a "Join request" to the group's admins when a pending requester
+ * redeems an invite link that needs approval.
+ *
+ * Scoped: only someone with a *pending* membership in the group may trigger
+ * it, so it can't be used to spam a group's admins.
+ */
+notificationsRouter.post(
+  "/group-request",
+  groupInviteLimit,
+  asyncHandler(async (req, res) => {
+    const groupId = String(req.body?.groupId ?? "").trim();
+    if (!UUID_RE.test(groupId)) {
+      res.status(400).json({ error: "groupId (uuid) is required" });
+      return;
+    }
+
+    const { data: requester } = await supabaseAdmin
+      .from("group_members")
+      .select("user_id")
+      .eq("group_id", groupId)
+      .eq("user_id", req.userId)
+      .eq("status", "pending")
+      .maybeSingle();
+    if (!requester) {
+      res.status(403).json({ error: "Only a pending requester can notify admins." });
+      return;
+    }
+
+    const { data: group } = await supabaseAdmin
+      .from("groups")
+      .select("id, name, owner_id")
+      .eq("id", groupId)
+      .maybeSingle();
+    if (!group) {
+      res.status(404).json({ error: "Group not found" });
+      return;
+    }
+
+    const { data: admins } = await supabaseAdmin
+      .from("group_members")
+      .select("user_id")
+      .eq("group_id", groupId)
+      .eq("status", "active")
+      .in("role", ["owner", "admin"]);
+    const adminIds = [
+      group.owner_id as string,
+      ...(admins ?? []).map((row) => row.user_id as string),
+    ].filter((id) => id && id !== req.userId);
+
+    if (adminIds.length === 0) {
+      res.json({ ok: true, push: false });
+      return;
+    }
+
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("username")
+      .eq("id", req.userId)
+      .maybeSingle();
+    const handle = profile?.username ? `@${profile.username}` : "Someone";
+
+    await notifyUsers(
+      adminIds,
+      {
+        title: "Join request",
+        body: `${handle} wants to join "${group.name}"`,
+        data: { type: "group_request", groupId },
+      },
+      "group_invites",
+    );
+
+    res.json({ ok: true, push: pushConfigured() });
+  }),
+);
+
+/** Human copy for a convoy alert, or null when it isn't worth a push. */
+function alertCopy(
+  kind: string,
+  handle: string,
+  message: string | null,
+): { title: string; body: string } | null {
+  switch (kind) {
+    case "sos":
+      return {
+        title: `SOS from ${handle}`,
+        body: message || "They need help — open Ranmap to see their location.",
+      };
+    case "regroup":
+      return {
+        title: "Regroup requested",
+        body: message || `${handle} set a rendezvous point.`,
+      };
+    default:
+      // arrived / departed are low-priority; they stay in-app.
+      return null;
+  }
+}
+
+/**
+ * POST /notifications/group-alert  { alertId }
+ *
+ * Pushes a convoy alert (SOS / regroup) to the rest of the group after the app
+ * has raised it. Scoped: only an active member of the alert's group may trigger
+ * it, so it can't be used to spam a group's members.
+ */
+notificationsRouter.post(
+  "/group-alert",
+  groupInviteLimit,
+  asyncHandler(async (req, res) => {
+    const alertId = String(req.body?.alertId ?? "").trim();
+    if (!UUID_RE.test(alertId)) {
+      res.status(400).json({ error: "alertId (uuid) is required" });
+      return;
+    }
+
+    const { data: alert } = await supabaseAdmin
+      .from("group_alerts")
+      .select("id, group_id, created_by, kind, message")
+      .eq("id", alertId)
+      .maybeSingle();
+    if (!alert) {
+      res.status(404).json({ error: "Alert not found" });
+      return;
+    }
+
+    const { data: caller } = await supabaseAdmin
+      .from("group_members")
+      .select("user_id")
+      .eq("group_id", alert.group_id)
+      .eq("user_id", req.userId)
+      .eq("status", "active")
+      .maybeSingle();
+    if (!caller) {
+      res.status(403).json({ error: "Only a member of the group can raise this alert." });
+      return;
+    }
+
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("username")
+      .eq("id", alert.created_by)
+      .maybeSingle();
+    const handle = profile?.username ? `@${profile.username}` : "A member";
+
+    const copy = alertCopy(alert.kind as string, handle, (alert.message as string | null) ?? null);
+    if (!copy) {
+      res.json({ ok: true, push: false });
+      return;
+    }
+
+    const { data: members } = await supabaseAdmin
+      .from("group_members")
+      .select("user_id")
+      .eq("group_id", alert.group_id)
+      .eq("status", "active");
+    const recipients = (members ?? [])
+      .map((row) => row.user_id as string)
+      .filter((id) => id && id !== req.userId);
+
+    await notifyUsers(
+      recipients,
+      {
+        title: copy.title,
+        body: copy.body,
+        data: { type: "group_alert", groupId: alert.group_id as string, kind: alert.kind as string },
+      },
+      "group_invites",
+    );
+
     res.json({ ok: true, push: pushConfigured() });
   }),
 );

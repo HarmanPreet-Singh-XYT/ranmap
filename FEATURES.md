@@ -123,7 +123,7 @@ directly from the code (real limits, real copy, real field names).
 
 ### Settings screen
 - **Preferences**: theme (System/Light/Dark), distance units (km/mi), map style, 3D buildings toggle, terrain toggle — all persisted and live-applied to the map.
-- **Notifications**: three independent toggles — Trip invites, Chat messages, Trip updates — each PATCHed to the server on change, optimistic with rollback-on-failure. Footer note: "Push delivery turns on once this build registers a device token with the server" (push isn't fully wired client-side yet).
+- **Notifications**: four independent toggles — Trip invites, Chat messages, Group invites, Trip updates — each PATCHed to the server on change, optimistic with rollback-on-failure. Footer note: "Push delivery turns on once this build registers a device token with the server" (push isn't fully wired client-side yet).
 - **Account**: Edit profile, Change password/email, "Sign out other devices".
 - **Delete account** (double-confirmed): first dialog "Delete your account? This permanently deletes your profile, trips, photos, chats and messages. It cannot be undone." → second "Are you absolutely sure? There is no way to recover your data after this." → calls the server, which best-effort deletes storage files then the auth user (everything else cascades via FK).
 - **Privacy**: default photo visibility (Only me / Trip members / Public); static note explaining location sharing stops when a trip ends or you leave it.
@@ -196,11 +196,29 @@ directly from the code (real limits, real copy, real field names).
 - Declining a request deletes the row (not a soft "blocked" state), so a future re-request is possible.
 
 ### Groups
-- Empty state: "No groups yet. Groups are shared crews you plan and take trips with. Create one and invite friends by username." + "New group" action (opens the same create dialog).
-- "New group" dialog, name ≤60 chars.
-- Group detail: owner can remove members (confirm dialog); non-owners see a "leave group" action.
-- "Add member" hits the free-tier group-size cap → shows the Pro paywall instead of an error.
-- Requires having friends first — otherwise toast "Add friends first, then invite them to a group."
+- Empty state: "No groups yet. Groups are shared crews you plan and take trips with. Create one, or join with an invite code." + "New group" and "Join with a code" actions.
+- **Create** a group: name ≤60 chars; it gets its own generated identicon avatars and a revocable invite code.
+- **Join** a group three ways: an admin adds you as a friend, you type an invite code, or you open a shared invite link (`https://<host>/join/<code>` / `com.ranmap.app://join/<code>`). A signed-out recipient's code survives the sign-up round trip and re-opens the join screen afterwards. Joining shows a preview of the group (name, description, member count) before you commit.
+- **Roles**: owner / admin / member. The owner is unique; admins can add/remove members, approve join requests, edit the group, manage the invite link, and promote/demote members (never the owner).
+- **Promote / demote**: tap a member (admins only) → "Make admin" / "Dismiss as admin".
+- **Join approval**: an admin can require approval for the invite link; new arrivals land as *pending*, and admins approve/deny from a "Join requests" section.
+- **Ownership transfer**: the owner can hand the group to another member ("Make owner"); the previous owner stays on as an admin.
+- **Leaving**: members leave freely; an owner must transfer first (or, as the last member, leaving deletes the group). A separate "Delete group" (owner-only) deletes it for everyone.
+- **Edit group**: name, description (≤200 chars) and a shuffleable group avatar.
+- **Invite link**: every member can copy/share the link and code; admins can toggle approval and reset (rotate) the link.
+- "Add member" hits the free-tier group-size cap → shows the Pro paywall instead of an error. Adding a friend directly still requires having friends first — otherwise toast "Add friends first, then invite them to a group."
+- Trips can be planned *for* a group (New trip → Group), which links the trip to the crew; the trip's Crew tab shows and opens the group.
+
+### Group live convoy (the core idea, at group scope)
+- **Live convoy screen** (Group detail → "Live convoy"): the group as a persistent convoy, independent of any trip.
+- **Share my location** toggle: turns on group presence (persisted, one active convoy at a time); your crew sees you live while it's on. Reuses the same server-attested broadcast as trips, on a group-scoped channel (`group-locations:<id>`).
+- **Live crew roster**: each member's real avatar, live distance + bearing arrow, and a state pill — **Live**, **Stopped**, or **Behind** (client-computed from real positions/speed). Tap a member to hand off to turn-by-turn directions.
+- **Convoy intelligence**: nearest-teammate safe-gap readout, a member flagged "Behind" past ~2 km, and "Stopped" when their speed drops to a standstill.
+- **SOS**: one tap alerts the whole crew (with your live location) and pushes them a notification.
+- **Regroup here**: shares a rendezvous point with your location; members who reach it (~150 m) are **auto-checked-in**, and the alert shows real "N/M arrived" progress. Admins can mark an alert resolved.
+- **Crew photos**: a gallery of map photos members have shared with the group (Share to a group from any map photo).
+- On the **main map**, when there's no active trip but a convoy is joined, the crew's live vehicles and roster appear exactly as they do on a trip.
+- Presence is stored as a latest-known-position snapshot (coarse, self-pruning); live movement rides the ephemeral broadcast, so a stationary member ages out of presence after ~15 minutes.
 
 ---
 
@@ -225,8 +243,8 @@ directly from the code (real limits, real copy, real field names).
 - **Short-lived Mapbox tokens**: fetched from the server, auto-refreshed 2 minutes before expiry, then the style silently reloads.
 - **Camera**: default zoom 15.5, pitch 45° (tilted for the 3D effect); "Recenter on me" FAB flies back with a 900ms animation.
 - **You are represented by your own 3D vehicle model**, not a flat dot, rotated to your heading.
-- **Status card**: "No active trip" or "`<trip title>` · N teammates live" — tap to open the live-teammates list.
-- **Background tracking**: continues while backgrounded during an active trip (Android foreground service with a persistent notification "Ranmap is sharing your trip"; iOS background location with `automotiveNavigation` activity type). 5-meter distance filter, high accuracy.
+- **Status card**: "No active trip" or "`<trip title>` · N teammates live" — tap to open the live-teammates list. When no trip is active but a group convoy is joined, the card and teammate layer show that crew instead (see §8).
+- **Background tracking**: continues while backgrounded during an active trip or a joined group convoy (Android foreground service with a persistent notification "Ranmap is sharing your location"; iOS background location with `automotiveNavigation` activity type). 5-meter distance filter, high accuracy.
 - **Live sync error chip**: shown if the realtime location/photo stream errors, with a retry button — "Live teammates aren't updating."
 
 ### Basemap & toggles
@@ -297,23 +315,29 @@ directly from the code (real limits, real copy, real field names).
 - Message limit: 4,000 characters, same as group chat.
 - Optimistic local echo while waiting for the server, reconciled once the real message streams back.
 
-**5 tools the assistant can call:**
+- Powered by **Gemini 3.1 Flash-Lite** (Interactions API) with **Google Search grounding** enabled, so it can answer current-information questions (opening hours, road/weather conditions, events) grounded in real web results, alongside its own tools.
+
+**6 tools the assistant can call:**
 1. **`save_place`** — saves a mentioned place to your saved-places list. *"remember Joshua Tree as a place I want to visit"* → saved with optional coordinates.
 2. **`create_trip`** — creates a new trip and enrolls you as its first member, optionally scheduling it in the same step. *"create a trip called Road Trip"*.
 3. **`schedule_trip`** — schedules one of your *existing* trips (found by exact title) to auto-start at a future time. *"schedule Road Trip for next Friday at 8am"*.
 4. **`invite_friend_to_trip`** — looks up a friend by exact username and adds them to a trip you're on, sending a push notification. *"invite alice_j to Road Trip"*.
 5. **`add_stop`** — geocodes and appends a located stop to one of your trips. *"add a stop at the Grand Canyon"*.
+6. **`propose_stop`** — proposes a stop for the convoy to vote on instead of adding it directly. *"propose a stop at the Grand Canyon"*.
 
 - All tool inputs are validated server-side (lat/lng ranges, future-only schedule times, allowlisted stop kinds) and every free-text field is clamped to prevent unbounded LLM-generated content from being written to the database.
-- Free tier: **15 AI messages per 30 days**, then gated behind Pro with the message: "You've used your free AI assistant messages. Upgrade to Ranmap Pro for unlimited planning help."
+- Free tier: **500k tokens per 30 days** (input + output, summed across every model call in a turn), then gated behind Pro with the message: "You've used your free AI assistant allowance. Upgrade to Ranmap Pro for unlimited planning help." The Profile tab shows a live **Free plan usage** meter (from `GET /plan/usage`) so the allowance is visible before it runs out.
 - A background scheduler (polling every 60s) auto-starts trips whose scheduled time has arrived.
 
 ---
 
 ## 14. Live Location Sync & Stats
 
-- While a trip is active, your GPS position streams continuously to the server; every teammate's latest position renders live on the map, refreshed via Supabase Realtime (debounced ~400ms).
-- **Stats dashboard** (distance, max/avg speed, duration) is recomputed automatically every 10 location pings during an active trip, from haversine distance between consecutive points — and once more, forced, when you complete the trip.
+- While a trip is active, live positions travel over a **private Supabase Realtime broadcast channel** per trip (`trip-locations:<trip_id>`, RLS on `realtime.messages` — accepted members only). A **group convoy** uses the same mechanism on a group-scoped channel (`group-locations:<group_id>`, active members only), plus a coarse latest-known-position snapshot (`group_locations`) that heals a cold start. Positions are ephemeral: no database write per fix, and none of the insert fan-out the old design had. A teammate's position appears on the map as it changes (broadcasts are throttled to ~1/s).
+- Broadcasting goes through the **`broadcast_position` RPC**: it verifies the caller's trip membership via `auth.uid()` and emits the broadcast with the **sender id stamped by the database**, so a member cannot forge another member's position. Clients can't publish on the channel directly (the client INSERT policy is revoked).
+- The `trip_member_locations` RPC is still fetched on every (re)subscribe as the **authoritative cold-start/reconcile path** — a broadcast is fire-and-forget, so a missed message (offline, reconnect) is healed by the next snapshot rather than showing a stale dot forever.
+- The **persisted trail** (`location_pings`) is written only every ~45s per rider for statistics and history — roughly a 50–100× reduction in rows versus one write per 5 m of movement.
+- **Stats dashboard** (distance, max/avg speed, duration) is recomputed automatically every 4 persisted pings during an active trip, from haversine distance between consecutive points — and once more, forced, when you complete the trip.
 - **Fuel cost estimation**: derives a $/km rate from logged fuel expenses and applies it to the planned route's full distance for an estimated total fuel cost.
 
 ---
@@ -333,8 +357,8 @@ directly from the code (real limits, real copy, real field names).
 
 ## 16. Push Notifications (server-ready, partially wired)
 
-- Server registers device tokens and delivers via FCM when configured; currently fires on trip invitations sent through the AI assistant.
-- Settings → Notifications lets you opt in/out per category (invites, chat, trip updates).
+- Server registers device tokens and delivers via FCM when configured; fires on trip invitations, group invites/join requests, and convoy alerts (SOS / regroup).
+- Settings → Notifications lets you opt in/out per category (trip invites, chat, group invites, trip updates).
 - **Not yet complete**: the Flutter client doesn't obtain an FCM token yet, so nothing is actually delivered to devices today — this is explicitly a "server-ready" feature.
 
 ---

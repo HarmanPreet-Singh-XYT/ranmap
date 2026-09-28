@@ -12,7 +12,7 @@ function optional(name: string, fallback: string): string {
 
 // Optional integrations: unset or empty disables just that feature (its route
 // returns 503) instead of refusing to start the whole server. Supabase and
-// Anthropic stay required — the server has nothing to do without them.
+// Gemini stay required — the server has nothing to do without them.
 function optionalValue(name: string): string | undefined {
   const value = process.env[name]?.trim();
   return value === undefined || value === "" ? undefined : value;
@@ -56,9 +56,16 @@ export const env = {
   supabaseUrl: required("SUPABASE_URL"),
   // Supabase secret key (the replacement for the legacy service-role key).
   supabaseSecretKey: required("SUPABASE_SECRET_KEY"),
-  anthropicApiKey: required("ANTHROPIC_API_KEY"),
+  // Gemini API key (Google AI Studio) — powers the AI copilot.
+  geminiApiKey: required("GEMINI_API_KEY"),
   // Overridable so a model rename doesn't require a code change.
-  anthropicModel: optional("ANTHROPIC_MODEL", "claude-sonnet-4-5"),
+  geminiModel: optional("GEMINI_MODEL", "gemini-3.1-flash-lite"),
+  // Redis (optional). When set, rate-limit buckets, the metered allowances and
+  // the plan/membership lookups are served from Redis instead of Postgres on
+  // the hot path. When unset, everything falls back to Postgres (correct, just
+  // more DB round-trips). Accepts a full URL, e.g. redis://host:6379 or
+  // rediss://user:pass@host:6379.
+  redisUrl: optionalValue("REDIS_URL"),
   googleMapsApiKey: optionalValue("GOOGLE_MAPS_API_KEY"),
   // Mapbox token used server-side for Directions + Search Box. A secret token
   // (sk.…) is recommended, or a public token without URL restrictions; either

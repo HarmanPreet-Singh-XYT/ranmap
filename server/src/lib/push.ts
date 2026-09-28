@@ -4,7 +4,11 @@ import { env } from "./env.js";
 import { supabaseAdmin } from "./supabase.js";
 
 /** The notification categories a user can opt out of. */
-export type NotificationKind = "trip_invites" | "chat_messages" | "trip_updates";
+export type NotificationKind =
+  | "trip_invites"
+  | "chat_messages"
+  | "trip_updates"
+  | "group_invites";
 
 /** FCM accepts at most 500 tokens per multicast request. */
 const MULTICAST_BATCH = 500;

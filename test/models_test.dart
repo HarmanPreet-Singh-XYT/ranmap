@@ -58,6 +58,19 @@ void main() {
     expect(trip.originPoint?.lat, 2.0);
     expect(trip.destinationPoint, isNull);
     expect(trip.startedAt, DateTime.parse('2026-01-01T10:00:00Z'));
+    // Missing currency defaults rather than throwing.
+    expect(trip.currency, 'USD');
+  });
+
+  test('Trip.fromJson reads a stored currency', () {
+    final trip = Trip.fromJson({
+      'id': 't1',
+      'created_by': 'u1',
+      'title': 'Alps run',
+      'currency': 'EUR',
+    });
+
+    expect(trip.currency, 'EUR');
   });
 
   test('Trip.fromJson defaults unknown status to planned', () {

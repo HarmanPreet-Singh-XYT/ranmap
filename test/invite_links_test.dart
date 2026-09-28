@@ -64,4 +64,51 @@ void main() {
       expect(inviteUsernameFromUri(Uri.parse(inviteLinkFor('dave'))), 'dave');
     });
   });
+
+  group('groupJoinCodeFromUri', () {
+    test('reads the code from a production web join link', () {
+      expect(
+        groupJoinCodeFromUri(Uri.parse('https://ranmap.app/join/3f9a1c2b4d5e')),
+        '3f9a1c2b4d5e',
+      );
+    });
+
+    test('reads the code from a custom-scheme join link', () {
+      expect(
+        groupJoinCodeFromUri(Uri.parse('com.ranmap.app://join/3f9a1c2b4d5e')),
+        '3f9a1c2b4d5e',
+      );
+    });
+
+    test('does not confuse a friend invite for a group join', () {
+      expect(
+        groupJoinCodeFromUri(Uri.parse('com.ranmap.app://invite/dave')),
+        null,
+      );
+      expect(
+        inviteUsernameFromUri(Uri.parse('com.ranmap.app://join/3f9a1c2b4d5e')),
+        null,
+      );
+    });
+
+    test('ignores a join link on another host', () {
+      expect(
+        groupJoinCodeFromUri(Uri.parse('https://evil.example/join/abc')),
+        null,
+      );
+    });
+
+    test('the custom-scheme group link round-trips through the parser', () {
+      final link = groupJoinSchemeLinkFor('3f9a1c2b4d5e');
+      expect(link, 'com.ranmap.app://join/3f9a1c2b4d5e');
+      expect(groupJoinCodeFromUri(Uri.parse(link)), '3f9a1c2b4d5e');
+    });
+
+    test('a shared group link parses back to the same code', () {
+      expect(
+        groupJoinCodeFromUri(Uri.parse(groupJoinLinkFor('3f9a1c2b4d5e'))),
+        '3f9a1c2b4d5e',
+      );
+    });
+  });
 }

@@ -5,10 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/providers/app_prefs_provider.dart';
+import '../../core/providers/settings_provider.dart';
+import '../../data/models/group_alert.dart';
+import '../../data/providers/repository_providers.dart';
 import '../../data/services/supabase_service.dart';
 import '../trip/trip_providers.dart';
 
-/// A single teammate's most recent position on the active trip.
+/// A single teammate's most recent position on the active convoy.
 class MemberLocation {
   const MemberLocation({
     required this.userId,
@@ -38,20 +42,76 @@ class MemberLocation {
       recordedAt: DateTime.parse(row['recorded_at'] as String),
     );
   }
+
+  /// Parses a live-position broadcast payload. The server sets the sender's id
+  /// (see `broadcast_position`), so [userId] is trustworthy. Throws on a
+  /// malformed payload; callers skip it rather than blanking the teammate list.
+  factory MemberLocation.fromBroadcast(Map<String, dynamic> payload) {
+    // `realtime.send` delivers the payload as built; `realtime.broadcast_changes`
+    // would wrap it in a change envelope, so unwrap a `record` if present.
+    final record = payload['record'];
+    final data = record is Map ? Map<String, dynamic>.from(record) : payload;
+    final at = data['recorded_at'] ?? data['at'];
+    return MemberLocation(
+      userId: (data['user_id'] ?? data['userId']) as String,
+      lat: (data['lat'] as num).toDouble(),
+      lng: (data['lng'] as num).toDouble(),
+      speedMps: (data['speed_mps'] as num? ?? data['speedMps'] as num?)
+          ?.toDouble(),
+      heading: (data['heading'] as num?)?.toDouble(),
+      recordedAt: at is String
+          ? (DateTime.tryParse(at) ?? DateTime.now())
+          : DateTime.now(),
+    );
+  }
 }
+
+/// The group whose live convoy the current user has joined, or null.
+///
+/// One convoy at a time — the crew you're riding with right now — and persisted
+/// so presence resumes after a restart. Enabling it turns on group presence
+/// sharing (subject to the global [AppSettings.shareLocation] switch).
+class ConvoyGroupNotifier extends Notifier<String?> {
+  @override
+  String? build() => ref.watch(appPrefsProvider).convoyGroupId;
+
+  Future<void> enable(String groupId) async {
+    state = groupId;
+    await ref.read(appPrefsProvider).setConvoyGroupId(groupId);
+  }
+
+  Future<void> disable() async {
+    state = null;
+    await ref.read(appPrefsProvider).setConvoyGroupId(null);
+  }
+}
+
+final convoyGroupIdProvider = NotifierProvider<ConvoyGroupNotifier, String?>(
+  ConvoyGroupNotifier.new,
+);
 
 /// The device's live position stream, shared across the app so only one
 /// GPS subscription is active at a time. On Android/iOS the updates keep
 /// coming while the app is backgrounded (foreground service / background
-/// location mode), which is what makes live trip sharing work when the phone
+/// location mode), which is what makes live sharing work when the phone
 /// is in a pocket.
 ///
 /// Background/foreground-service behaviour is only enabled while a trip is
-/// active: [MapScreen] is always mounted in the home shell, so without this
-/// the persistent "sharing your trip" notification (and the wake lock behind
-/// it) would appear from app launch even when nothing is being shared.
+/// active or a group convoy is joined: [MapScreen] is always mounted in the
+/// home shell, so without this the persistent "sharing your location"
+/// notification (and the wake lock behind it) would appear from app launch even
+/// when nothing is being shared.
 final devicePositionProvider = StreamProvider.autoDispose<Position>((ref) {
-  final sharing = ref.watch(activeTripProvider).valueOrNull != null;
+  final shareLocation = ref.watch(
+    appSettingsProvider.select((s) => s.shareLocation),
+  );
+  final hasTrip = ref.watch(activeTripProvider).valueOrNull != null;
+  final hasConvoy = ref.watch(convoyGroupIdProvider) != null;
+  // Background/foreground-service updates only while something is being shared
+  // AND the user hasn't paused sharing — otherwise the persistent "sharing your
+  // location" notification would be a lie. The foreground stream still runs
+  // either way, so the user's own map keeps working while paused.
+  final sharing = (hasTrip || hasConvoy) && shareLocation;
 
   if (Platform.isAndroid) {
     return Geolocator.getPositionStream(
@@ -60,10 +120,10 @@ final devicePositionProvider = StreamProvider.autoDispose<Position>((ref) {
         distanceFilter: 5,
         foregroundNotificationConfig: sharing
             ? const ForegroundNotificationConfig(
-                notificationTitle: 'Ranmap is sharing your trip',
+                notificationTitle: 'Ranmap is sharing your location',
                 notificationText:
-                    'Your live location is being shared with your group.',
-                notificationChannelName: 'Live trip sharing',
+                    'Your live location is being shared with your crew.',
+                notificationChannelName: 'Live location sharing',
                 enableWakeLock: true,
                 setOngoing: true,
               )
@@ -106,115 +166,363 @@ final locationPermissionProvider = FutureProvider.autoDispose<bool>((
       permission == LocationPermission.whileInUse;
 });
 
-/// How many location pings to log between each `trip_stats` recompute.
-/// Recomputing re-reads the trip's whole ping history, so this keeps the
-/// dashboard reasonably fresh without hitting the DB on every 5m movement.
-const _statsRecomputeEveryNPings = 10;
+/// Minimum gap between live broadcast messages. The GPS stream fires every
+/// ~5 m (≈6/s at highway speed) and every message fans out to every teammate,
+/// so this throttles the live feed to a rate the map still reads as smooth.
+const _minBroadcastInterval = Duration(seconds: 1);
 
-/// Pushes the device's own position to `location_pings` whenever there is an
-/// active trip, and periodically recomputes `trip_stats`. Kept as a provider
-/// (rather than inline in the widget) so any screen can keep this alive just
-/// by watching it.
-final locationBroadcastProvider = Provider.autoDispose<void>((ref) {
-  final activeTrip = ref.watch(activeTripProvider).valueOrNull;
-  if (activeTrip == null) return;
-  final tripId = activeTrip.id;
+/// How often a position is persisted to `location_pings`. Live positions no
+/// longer touch the database, so this is deliberately coarse — the persisted
+/// trail exists only to back `computeTripStats` and trip history.
+const _persistInterval = Duration(seconds: 45);
 
+/// How often the (trip-independent) group presence snapshot is refreshed. The
+/// live feed is broadcast-only; this is what heals a cold start, so it stays
+/// coarse to keep DB writes rare.
+const _presencePersistInterval = Duration(seconds: 30);
+
+/// Coarse persisted pings between each `trip_stats` recompute. Recomputing
+/// re-reads the trip's whole ping history, so it must not run per ping.
+const _statsRecomputeEveryNPings = 4;
+
+/// The Realtime channel name for a trip's live positions. It must be identical
+/// on every client (the RLS policy authorizes by the trip id in the topic), so
+/// unlike the old per-instance topic it is deterministic.
+String tripLocationsTopic(String tripId) => 'trip-locations:$tripId';
+
+/// The Realtime channel name for a group's live convoy. Same rules as
+/// [tripLocationsTopic] — the RLS policy authorizes by the group id.
+String groupLocationsTopic(String groupId) => 'group-locations:$groupId';
+
+/// One live-position channel per scope (trip or group), held for the session.
+///
+/// Rebuilding the provider (a retry, or leaving and returning to the map) must
+/// NOT re-subscribe to the same topic: the Realtime server rejects a second
+/// subscribe to an already-joined topic and silently kills it. So the channel
+/// is created once and providers attach/detach listeners to it instead — which
+/// is also why the topic can safely be deterministic.
+class _LiveChannel {
+  _LiveChannel({
+    required this.key,
+    required this.userId,
+    required this.channel,
+  });
+
+  /// `trip:<id>` or `group:<id>` — the cache key and the topic discriminator.
+  final String key;
+  final String? userId;
+  final RealtimeChannel channel;
+
+  /// Latest known position per teammate (excluding self).
+  final Map<String, MemberLocation> latest = {};
+  final List<void Function()> _listeners = [];
+
+  /// Set when the last seed failed (and cleared once one succeeds), so
+  /// consumers can surface "live teammates aren't updating".
+  Object? error;
+
+  void attach(void Function() onUpdate) => _listeners.add(onUpdate);
+  void detach(void Function() onUpdate) => _listeners.remove(onUpdate);
+
+  void notify() {
+    for (final listener in List.of(_listeners)) {
+      listener();
+    }
+  }
+}
+
+final Map<String, _LiveChannel> _liveChannels = {};
+
+/// The cached channel for [key], created on first use. Recreated only if the
+/// signed-in user changes, so a sign-out can't leave another user's channel
+/// subscribed.
+_LiveChannel _liveChannelFor({
+  required String key,
+  required String topic,
+  required Future<List<Map<String, dynamic>>> Function() seedRows,
+}) {
+  final userId = SupabaseService.currentUser?.id;
+  final existing = _liveChannels[key];
+  if (existing != null && existing.userId == userId) return existing;
+  if (existing != null) {
+    _liveChannels.remove(key);
+    unawaited(SupabaseService.client.removeChannel(existing.channel));
+  }
+
+  final client = SupabaseService.client;
+  // Private: publishes are authorized by RLS on realtime.messages (0022 / 0027)
+  // — only accepted trip members, or active group members, may receive on the
+  // topic. Clients never publish directly; the server RPC does, so the sender
+  // id is attested.
+  final channel = client.channel(
+    topic,
+    opts: const RealtimeChannelConfig(private: true),
+  );
+  final holder = _LiveChannel(key: key, userId: userId, channel: channel);
+
+  /// Reconciles against the authoritative latest-per-user snapshot. Runs on
+  /// every (re)subscribe, so a reconnect (or a missed broadcast) is healed.
+  Future<void> seed() async {
+    try {
+      final rows = await seedRows();
+      holder.latest.clear();
+      for (final row in rows) {
+        // One malformed row must not blank the whole teammate list.
+        try {
+          final loc = MemberLocation.fromRow(row);
+          if (loc.userId == userId) continue;
+          holder.latest[loc.userId] = loc;
+        } catch (_) {
+          continue;
+        }
+      }
+      holder.error = null;
+    } catch (e) {
+      holder.error = e;
+    }
+    holder.notify();
+  }
+
+  channel.onBroadcast(
+    event: 'position',
+    callback: (payload) {
+      try {
+        final loc = MemberLocation.fromBroadcast(payload);
+        if (loc.userId == userId) return;
+        holder.latest[loc.userId] = loc;
+        holder.notify();
+      } catch (_) {
+        // A malformed broadcast must not blank the teammate list.
+      }
+    },
+  );
+
+  channel.subscribe((status, error) {
+    if (status == RealtimeSubscribeStatus.subscribed) unawaited(seed());
+    if (error != null) holder.error = error;
+    holder.notify();
+  });
+
+  _liveChannels[key] = holder;
+  return holder;
+}
+
+/// Live teammate positions for a scope (excluding self), plus this device's own
+/// outgoing position sharing.
+///
+/// One channel, two jobs:
+///   * **Inbound** — a private Realtime **broadcast** delivers each teammate's
+///     position as it changes, with no database write. The snapshot RPC is
+///     still fetched on every (re)subscribe as the authoritative cold-start /
+///     reconcile path, because a broadcast is fire-and-forget.
+///   * **Outbound** — the device's GPS fixes are broadcast (throttled) for the
+///     live map. Trips additionally persist a coarse trail to `location_pings`
+///     for statistics/history; groups refresh a latest-only presence snapshot
+///     at a coarse cadence.
+///
+/// Kept alive by whoever watches it.
+Stream<Map<String, MemberLocation>> _liveSync(
+  Ref ref, {
+  required bool isTrip,
+  required String id,
+}) {
+  final key = isTrip ? 'trip:$id' : 'group:$id';
+  final tripRepo = ref.watch(tripRepositoryProvider);
+  final convoyRepo = ref.watch(convoyRepositoryProvider);
+  final holder = _liveChannelFor(
+    key: key,
+    topic: isTrip ? tripLocationsTopic(id) : groupLocationsTopic(id),
+    seedRows: () =>
+        isTrip ? tripRepo.memberLocations(id) : convoyRepo.memberLocations(id),
+  );
+
+  final controller = StreamController<Map<String, MemberLocation>>();
+  var disposed = false;
+
+  void onUpdate() {
+    if (disposed) return;
+    final error = holder.error;
+    if (error != null) {
+      controller.addError(error);
+    } else {
+      controller.add(Map.of(holder.latest));
+    }
+  }
+
+  holder.attach(onUpdate);
+  onUpdate();
+
+  // --- outbound ---
+  DateTime? lastBroadcastAt;
+  DateTime? lastPersistedAt;
   var pingsSinceRecompute = 0;
+
+  /// Publishes via the server RPC, which stamps the sender id — the client
+  /// never authors a broadcast, so it can't forge another member's position.
+  Future<void> broadcast(Position pos, {required bool persist}) async {
+    try {
+      if (isTrip) {
+        await tripRepo.broadcastPosition(
+          tripId: id,
+          lat: pos.latitude,
+          lng: pos.longitude,
+          speedMps: pos.speed >= 0 ? pos.speed : null,
+          heading: pos.heading,
+        );
+      } else {
+        await convoyRepo.broadcastPosition(
+          groupId: id,
+          lat: pos.latitude,
+          lng: pos.longitude,
+          speedMps: pos.speed >= 0 ? pos.speed : null,
+          heading: pos.heading,
+          persist: persist,
+        );
+      }
+    } catch (_) {
+      // Best-effort: a dropped broadcast heals on the next tick (or the
+      // next reconnect-seed).
+    }
+  }
 
   ref.listen(devicePositionProvider, (previous, next) {
     final pos = next.valueOrNull;
     if (pos == null) return;
-    final repo = ref.read(tripRepositoryProvider);
+    // Re-read at fire time so pausing sharing, or switching convoys, takes
+    // effect without rebuilding this provider.
+    if (!ref.read(appSettingsProvider).shareLocation) return;
+    if (isTrip) {
+      if (ref.read(activeTripProvider).valueOrNull?.id != id) return;
+    } else {
+      if (ref.read(convoyGroupIdProvider) != id) return;
+    }
 
-    unawaited(() async {
-      try {
-        await repo.logLocation(
-          tripId: tripId,
-          lat: pos.latitude,
-          lng: pos.longitude,
-          speedMps: pos.speed,
-          heading: pos.heading,
-        );
+    final now = DateTime.now();
 
-        pingsSinceRecompute++;
-        if (pingsSinceRecompute >= _statsRecomputeEveryNPings) {
-          pingsSinceRecompute = 0;
-          await repo.recomputeStats(tripId);
-        }
-      } catch (_) {
-        // Best-effort background sync: a dropped ping or a transient network
-        // failure must not surface as an unhandled async error.
+    if (isTrip) {
+      // Live: ephemeral, server-attested broadcast, throttled.
+      if (lastBroadcastAt == null ||
+          now.difference(lastBroadcastAt!) >= _minBroadcastInterval) {
+        lastBroadcastAt = now;
+        unawaited(broadcast(pos, persist: false));
       }
-    }());
+      // Persisted trail: coarse, and the only thing that touches the DB.
+      if (lastPersistedAt == null ||
+          now.difference(lastPersistedAt!) >= _persistInterval) {
+        lastPersistedAt = now;
+        unawaited(() async {
+          try {
+            await tripRepo.logLocation(
+              tripId: id,
+              lat: pos.latitude,
+              lng: pos.longitude,
+              speedMps: pos.speed,
+              heading: pos.heading,
+            );
+            pingsSinceRecompute++;
+            if (pingsSinceRecompute >= _statsRecomputeEveryNPings) {
+              pingsSinceRecompute = 0;
+              await tripRepo.recomputeStats(id);
+            }
+          } catch (_) {
+            // Best-effort background sync: a dropped ping or a transient
+            // network failure must not surface as an unhandled async error.
+          }
+        }());
+      }
+    } else {
+      // Group convoy: one throttled broadcast, refreshing the presence
+      // snapshot only occasionally (the DB write is the expensive part).
+      final dueToPersist =
+          lastPersistedAt == null ||
+          now.difference(lastPersistedAt!) >= _presencePersistInterval;
+      if (lastBroadcastAt == null ||
+          now.difference(lastBroadcastAt!) >= _minBroadcastInterval) {
+        lastBroadcastAt = now;
+        if (dueToPersist) lastPersistedAt = now;
+        unawaited(broadcast(pos, persist: dueToPersist));
+      }
+    }
   });
-});
 
-/// Latest known location per teammate on the active trip (excludes self).
-///
-/// Instead of streaming every ping row (which grows without bound and
-/// re-sends the whole set on each insert), this fetches the current
-/// latest-per-user snapshot via the `trip_member_locations` RPC and refreshes
-/// on Realtime inserts for the trip, debounced to avoid a fetch storm.
-final tripMemberLocationsProvider = StreamProvider.autoDispose
-    .family<Map<String, MemberLocation>, String>((ref, tripId) {
-      final myUid = SupabaseService.currentUser?.id;
-      final repo = ref.watch(tripRepositoryProvider);
+  ref.onDispose(() {
+    disposed = true;
+    holder.detach(onUpdate);
+    controller.close();
+  });
+
+  return controller.stream;
+}
+
+/// Live teammate positions for a trip (excluding self). See [_liveSync].
+final tripLiveSyncProvider = StreamProvider.autoDispose
+    .family<Map<String, MemberLocation>, String>(
+      (ref, tripId) => _liveSync(ref, isTrip: true, id: tripId),
+    );
+
+/// Live teammate positions for a group convoy (excluding self). See [_liveSync].
+final groupLiveSyncProvider = StreamProvider.autoDispose
+    .family<Map<String, MemberLocation>, String>(
+      (ref, groupId) => _liveSync(ref, isTrip: false, id: groupId),
+    );
+
+/// The group's convoy alerts, kept live via Supabase Realtime postgres changes
+/// on `group_alerts` / `alert_checkins`.
+final groupAlertsProvider = StreamProvider.autoDispose
+    .family<List<GroupAlert>, String>((ref, groupId) {
+      final repo = ref.watch(convoyRepositoryProvider);
       final client = SupabaseService.client;
-
-      final controller = StreamController<Map<String, MemberLocation>>();
-      final latest = <String, MemberLocation>{};
-      Timer? debounce;
+      final controller = StreamController<List<GroupAlert>>();
       var disposed = false;
 
       Future<void> refresh() async {
         try {
-          final rows = await repo.memberLocations(tripId);
-          if (disposed) return;
-          latest.clear();
-          for (final row in rows) {
-            // One malformed row must not blank the whole teammate list.
-            try {
-              final loc = MemberLocation.fromRow(row);
-              if (loc.userId == myUid) continue;
-              latest[loc.userId] = loc;
-            } catch (_) {
-              continue;
-            }
-          }
-          controller.add(Map.of(latest));
+          final alerts = await repo.fetchAlerts(groupId);
+          if (!disposed) controller.add(alerts);
         } catch (e, st) {
           if (!disposed) controller.addError(e, st);
         }
       }
 
-      void scheduleRefresh() {
-        debounce?.cancel();
-        debounce = Timer(const Duration(milliseconds: 400), refresh);
-      }
-
       unawaited(refresh());
 
-      // Unique topic per provider instance: a rebuilt family provider must not race
-      // an in-flight removeChannel for a reused topic (which Realtime rejects,
-      // silently killing the new subscription).
-      final topic =
-          'trip-$tripId-locations-${DateTime.now().microsecondsSinceEpoch}';
+      Timer? debounce;
+      void scheduleRefresh() {
+        debounce?.cancel();
+        debounce = Timer(
+          const Duration(milliseconds: 400),
+          () => unawaited(refresh()),
+        );
+      }
+
       final channel = client
-          .channel(topic)
+          .channel(
+            'convoy-alerts-$groupId-${DateTime.now().microsecondsSinceEpoch}',
+          )
           .onPostgresChanges(
-            event: PostgresChangeEvent.insert,
+            event: PostgresChangeEvent.all,
             schema: 'public',
-            table: 'location_pings',
+            table: 'group_alerts',
             filter: PostgresChangeFilter(
               type: PostgresChangeFilterType.eq,
-              column: 'trip_id',
-              value: tripId,
+              column: 'group_id',
+              value: groupId,
             ),
+            callback: (_) => scheduleRefresh(),
+          )
+          // Check-ins carry no group id, so listen unfiltered and refetch; the
+          // table is tiny and the debounce coalesces bursts.
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'alert_checkins',
             callback: (_) => scheduleRefresh(),
           )
           .subscribe((status, error) {
             if (error != null && !disposed) controller.addError(error);
+            if (status == RealtimeSubscribeStatus.subscribed) {
+              unawaited(refresh());
+            }
           });
 
       ref.onDispose(() {

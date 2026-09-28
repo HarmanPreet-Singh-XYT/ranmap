@@ -3,6 +3,10 @@ import { Router } from "express";
 import { asyncHandler } from "../lib/async-handler.js";
 import { env } from "../lib/env.js";
 import { fail, notConfigured } from "../lib/errors.js";
+// The same SQL predicates RLS uses (is_trip_participant / is_group_member,
+// 0002), cached in Redis — see membership-store.ts — so this can't drift from
+// RLS and doesn't hit Postgres per request.
+import { isGroupMember, isTripParticipant } from "../lib/membership-store.js";
 import { premiumRequired } from "../lib/plans.js";
 import { tripOrGroupHasPro } from "../lib/plan-store.js";
 import { rateLimit } from "../lib/rate-limit.js";
@@ -116,27 +120,6 @@ voiceRouter.post(
     }
   }),
 );
-
-// Delegates to the same SQL predicates RLS itself uses (is_trip_participant /
-// is_group_member, 0002_rls_hardening.sql) instead of re-implementing the
-// membership rule here, so this can never drift out of sync with RLS.
-async function isTripParticipant(tripId: string, userId: string): Promise<boolean> {
-  const { data, error } = await supabaseAdmin.rpc("is_trip_participant", {
-    p_trip: tripId,
-    p_user: userId,
-  });
-  if (error) throw new Error(error.message);
-  return data === true;
-}
-
-async function isGroupMember(groupId: string, userId: string): Promise<boolean> {
-  const { data, error } = await supabaseAdmin.rpc("is_group_member", {
-    p_group: groupId,
-    p_user: userId,
-  });
-  if (error) throw new Error(error.message);
-  return data === true;
-}
 
 async function participantIdentity(userId: string): Promise<string> {
   const { data } = await supabaseAdmin

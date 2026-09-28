@@ -283,6 +283,20 @@ class SettingsScreen extends ConsumerWidget {
                   label: _visibilityLabel(settings.photoVisibility),
                 ),
               ),
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: settings.shareLocation
+                    ? Icons.share_location_rounded
+                    : Icons.location_disabled_rounded,
+                title: 'Share live location',
+                subtitle: 'Broadcast your position to the active trip',
+                // Only the switch toggles, matching the 3D/terrain rows.
+                onTap: null,
+                trailing: FSwitch(
+                  value: settings.shareLocation,
+                  onChange: notifier.setShareLocation,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: BrandSpace.sm),
@@ -399,7 +413,7 @@ class _LocationSharingNote extends StatelessWidget {
   Widget build(BuildContext context) {
     return const BrandAlert(
       variant: BrandAlertVariant.info,
-      message: 'While a trip is active, your position is shared with that trip’s members so they can see you on the map. It stops when the trip ends or you leave it.',
+      message: 'While a trip is active, your position is shared with that trip’s members so they can see you on the map. It stops when the trip ends, you leave it, or you turn off Share live location.',
     );
   }
 }
@@ -527,6 +541,21 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
                         value: prefs.chatMessages,
                         onChange: (v) =>
                             _update(prefs.copyWith(chatMessages: v)),
+                      ),
+                    ),
+                    const BrandRowDivider(),
+                    BrandListRow(
+                      icon: Icons.groups_rounded,
+                      title: 'Group invites',
+                      subtitle:
+                          'When you are added to a group or approved to join',
+                      onTap: () => _update(
+                        prefs.copyWith(groupInvites: !prefs.groupInvites),
+                      ),
+                      trailing: FSwitch(
+                        value: prefs.groupInvites,
+                        onChange: (v) =>
+                            _update(prefs.copyWith(groupInvites: v)),
                       ),
                     ),
                     const BrandRowDivider(),

@@ -77,6 +77,13 @@ final tripStatsProvider = FutureProvider.autoDispose.family<TripStats?, String>(
   },
 );
 
+/// The current user's recorded speed samples (km/h) for a trip, for the stats
+/// tab's speed profile. Empty until the trip has logged pings with a reading.
+final tripSpeedProfileProvider = FutureProvider.autoDispose
+    .family<List<double>, String>((ref, tripId) {
+      return ref.watch(tripRepositoryProvider).speedProfile(tripId);
+    });
+
 /// Every trip's stats rollup for the current user, for the history screen.
 final myTripStatsProvider =
     FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) {

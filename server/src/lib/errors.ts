@@ -2,7 +2,7 @@ import type { Response } from "express";
 
 /**
  * Logs the real error server-side and returns a stable, generic message to the
- * client. Raw `err.message` / Postgres / Twilio / Anthropic text can leak
+ * client. Raw `err.message` / Postgres / Twilio / Gemini text can leak
  * schema, constraint, and provider internals, so it must never be echoed.
  */
 export function fail(

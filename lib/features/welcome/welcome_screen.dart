@@ -29,7 +29,21 @@ class WelcomeScreen extends ConsumerStatefulWidget {
 }
 
 class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
+  late final PageController _pageController;
+  int _slideIndex = 0;
   bool _leaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController();
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
 
   /// Marks the welcome as seen and opens the chosen auth screen.
   ///
@@ -55,21 +69,53 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
             child: Column(
               children: [
                 const SizedBox(height: BrandSpace.sm),
-                const BrandDots(count: 3, index: 0),
+                BrandDots(
+                  count: _slides.length,
+                  index: _slideIndex,
+                  onTap: (i) => _pageController.animateToPage(
+                    i,
+                    duration: const Duration(milliseconds: 320),
+                    curve: Curves.easeOutCubic,
+                  ),
+                ),
                 const SizedBox(height: BrandSpace.md),
-                const _BentoCollage()
-                    .animate()
-                    .fadeIn(duration: 480.ms, curve: Curves.easeOut)
-                    .scale(
-                      begin: const Offset(0.96, 0.96),
-                      end: const Offset(1, 1),
-                      curve: Curves.easeOutCubic,
-                    ),
+                SizedBox(
+                  height: 310,
+                  child: PageView.builder(
+                    controller: _pageController,
+                    itemCount: _slides.length,
+                    onPageChanged: (i) => setState(() => _slideIndex = i),
+                    itemBuilder: (context, i) =>
+                        _BentoCollage(slide: _slides[i]),
+                  ),
+                ),
                 const SizedBox(height: BrandSpace.xl),
-                const _ValueProp()
-                    .animate()
-                    .fadeIn(delay: 120.ms, duration: 420.ms)
-                    .slideY(begin: 0.15, end: 0, curve: Curves.easeOutCubic),
+                GestureDetector(
+                  onHorizontalDragEnd: (details) {
+                    if (details.primaryVelocity != null) {
+                      if (details.primaryVelocity! < -200 &&
+                          _slideIndex < _slides.length - 1) {
+                        _pageController.nextPage(
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOutCubic,
+                        );
+                      } else if (details.primaryVelocity! > 200 &&
+                          _slideIndex > 0) {
+                        _pageController.previousPage(
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOutCubic,
+                        );
+                      }
+                    }
+                  },
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 260),
+                    child: KeyedSubtree(
+                      key: ValueKey(_slideIndex),
+                      child: _ValueProp(slide: _slides[_slideIndex]),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: BrandSpace.lg),
                 _Actions(onStart: () => _leave('/sign-up'), onSocial: _social)
                     .animate()
@@ -105,13 +151,128 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
   }
 }
 
+class _WelcomeSlide {
+  const _WelcomeSlide({
+    required this.tagIcon,
+    required this.tagLabel,
+    required this.title,
+    required this.body,
+    required this.topLeft,
+    required this.topRight,
+    required this.bottomLeft,
+    required this.bottomRight,
+  });
+
+  final IconData tagIcon;
+  final String tagLabel;
+  final String title;
+  final String body;
+  final Widget topLeft;
+  final Widget topRight;
+  final Widget bottomLeft;
+  final Widget bottomRight;
+}
+
+final List<_WelcomeSlide> _slides = [
+  _WelcomeSlide(
+    tagIcon: Icons.satellite_alt_rounded,
+    tagLabel: 'Real-Time Convoy Navigation',
+    title: 'Drive Together,\nStay Connected',
+    body: 'Live 3D location, convoy voice chat, and shared road-trip pitstops for every adventure.',
+    topLeft: const _PhotoPod(asset: 'assets/images/onboarding/welcome_crew.jpg'),
+    topRight: BrandPod(
+      color: BrandColors.accentPeach,
+      child: _IllustrationPod(
+        icon: Icons.directions_car_rounded,
+        iconColor: BrandColors.tertiary,
+        label: 'Convoy',
+        dotColor: BrandColors.primary,
+      ),
+    ),
+    bottomLeft: BrandPod(
+      color: BrandColors.accentMint,
+      child: _IllustrationPod(
+        icon: Icons.cell_tower_rounded,
+        iconColor: BrandColors.primary,
+        label: 'Live Audio',
+      ),
+    ),
+    bottomRight: const _PhotoPod(
+      asset: 'assets/images/onboarding/welcome_route.jpg',
+      badge: 'Route 1',
+    ),
+  ),
+  _WelcomeSlide(
+    tagIcon: Icons.graphic_eq_rounded,
+    tagLabel: 'Ultra Low-Latency Voice',
+    title: 'Walkie-Talkie in\nYour Pocket',
+    body: 'One-touch push-to-talk convoy radio with highway wind cancellation and instant hands-free audio.',
+    topLeft: BrandPod(
+      color: BrandColors.accentSky,
+      child: _IllustrationPod(
+        icon: Icons.mic_rounded,
+        iconColor: BrandColors.primary,
+        label: 'PTT Radio',
+        dotColor: BrandColors.primary,
+      ),
+    ),
+    topRight: const _PhotoPod(
+      asset: 'assets/images/onboarding/welcome_voice.jpg',
+      badge: 'Voice Active',
+    ),
+    bottomLeft: const _PhotoPod(
+      asset: 'assets/images/onboarding/welcome_convoy.jpg',
+      badge: 'Pacific Highway',
+    ),
+    bottomRight: BrandPod(
+      color: BrandColors.accentLavender,
+      child: _IllustrationPod(
+        icon: Icons.headphones_rounded,
+        iconColor: BrandColors.tertiary,
+        label: 'Zero-Lag',
+        dotColor: BrandColors.tertiary,
+      ),
+    ),
+  ),
+  _WelcomeSlide(
+    tagIcon: Icons.local_cafe_rounded,
+    tagLabel: 'Curated Pitstops & Trip Vault',
+    title: 'Curate Pitstops,\nSave Every Moment',
+    body: 'Synchronized group voting on coffee stops, scenic lookouts, EV fast chargers, and photo vaults.',
+    topLeft: const _PhotoPod(
+      asset: 'assets/images/onboarding/welcome_pitstop.jpg',
+      badge: 'Scenic Stop',
+    ),
+    topRight: BrandPod(
+      color: BrandColors.accentPeach,
+      child: _IllustrationPod(
+        icon: Icons.turn_right_rounded,
+        iconColor: BrandColors.tertiary,
+        label: 'Pitstop Vote',
+        dotColor: BrandColors.primary,
+      ),
+    ),
+    bottomLeft: BrandPod(
+      color: BrandColors.accentMint,
+      child: _IllustrationPod(
+        icon: Icons.ev_station_rounded,
+        iconColor: BrandColors.primary,
+        label: 'Range Sync',
+        dotColor: BrandColors.primary,
+      ),
+    ),
+    bottomRight: const _PhotoPod(
+      asset: 'assets/images/onboarding/welcome_memories.jpg',
+      badge: '4 in Convoy',
+    ),
+  ),
+];
+
 /// The 2×2 bento cluster: two photo pods and two pastel illustration pods.
 class _BentoCollage extends StatelessWidget {
-  const _BentoCollage();
+  const _BentoCollage({required this.slide});
 
-  // Bundled copies of the design previews, so the hero renders offline.
-  static const _topLeftPhoto = 'assets/images/onboarding/welcome_crew.jpg';
-  static const _bottomRightPhoto = 'assets/images/onboarding/welcome_route.jpg';
+  final _WelcomeSlide slide;
 
   @override
   Widget build(BuildContext context) {
@@ -127,19 +288,9 @@ class _BentoCollage extends StatelessWidget {
                 Expanded(
                   child: Row(
                     children: [
-                      Expanded(child: _PhotoPod(asset: _topLeftPhoto)),
+                      Expanded(child: slide.topLeft),
                       const SizedBox(width: BrandSpace.gutterSm),
-                      Expanded(
-                        child: BrandPod(
-                          color: BrandColors.accentPeach,
-                          child: _IllustrationPod(
-                            icon: Icons.directions_car_rounded,
-                            iconColor: BrandColors.tertiary,
-                            label: 'Convoy',
-                            dotColor: BrandColors.primary,
-                          ),
-                        ),
-                      ),
+                      Expanded(child: slide.topRight),
                     ],
                   ),
                 ),
@@ -147,23 +298,9 @@ class _BentoCollage extends StatelessWidget {
                 Expanded(
                   child: Row(
                     children: [
-                      Expanded(
-                        child: BrandPod(
-                          color: BrandColors.accentMint,
-                          child: _IllustrationPod(
-                            icon: Icons.cell_tower_rounded,
-                            iconColor: BrandColors.primary,
-                            label: 'Live Audio',
-                          ),
-                        ),
-                      ),
+                      Expanded(child: slide.bottomLeft),
                       const SizedBox(width: BrandSpace.gutterSm),
-                      Expanded(
-                        child: _PhotoPod(
-                          asset: _bottomRightPhoto,
-                          badge: 'Route 1',
-                        ),
-                      ),
+                      Expanded(child: slide.bottomRight),
                     ],
                   ),
                 ),
@@ -302,7 +439,9 @@ class _PhotoPod extends StatelessWidget {
 }
 
 class _ValueProp extends StatelessWidget {
-  const _ValueProp();
+  const _ValueProp({required this.slide});
+
+  final _WelcomeSlide slide;
 
   @override
   Widget build(BuildContext context) {
@@ -310,13 +449,13 @@ class _ValueProp extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Column(
         children: [
-          const BrandTag(
-            icon: Icons.satellite_alt_rounded,
-            label: 'Real-Time Convoy Navigation',
+          BrandTag(
+            icon: slide.tagIcon,
+            label: slide.tagLabel,
           ),
           const SizedBox(height: 12),
           Text(
-            'Drive Together,\nStay Connected',
+            slide.title,
             textAlign: TextAlign.center,
             style: BrandText.displayLgMobile.copyWith(
               color: BrandColors.textHeadline,
@@ -326,7 +465,7 @@ class _ValueProp extends StatelessWidget {
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 320),
             child: Text(
-              'Live 3D location, convoy voice chat, and shared road-trip pitstops for every adventure.',
+              slide.body,
               textAlign: TextAlign.center,
               style: BrandText.bodyMd.copyWith(color: BrandColors.textBody),
             ),

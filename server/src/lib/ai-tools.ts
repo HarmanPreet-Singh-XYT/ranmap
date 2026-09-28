@@ -1,14 +1,25 @@
-import type Anthropic from "@anthropic-ai/sdk";
 import { isUniqueViolation } from "./errors.js";
 import { notifyUsers } from "./push.js";
 import { supabaseAdmin } from "./supabase.js";
 
-export const aiTools: Anthropic.Tool[] = [
+/**
+ * A Gemini function tool declaration — one entry of the Interactions API
+ * `tools` array (alongside the built-in `{ type: "google_search" }` tool).
+ */
+export interface FunctionTool {
+  type: "function";
+  name: string;
+  description: string;
+  /** JSON Schema for the function's parameters. */
+  parameters: Record<string, unknown>;
+}
+
+const toolDeclarations: Omit<FunctionTool, "type">[] = [
   {
     name: "save_place",
     description:
       "Save a place the user mentions (a destination, stop, or point of interest) to their saved places list for later trip planning.",
-    input_schema: {
+    parameters: {
       type: "object",
       properties: {
         name: { type: "string", description: "Short human-readable name for the place." },
@@ -23,7 +34,7 @@ export const aiTools: Anthropic.Tool[] = [
     name: "schedule_trip",
     description:
       "Schedule an existing trip (one the user already created and is a member of) to auto-start at a future date/time. Requires the trip's exact title to look it up.",
-    input_schema: {
+    parameters: {
       type: "object",
       properties: {
         trip_title: { type: "string", description: "Exact title of the existing trip to schedule." },
@@ -39,7 +50,7 @@ export const aiTools: Anthropic.Tool[] = [
     name: "create_trip",
     description:
       "Create a new trip owned by the user, who is enrolled as its first accepted member. Use when the user asks to plan or start a new trip. Optionally schedule it to auto-start at a future time in the same step.",
-    input_schema: {
+    parameters: {
       type: "object",
       properties: {
         title: { type: "string", description: "Title for the new trip." },
@@ -55,7 +66,7 @@ export const aiTools: Anthropic.Tool[] = [
     name: "invite_friend_to_trip",
     description:
       "Invite a user (by their exact username) to an existing trip the caller is a member of. Use when the user asks to add or invite someone to a trip.",
-    input_schema: {
+    parameters: {
       type: "object",
       properties: {
         trip_title: { type: "string", description: "Exact title of the existing trip." },
@@ -68,7 +79,7 @@ export const aiTools: Anthropic.Tool[] = [
     name: "add_stop",
     description:
       "Add a stop to an existing trip the caller is a member of. A stop needs a name and a location (latitude/longitude).",
-    input_schema: {
+    parameters: {
       type: "object",
       properties: {
         trip_title: { type: "string", description: "Exact title of the existing trip." },
@@ -88,7 +99,7 @@ export const aiTools: Anthropic.Tool[] = [
     name: "propose_stop",
     description:
       "Propose a stop for the convoy to vote on, rather than adding it to the trip directly. The stop only becomes a real stop once a majority of the trip's members approve it. Use this when the user suggests a place to stop but the decision is the group's to make.",
-    input_schema: {
+    parameters: {
       type: "object",
       properties: {
         trip_title: { type: "string", description: "Exact title of the existing trip." },
@@ -104,6 +115,23 @@ export const aiTools: Anthropic.Tool[] = [
     },
   },
 ];
+
+/**
+ * The function tools in the Gemini Interactions `tools` shape, plus the
+ * built-in Google Search grounding tool. Combining the two is a Gemini 3
+ * feature (see the tool-combination docs); it requires `tool_choice:
+ * "validated"` (set in the route) rather than the usual `auto`.
+ */
+export const aiTools: FunctionTool[] = toolDeclarations.map((declaration) => ({
+  type: "function",
+  ...declaration,
+}));
+
+/** Built-in Google Search grounding, as an entry of the Interactions `tools`. */
+export const googleSearchTool = { type: "google_search" } as const;
+
+/** Everything the assistant may use in one interaction. */
+export const assistantTools = [...aiTools, googleSearchTool];
 
 const STOP_KINDS = new Set(["food", "scenery", "fuel", "rest", "custom"]);
 
@@ -183,11 +211,15 @@ export async function runTool(
     const found = await findMyTripByTitle(userId, title);
     if ("error" in found) return JSON.stringify({ error: found.error });
 
-    const { error } = await supabaseAdmin.from("scheduled_trips").insert({
-      trip_id: found.tripId,
-      scheduled_for: scheduledFor,
-      created_by_ai: true,
-    });
+    // One schedule per trip (unique index on scheduled_trips.trip_id): upsert
+    // so asking the assistant to schedule the same trip twice reschedules it
+    // instead of failing on the constraint.
+    const { error } = await supabaseAdmin
+      .from("scheduled_trips")
+      .upsert(
+        { trip_id: found.tripId, scheduled_for: scheduledFor, created_by_ai: true },
+        { onConflict: "trip_id" },
+      );
 
     if (error) return JSON.stringify({ error: "Could not schedule that trip." });
     return JSON.stringify({ ok: true, trip_title: title, scheduled_for: scheduledFor });
@@ -198,6 +230,9 @@ export async function runTool(
     if (!title) return JSON.stringify({ error: "Missing title" });
 
     // Use the atomic RPC so the trip and its creator-membership can't half-apply.
+    // The RPC derives the owner from auth.uid(), which is NULL under the
+    // service-role client, so the actor is passed explicitly (service_role is
+    // the only role allowed to do so — see 0018_service_role_rpc_user.sql).
     const { data: created, error: tripError } = await supabaseAdmin.rpc("create_trip", {
       p_title: title,
       p_group_id: null,
@@ -209,6 +244,7 @@ export async function runTool(
       p_destination_lat: null,
       p_destination_lng: null,
       p_route_polyline: null,
+      p_user: userId,
     });
     if (tripError || !created) {
       return JSON.stringify({ error: "Failed to create the trip." });
@@ -342,13 +378,15 @@ export async function runTool(
     const lng = validLongitude(args.longitude);
 
     // Use the atomic RPC so the proposal row and its membership check apply
-    // together (mirrors create_trip).
+    // together (mirrors create_trip). p_user carries the actor because
+    // auth.uid() is NULL under the service-role client.
     const { data: proposal, error } = await supabaseAdmin.rpc("propose_stop", {
       p_trip: found.tripId,
       p_name: stopName,
       p_note: typeof args.note === "string" ? clamp(args.note, MAX_NOTES_CHARS) : null,
       p_lat: lat,
       p_lng: lng,
+      p_user: userId,
     });
     if (error || !proposal) {
       return JSON.stringify({ error: "Could not propose that stop." });

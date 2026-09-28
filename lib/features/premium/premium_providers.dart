@@ -2,11 +2,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/network/backend_client.dart';
+import '../../data/models/usage_quota.dart';
 import '../../data/providers/repository_providers.dart';
 import '../../data/repositories/premium_repository.dart';
 import 'revenuecat.dart';
 
 export '../../data/repositories/premium_repository.dart' show Entitlements;
+export '../../data/models/usage_quota.dart' show UsageQuota, UsageReport;
 
 /// The current user's plan, read once and cached.
 final entitlementsProvider = FutureProvider<Entitlements>(
@@ -30,6 +32,12 @@ final tripProProvider = FutureProvider.autoDispose.family<bool, String>(
 /// Whether a group is Pro-enabled by any member.
 final groupProProvider = FutureProvider.autoDispose.family<bool, String>(
   (ref, groupId) => ref.watch(premiumRepositoryProvider).groupHasPro(groupId),
+);
+
+/// The caller's metered free allowances, for the quota meter. autoDispose so
+/// re-entering the screen reflects usage consumed since the last visit.
+final usageQuotaProvider = FutureProvider.autoDispose<UsageReport>(
+  (ref) => ref.watch(usageRepositoryProvider).fetch(),
 );
 
 /// True when a caught error is the server's "upgrade required" signal, so the

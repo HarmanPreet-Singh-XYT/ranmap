@@ -3,7 +3,7 @@ import '../models/ai_conversation.dart';
 import '../models/ai_message.dart';
 import '../services/supabase_service.dart';
 
-/// Talks to ranmap-server (see server/), which holds the Anthropic API key
+/// Talks to ranmap-server (see server/), which holds the Gemini API key
 /// and executes AI tool calls (saving places, scheduling trips, creating
 /// trips) with the Supabase secret key. The client never talks to the LLM
 /// directly.

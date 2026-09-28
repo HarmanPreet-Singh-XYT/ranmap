@@ -36,7 +36,8 @@ vision is tracked in "Roadmap" below.
 - **livekit_client** for voice channels (audio over WebRTC via a LiveKit room)
 - **ranmap-server** (`server/`, Node + TypeScript + Express): a small
   backend for anything that needs a secret key server-side — the
-  Anthropic-backed AI trip assistant, Twilio Verify-backed phone OTP, and
+  Gemini-backed AI trip assistant (with Google Search grounding), Twilio
+  Verify-backed phone OTP, and
   minting LiveKit voice-room tokens. The client never holds an LLM, Twilio,
   or LiveKit key; it forwards its Supabase session token to the backend,
   which verifies it and performs privileged operations (writes with the
@@ -96,9 +97,32 @@ server/           # ranmap-server: Node/TS backend for secret-holding operations
    `0008_hardening_followups.sql`, `0009_plans.sql`, `0010_plan_limits.sql`,
    `0011_notifications.sql`, `0012_text_length_limits.sql`,
    `0013_ai_message_tools.sql`, `0014_trip_schedule_autostart.sql`,
-   `0015_stop_proposals.sql`, `0016_trip_legs.sql` and
-   `0017_profile_search.sql` (either paste
-   them into the SQL editor in that order, or `supabase db push`). `0017`
+   `0015_stop_proposals.sql`, `0016_trip_legs.sql`,
+   `0017_profile_search.sql`, `0018_service_role_rpc_user.sql`,
+   `0019_trip_currency.sql`, `0020_usage_status.sql`,
+   `0021_add_usage.sql`, `0022_realtime_trip_locations.sql`,
+   `0023_broadcast_position.sql`, `0024_rate_limit_store.sql` and
+   `0025_usage_rpc_state.sql` (either paste
+   them into the SQL editor in that order, or `supabase db push`). `0025`
+   makes `consume_usage` / `add_usage` return their resulting counter state, so
+   the Redis cache can be refreshed in the same round-trip. `0024`
+   moves rate-limit buckets into Postgres so they're shared across server
+   instances. `0023`
+   adds the `broadcast_position` RPC — the server stamps the sender id, so a
+   client can't forge another member's live position. `0022`
+   adds the Realtime Authorization policies that let only a trip's accepted
+   members receive on the private live-position broadcast channel.
+   `0021`
+   adds `add_usage`, which records a variable number of units (AI tokens are
+   only known after the model responds). `0020`
+   adds the read-only `usage_status` RPC behind `GET /plan/usage`, so the app
+   can show a quota meter before a free limit is hit. `0019`
+   adds `trips.currency` and threads it through `create_trip`, so the ledger
+   and fuel figures have one deliberate currency instead of one arbitrary
+   expense row's. `0018`
+   adds the `p_user` escape hatch to `create_trip`/`propose_stop` so the AI
+   server's service-role client can act for a user (auth.uid() is NULL under
+   that key), and makes `scheduled_trips` one schedule per trip. `0017`
    enables `pg_trgm` and adds the `search_profiles` RPC (typo-tolerant username
    search; the app falls back to a plain substring search if it's absent).
    `0011`
@@ -196,7 +220,7 @@ cp .env.example .env
 
 Fill in `server/.env`:
 
-Supabase and Anthropic are required — the server won't start without them.
+Supabase and Gemini are required — the server won't start without them.
 Everything else is **optional**: leave it unset and the server still runs, with
 only the routes that need it returning `503` (and a startup warning listing
 what's missing). Uncomment + fill in what you have:
@@ -204,9 +228,10 @@ what's missing). Uncomment + fill in what you have:
 ```
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SECRET_KEY=sb_secret_your-key   # Project Settings → API Keys — server-only, never ship this
-ANTHROPIC_API_KEY=your-anthropic-api-key
-# ANTHROPIC_MODEL=claude-sonnet-4-5                 # optional override
+GEMINI_API_KEY=your-gemini-api-key
+# GEMINI_MODEL=gemini-3.1-flash-lite                # optional override
 # --- optional integrations ---
+# REDIS_URL=redis://localhost:6379                  # optional; shares rate limits, allowances & auth caches across instances (falls back to Postgres when unset)
 # GOOGLE_MAPS_API_KEY=your-google-maps-server-key   # Places API (New); per-place details only
 # MAPBOX_ACCESS_TOKEN=sk.your-mapbox-secret-token   # SECRET (sk.), not pk.: mints the app's map token, so needs tokens:write + styles:read/fonts:read/styles:tiles
 # MAPBOX_USERNAME=your-mapbox-username              # account the app's rendering tokens are minted under
@@ -229,9 +254,10 @@ npm run dev
 
 This starts the backend on `http://localhost:8787` (matching `BACKEND_URL`
 above). It verifies the Supabase session token the app forwards, then: for
-the AI assistant, calls Claude with tools for saving places, creating
-trips, and scheduling them, executing those tool calls with the
-secret key; for phone verification, calls Twilio Verify to send/check
+the AI assistant, calls Gemini (with Google Search grounding) and our tools
+for saving places, creating trips, scheduling them, inviting friends, and
+adding/proposing stops, executing those tool calls with the secret key;
+for phone verification, calls Twilio Verify to send/check
 a code and, on success, writes `phone_number`/`phone_verified` to the
 caller's own profile with the secret key; for voice, checks the
 caller is actually a trip participant / group member (via the same SQL
@@ -246,10 +272,35 @@ using the secret key; clients can read their own plan via the `my_plan()` RPC
 but have no UPDATE grant on it.
 
 - **Gated, per user**: the AI assistant (`/ai/*`) and a daily cap on route &
-  place search (`/maps/*`). Free accounts get a metered allowance first
-  (`requireProOrTrial`), so the feature is discoverable before it's paywalled.
-  The meter lives in Postgres (`consume_usage`), so it's shared across server
-  instances.
+  place search (`/maps/*`). Free accounts get a metered allowance first, so the
+  feature is discoverable before it's paywalled. The meter lives in Postgres
+  (`consume_usage` / `usage_status` / `add_usage`), so it's shared across server
+  instances. Two shapes: **search** counts requests (`requireProOrTrial`
+  consumes one up front); the **AI assistant** is metered in **tokens** — the
+  cost is only known after the model responds, so `requireWithinAllowance`
+  checks the cap up front and the route records the real spend with
+  `add_usage` afterwards. `GET /plan/usage` reports both, and the app renders a
+  **free-plan usage meter** on the Profile tab.
+- **Shared state, not per-process**: rate-limit buckets, the metered
+  allowances, and the plan/membership lookups are served from **Redis** when
+  `REDIS_URL` is set, so several `ranmap-server` instances don't multiply a
+  limit or hammer Postgres on every request. Each falls back to Postgres
+  (correct, just slower) when Redis is absent or erroring:
+  - *Rate limits* — Redis `INCR` + TTL, else `consume_rate_limit` (0024), else
+    the in-memory store (single instance/tests). Fail **open** if every store
+    fails, logged loudly.
+  - *Allowances* — Postgres stays the **source of truth**
+    (`consume_usage` / `usage_status` / `add_usage`); Redis is a
+    **read-through cache** in front of it, refreshed on a miss and after every
+    write. A flush or eviction costs one extra Postgres read — it can never hand
+    back a fresh allowance, because the durable counter is never bypassed. (The
+    writes stay in Postgres deliberately: billing-adjacent data, low volume, and
+    a durable counter is worth one round-trip.)
+  - *Plan & membership* — cached booleans with a short TTL (60s) in front of
+    `is_pro` / `trip_has_pro` / `group_has_pro` / `is_trip_participant` /
+    `is_group_member`; the billing webhook invalidates the caller's own plan
+    entry so a purchase takes effect immediately rather than waiting out the
+    TTL.
 - **Gated, travel together**: voice channels (`/voice/token`) are unlocked when
   **any** member of the trip/group is Pro, not just the caller — one subscriber
   covers the whole crew (`trip_has_pro` / `group_has_pro`).
@@ -356,11 +407,16 @@ picks it up automatically (and both files are gitignored).
   food/fuel/lodging/sights around your current position and drops a marker on
   the one you pick. Tapping a result fetches its rating, review count, and
   opening hours.
-- **Live sync**: while a trip is active, your own GPS position streams to
-  `location_pings` (`locationBroadcastProvider`), and every other member's
-  latest position renders as a live 3D vehicle model on the map via the
-  `trip_member_locations` RPC refreshed on Supabase Realtime
-  (`tripMemberLocationsProvider`). Tracking continues while the app is
+- **Live sync**: while a trip is active, your GPS fixes are published to a
+  **private, per-trip Realtime broadcast channel** (`tripLiveSyncProvider`),
+  and every teammate's position renders as a live 3D vehicle model on the map
+  as it arrives — with no database write per fix. Publishing goes through the
+  `broadcast_position` RPC, so the **server stamps the sender id** (a client
+  can't forge another member's position). The `trip_member_locations` RPC is
+  still fetched on every (re)subscribe as the authoritative cold-start/reconcile
+  path, so a missed broadcast (offline, reconnect) heals on the next snapshot.
+  A much coarser `location_pings` trail (≈ every 45s) is persisted for
+  stats/history, cutting rows ~50–100×. Tracking continues while the app is
   backgrounded (Android foreground service / iOS background location).
 - **Navigate to friend**: tapping the status card lists the live teammates;
   choosing one shows distance + compass direction and can hand off to the
@@ -425,7 +481,9 @@ picks it up automatically (and both files are gitignored).
 - **AI trip assistant**: a chat tab (Chat & Voice → AI Assistant) backed by
   `ranmap-server`, with a conversation list screen (`AiConversationsScreen`)
   to browse, resume, or delete past conversations, or start a new one.
-  Messages are stored in `ai_conversations`/`ai_messages`; the assistant can
+  It runs on **Gemini 3.1 Flash-Lite** via the Interactions API with **Google
+  Search grounding** (so it can answer current-information questions) plus our
+  function tools. Messages are stored in `ai_conversations`/`ai_messages`; the assistant can
   call five tools — `save_place` (writes to `ai_saved_places`),
   `create_trip` (creates a trip and enrolls the user as its first accepted
   member, optionally scheduling it in the same step), `schedule_trip`

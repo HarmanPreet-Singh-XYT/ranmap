@@ -14,6 +14,7 @@ import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/geo_distance.dart';
 import '../../core/util/units.dart';
+import '../../core/util/validation.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/avatar_view.dart';
@@ -37,6 +38,7 @@ import '../../data/services/supabase_service.dart';
 import '../map/live_sync_providers.dart';
 import '../map/map_engine/geo.dart';
 import '../map/trip_photos_screen.dart';
+import '../social/group_detail_screen.dart';
 import '../social/social_providers.dart';
 import 'add_expense_screen.dart';
 import 'add_stop_screen.dart';
@@ -55,10 +57,7 @@ class TripDetailScreen extends ConsumerWidget {
       ref.invalidate(myTripsProvider);
       ref.invalidate(activeTripProvider);
       if (!context.mounted) return;
-      showAppToast(
-        context,
-        'Trip started — your crew can follow you live.',
-      );
+      showAppToast(context, 'Trip started — your crew can follow you live.');
       Navigator.of(context).maybePop();
     } catch (e) {
       if (context.mounted) showAppToast(context, friendlyError(e), error: true);
@@ -231,6 +230,7 @@ class TripDetailScreen extends ConsumerWidget {
                   child: _StatsTab(
                     tripId: trip.id,
                     routePolyline: trip.routePolyline,
+                    currency: trip.currency,
                   ),
                 ),
                 FTabEntry(
@@ -246,11 +246,12 @@ class TripDetailScreen extends ConsumerWidget {
                     tripId: trip.id,
                     createdBy: trip.createdBy,
                     tripTitle: trip.title,
+                    groupId: trip.groupId,
                   ),
                 ),
                 FTabEntry(
                   label: const Text('Expenses'),
-                  child: _ExpensesTab(tripId: trip.id),
+                  child: _ExpensesTab(tripId: trip.id, currency: trip.currency),
                 ),
               ],
             ),
@@ -289,16 +290,28 @@ class _HeaderIconButton extends StatelessWidget {
 }
 
 class _StatsTab extends ConsumerWidget {
-  const _StatsTab({required this.tripId, this.routePolyline});
+  const _StatsTab({
+    required this.tripId,
+    required this.currency,
+    this.routePolyline,
+  });
 
   final String tripId;
+
+  /// ISO 4217 code the trip's expenses are denominated in — the fuel figures
+  /// below label themselves with this rather than a hard-coded `$`.
+  final String currency;
   final String? routePolyline;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
+    final symbol = ledgerSymbol(currency);
     final statsAsync = ref.watch(tripStatsProvider(tripId));
     final expensesAsync = ref.watch(tripExpensesProvider(tripId));
+    final speeds =
+        ref.watch(tripSpeedProfileProvider(tripId)).valueOrNull ??
+        const <double>[];
 
     return RefreshIndicator(
       onRefresh: () async {
@@ -323,7 +336,7 @@ class _StatsTab extends ConsumerWidget {
           final expenses = expensesAsync.valueOrNull;
           final fuelSummary = expenses == null
               ? null
-              : _fuelSummary(expenses, s, unit);
+              : _fuelSummary(expenses, s, unit, currency);
 
           return ListView(
             padding: const EdgeInsets.only(
@@ -358,11 +371,15 @@ class _StatsTab extends ConsumerWidget {
                   ),
                 ],
               ),
+              if (speeds.length >= 2) ...[
+                const SizedBox(height: BrandSpace.gutterSm),
+                _SpeedProfileCard(speeds: speeds, unit: unit),
+              ],
               if (fuelAvg != null) ...[
                 const SizedBox(height: BrandSpace.gutterSm),
                 _StatTile(
                   label: 'Avg fuel cost',
-                  value: '\$${fuelAvg.toStringAsFixed(2)}',
+                  value: '$symbol${fuelAvg.toStringAsFixed(2)}',
                   wide: true,
                 ),
               ],
@@ -371,7 +388,7 @@ class _StatsTab extends ConsumerWidget {
                 _StatTile(
                   label: 'Fuel cost / ${distanceUnitSymbol(unit)}',
                   value:
-                      '\$${costPerDistance(fuelCostPerKm, unit).toStringAsFixed(2)}',
+                      '$symbol${costPerDistance(fuelCostPerKm, unit).toStringAsFixed(2)}',
                   wide: true,
                 ),
               ],
@@ -379,7 +396,7 @@ class _StatsTab extends ConsumerWidget {
                 const SizedBox(height: BrandSpace.gutterSm),
                 _StatTile(
                   label: 'Est. fuel for route',
-                  value: '\$${projectedFuel.toStringAsFixed(2)}',
+                  value: '$symbol${projectedFuel.toStringAsFixed(2)}',
                   wide: true,
                 ),
               ],
@@ -451,6 +468,7 @@ class _StatsTab extends ConsumerWidget {
     List<TripExpense> expenses,
     TripStats stats,
     DistanceUnit unit,
+    String currency,
   ) {
     final fuel = expenses.where((e) => e.category == 'fuel').toList();
     if (fuel.isEmpty) return null;
@@ -492,8 +510,7 @@ class _StatsTab extends ConsumerWidget {
       if (spend > 0)
         BrandStatTile(
           label: 'Fuel cost',
-          value:
-              '${ledgerSymbol(fuel.first.currency)}${spend.toStringAsFixed(2)}',
+          value: '${ledgerSymbol(currency)}${spend.toStringAsFixed(2)}',
           icon: Icons.payments_outlined,
         ),
       if (efficiencyValue != null)
@@ -603,6 +620,34 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
   /// Locally-reordered copy shown while a drag (and its save) is in flight,
   /// so the list doesn't snap back before the server round-trip completes.
   List<TripStop>? _optimisticOrder;
+
+  /// Proposes a stop for the convoy to vote on, rather than adding it to the
+  /// itinerary outright. Open to any participant (the RPC checks membership).
+  Future<void> _proposeStop() async {
+    final name = await showAppTextDialog(
+      context,
+      title: 'Propose a stop',
+      label: 'Stop name',
+      hint: 'Fuel + coffee',
+      confirmLabel: 'Propose',
+      maxLength: kNameMaxLength,
+    );
+    if (name == null) return;
+    final validationError = nameError(name, label: 'Stop name');
+    if (validationError != null) {
+      if (mounted) showAppToast(context, validationError, error: true);
+      return;
+    }
+    try {
+      await ref
+          .read(tripRepositoryProvider)
+          .proposeStop(tripId: widget.tripId, name: name);
+      ref.invalidate(tripProposalsProvider(widget.tripId));
+      if (mounted) showAppToast(context, 'Proposed — the crew will vote.');
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
 
   Future<void> _onReorder(
     List<TripStop> stops,
@@ -906,21 +951,37 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
         Positioned(
           right: BrandSpace.md,
           bottom: BrandSpace.md,
-          child: BrandPrimaryButton(
-            label: 'Add stop',
-            leadingIcon: Icons.add_location_alt_rounded,
-            trailingIcon: null,
-            expand: false,
-            onPressed: () async {
-              await Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => AddStopScreen(
-                    tripId: widget.tripId,
-                    originPoint: widget.originPoint,
-                  ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              BrandSecondaryButton(
+                label: 'Propose',
+                trailing: Icon(
+                  Icons.how_to_vote_outlined,
+                  size: 18,
+                  color: BrandColors.textHeadlineAlt,
                 ),
-              );
-            },
+                expand: false,
+                onPressed: _proposeStop,
+              ),
+              const SizedBox(width: BrandSpace.sm),
+              BrandPrimaryButton(
+                label: 'Add stop',
+                leadingIcon: Icons.add_location_alt_rounded,
+                trailingIcon: null,
+                expand: false,
+                onPressed: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => AddStopScreen(
+                        tripId: widget.tripId,
+                        originPoint: widget.originPoint,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
           ),
         ),
       ],
@@ -1250,11 +1311,16 @@ class _CrewTab extends ConsumerWidget {
     required this.tripId,
     required this.createdBy,
     required this.tripTitle,
+    this.groupId,
   });
 
   final String tripId;
   final String createdBy;
   final String tripTitle;
+
+  /// The group this trip belongs to, when it was planned for one. Null for a
+  /// standalone trip.
+  final String? groupId;
 
   Future<void> _shareInvite(BuildContext context, WidgetRef ref) async {
     final handle = ref.read(myProfileProvider).valueOrNull?.username;
@@ -1293,10 +1359,8 @@ class _CrewTab extends ConsumerWidget {
     return showFSheet<void>(
       context: context,
       side: FLayout.btt,
-      builder: (_) => _AddMemberSheet(
-        tripId: tripId,
-        existingUsernames: existing,
-      ),
+      builder: (_) =>
+          _AddMemberSheet(tripId: tripId, existingUsernames: existing),
     );
   }
 
@@ -1340,11 +1404,12 @@ class _CrewTab extends ConsumerWidget {
         membersAsync.when(
           data: (fetched) {
             // Accepted members first; pending invites trail.
-            final sorted = [...fetched]..sort((a, b) {
-              final aAccepted = a['invite_status'] == 'accepted' ? 0 : 1;
-              final bAccepted = b['invite_status'] == 'accepted' ? 0 : 1;
-              return aAccepted.compareTo(bAccepted);
-            });
+            final sorted = [...fetched]
+              ..sort((a, b) {
+                final aAccepted = a['invite_status'] == 'accepted' ? 0 : 1;
+                final bAccepted = b['invite_status'] == 'accepted' ? 0 : 1;
+                return aAccepted.compareTo(bAccepted);
+              });
             return RefreshIndicator(
               onRefresh: () async =>
                   ref.invalidate(tripMembersProvider(tripId)),
@@ -1365,6 +1430,10 @@ class _CrewTab extends ConsumerWidget {
                       onTap: () => _shareInvite(context, ref),
                     ),
                   ),
+                  if (groupId != null) ...[
+                    const SizedBox(height: BrandSpace.md),
+                    _TripGroupCard(groupId: groupId!),
+                  ],
                   const SizedBox(height: BrandSpace.md),
                   if (sorted.isEmpty)
                     const BrandEmptyState(
@@ -1394,8 +1463,8 @@ class _CrewTab extends ConsumerWidget {
                               // Never offer to remove the organizer: dropping
                               // the creator's own membership would orphan the
                               // trip.
-                              onRemove: isCreator &&
-                                      member['user_id'] != createdBy
+                              onRemove:
+                                  isCreator && member['user_id'] != createdBy
                                   ? () => _removeMember(context, ref, member)
                                   : null,
                             ),
@@ -1413,18 +1482,48 @@ class _CrewTab extends ConsumerWidget {
             onRetry: () => ref.invalidate(tripMembersProvider(tripId)),
           ),
         ),
-        Positioned(
-          right: BrandSpace.md,
-          bottom: BrandSpace.md,
-          child: BrandPrimaryButton(
-            label: 'Add member',
-            leadingIcon: Icons.person_add_alt_1_rounded,
-            trailingIcon: null,
-            expand: false,
-            onPressed: () => _addMember(context, members),
+        // Only the trip's creator may add members (RLS enforces it too).
+        if (isCreator)
+          Positioned(
+            right: BrandSpace.md,
+            bottom: BrandSpace.md,
+            child: BrandPrimaryButton(
+              label: 'Add member',
+              leadingIcon: Icons.person_add_alt_1_rounded,
+              trailingIcon: null,
+              expand: false,
+              onPressed: () => _addMember(context, members),
+            ),
           ),
-        ),
       ],
+    );
+  }
+}
+
+/// Links a trip back to the group it was planned for (when it has one).
+class _TripGroupCard extends ConsumerWidget {
+  const _TripGroupCard({required this.groupId});
+
+  final String groupId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final group = ref.watch(groupProvider(groupId)).valueOrNull;
+    if (group == null) return const SizedBox.shrink();
+    return BrandCard(
+      padding: const EdgeInsets.symmetric(
+        horizontal: BrandSpace.md,
+        vertical: BrandSpace.xs,
+      ),
+      child: BrandListRow(
+        icon: Icons.groups_rounded,
+        iconColor: BrandColors.primary,
+        title: group.name,
+        subtitle: 'Group this trip belongs to',
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => GroupDetailScreen(group: group)),
+        ),
+      ),
     );
   }
 }
@@ -1637,16 +1736,16 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
                         as Map<String, dynamic>?;
                   })
                   .whereType<Map<String, dynamic>>()
-                  .where(
-                    (p) => !_isOnTrip(p['username'] as String? ?? ''),
-                  )
+                  .where((p) => !_isOnTrip(p['username'] as String? ?? ''))
                   .toList();
 
               if (friends.isEmpty) {
                 return Text(
                   'No more friends to add here — share an invite for anyone '
                   'else.',
-                  style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
+                  style: BrandText.bodySm.copyWith(
+                    color: BrandColors.textMuted,
+                  ),
                 );
               }
               return Column(
@@ -1702,9 +1801,10 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
 }
 
 class _ExpensesTab extends ConsumerWidget {
-  const _ExpensesTab({required this.tripId});
+  const _ExpensesTab({required this.tripId, required this.currency});
 
   final String tripId;
+  final String currency;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1740,6 +1840,7 @@ class _ExpensesTab extends ConsumerWidget {
                   expenses: expenses,
                   total: total,
                   byCategory: byCategory,
+                  currency: currency,
                 ),
                 const SizedBox(height: BrandSpace.md),
                 ...expenses.map(
@@ -1759,7 +1860,7 @@ class _ExpensesTab extends ConsumerWidget {
                       }
                     },
                     background: _dismissBackground(),
-                    child: _ExpenseCard(expense: e),
+                    child: _ExpenseCard(expense: e, currency: currency),
                   ),
                 ),
               ],
@@ -1782,7 +1883,8 @@ class _ExpensesTab extends ConsumerWidget {
             onPressed: () async {
               await Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => AddExpenseScreen(tripId: tripId),
+                  builder: (_) =>
+                      AddExpenseScreen(tripId: tripId, currency: currency),
                 ),
               );
             },
@@ -1801,6 +1903,7 @@ class _LedgerSummary extends ConsumerWidget {
     required this.expenses,
     required this.total,
     required this.byCategory,
+    required this.currency,
   });
 
   final String tripId;
@@ -1808,13 +1911,23 @@ class _LedgerSummary extends ConsumerWidget {
   final double total;
   final Map<String, double> byCategory;
 
+  /// The trip's currency — a deliberate single source rather than one
+  /// arbitrary expense row's [TripExpense.currency].
+  final String currency;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final symbol = ledgerSymbol(expenses.first.currency);
+    final symbol = ledgerSymbol(currency);
 
+    // Only accepted members share costs: someone merely invited (who may never
+    // join) must not appear as a payer, or every balance and settlement step
+    // would be wrong. Members who logged an expense are still included below
+    // via `expenses`, so a payer who later left the trip isn't dropped.
     final members =
-        ref.watch(tripMembersProvider(tripId)).valueOrNull ??
-        const <Map<String, dynamic>>[];
+        (ref.watch(tripMembersProvider(tripId)).valueOrNull ??
+                const <Map<String, dynamic>>[])
+            .where((m) => m['invite_status'] == 'accepted')
+            .toList();
     final nameById = <String, String>{
       for (final m in members)
         (m['user_id'] as String):
@@ -1833,6 +1946,12 @@ class _LedgerSummary extends ConsumerWidget {
     );
     final transfers = settleLedger(balances);
     String name(String id) => nameById[id] ?? 'member';
+    // Scale for the per-member diverging bars, so the biggest swing fills its
+    // half and everyone else is read against it.
+    final maxAbs = balances.values.fold<double>(
+      0,
+      (m, v) => v.abs() > m ? v.abs() : m,
+    );
 
     return BrandCard(
       padding: const EdgeInsets.all(BrandSpace.md),
@@ -1867,19 +1986,36 @@ class _LedgerSummary extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: BrandSpace.sm),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              for (final e in byCategory.entries)
-                BrandPill(
-                  label:
-                      '${ledgerCategoryLabel(e.key)} $symbol${e.value.toStringAsFixed(0)}',
-                  background: BrandColors.surfaceContainerLow,
-                  foreground: BrandColors.onSurfaceVariant,
-                ),
-            ],
-          ),
+          if (byCategory.isNotEmpty) ...[
+            const SizedBox(height: BrandSpace.xs),
+            Text(
+              'By category',
+              style: BrandText.labelSm.copyWith(color: BrandColors.textMuted),
+            ),
+            const SizedBox(height: BrandSpace.sm),
+            // Largest category first, each bar scaled against it so the split
+            // reads at a glance rather than as a row of equally-weighted pills.
+            Builder(
+              builder: (context) {
+                final sorted = byCategory.entries.toList()
+                  ..sort((a, b) => b.value.compareTo(a.value));
+                final maxCat = sorted.first.value;
+                return Column(
+                  children: [
+                    for (final (i, e) in sorted.indexed) ...[
+                      if (i > 0) const SizedBox(height: BrandSpace.sm),
+                      BrandBreakdownRow(
+                        label: ledgerCategoryLabel(e.key),
+                        fraction: maxCat <= 0 ? 0 : e.value / maxCat,
+                        valueLabel: '$symbol${e.value.toStringAsFixed(2)}',
+                        color: _ledgerCategoryColor(e.key),
+                      ),
+                    ],
+                  ],
+                );
+              },
+            ),
+          ],
           const SizedBox(height: BrandSpace.md),
           Divider(height: 1, color: BrandColors.hairline),
           const SizedBox(height: BrandSpace.md),
@@ -1890,29 +2026,37 @@ class _LedgerSummary extends ConsumerWidget {
           const SizedBox(height: BrandSpace.sm),
           for (final id in ids)
             Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Text(
-                      '@${name(id)}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: BrandText.bodySm.copyWith(
-                        color: BrandColors.textHeadline,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '@${name(id)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: BrandText.bodySm.copyWith(
+                            color: BrandColors.textHeadline,
+                          ),
+                        ),
                       ),
-                    ),
+                      Text(
+                        balances[id]! >= 0
+                            ? 'gets back $symbol${balances[id]!.toStringAsFixed(2)}'
+                            : 'owes $symbol${(-balances[id]!).toStringAsFixed(2)}',
+                        style: BrandText.labelSm.copyWith(
+                          color: balances[id]! >= 0
+                              ? BrandColors.primary
+                              : BrandColors.error,
+                        ),
+                      ),
+                    ],
                   ),
-                  Text(
-                    balances[id]! >= 0
-                        ? 'gets back $symbol${balances[id]!.toStringAsFixed(2)}'
-                        : 'owes $symbol${(-balances[id]!).toStringAsFixed(2)}',
-                    style: BrandText.labelSm.copyWith(
-                      color: balances[id]! >= 0
-                          ? BrandColors.primary
-                          : BrandColors.error,
-                    ),
-                  ),
+                  const SizedBox(height: 4),
+                  // Owed extends left, credited right, centred on zero.
+                  BrandDivergingBar(value: balances[id]!, maxAbs: maxAbs),
                 ],
               ),
             ),
@@ -1963,9 +2107,12 @@ class _LedgerSummary extends ConsumerWidget {
 }
 
 class _ExpenseCard extends StatelessWidget {
-  const _ExpenseCard({required this.expense});
+  const _ExpenseCard({required this.expense, required this.currency});
 
   final TripExpense expense;
+
+  /// The trip's currency, so the row labels itself with the right symbol.
+  final String currency;
 
   @override
   Widget build(BuildContext context) {
@@ -1998,7 +2145,7 @@ class _ExpenseCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '\$${expense.amount.toStringAsFixed(2)} · ${expense.category}',
+                    '${ledgerSymbol(currency)}${expense.amount.toStringAsFixed(2)} · ${expense.category}',
                     style: BrandText.weight(
                       BrandText.titleSm,
                       700,
@@ -2016,6 +2163,59 @@ class _ExpenseCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// A speed-over-time profile for the current user's trip pings: an area
+/// sparkline of the recorded samples with max and average captions in the
+/// user's unit. Built only when there are at least two samples.
+class _SpeedProfileCard extends StatelessWidget {
+  const _SpeedProfileCard({required this.speeds, required this.unit});
+
+  /// Recorded speeds in km/h, in time order.
+  final List<double> speeds;
+  final DistanceUnit unit;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxKmh = speeds.reduce((a, b) => a > b ? a : b);
+    final avgKmh = speeds.reduce((a, b) => a + b) / speeds.length;
+    return BrandCard(
+      padding: const EdgeInsets.all(BrandSpace.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const BrandSectionHeader(
+            icon: Icons.speed_rounded,
+            title: 'Speed profile',
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Max ${formatSpeed(maxKmh, unit)}',
+                  style: BrandText.labelSm.copyWith(
+                    color: BrandColors.textHeadline,
+                  ),
+                ),
+              ),
+              Text(
+                'Avg ${formatSpeed(avgKmh, unit)}',
+                style: BrandText.labelSm.copyWith(color: BrandColors.textMuted),
+              ),
+            ],
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          BrandSparkline(values: speeds, width: double.infinity, height: 72),
+          const SizedBox(height: BrandSpace.xs),
+          Text(
+            'Speed across the trip, from your recorded pings.',
+            style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
+          ),
+        ],
       ),
     );
   }
@@ -2040,3 +2240,13 @@ Widget _dismissBackground() {
     child: const Icon(Icons.delete_outline, color: Colors.white),
   );
 }
+
+/// A brand colour per expense category, so the ledger's breakdown bars read
+/// apart without needing a legend.
+Color _ledgerCategoryColor(String category) => switch (category) {
+  'fuel' => BrandColors.primary,
+  'food' => BrandColors.accentPeach,
+  'toll' => BrandColors.accentMint,
+  'lodging' => BrandColors.primaryContainer,
+  _ => BrandColors.textMuted,
+};

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { asyncHandler } from "../lib/async-handler.js";
 import { env } from "../lib/env.js";
 import { fail } from "../lib/errors.js";
+import { invalidatePlanCache } from "../lib/plan-store.js";
 import {
   extractUserId,
   isAuthorizedWebhook,
@@ -78,6 +79,10 @@ billingRouter.post(
       fail(res, error, 500, "Could not sync the subscription.", "billing: update plan");
       return;
     }
+
+    // Drop the cached plan so the change takes effect immediately instead of
+    // waiting out its TTL (see plan-store.ts).
+    await invalidatePlanCache(userId);
 
     res.json({ ok: true, plan: active ? "pro" : "free" });
   }),

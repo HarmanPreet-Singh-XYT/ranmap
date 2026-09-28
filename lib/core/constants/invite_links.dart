@@ -63,3 +63,33 @@ String? inviteUsernameFromUri(Uri uri) {
   if (segments.isNotEmpty) return segments.first;
   return null;
 }
+
+/// The link to share for a group's invite [code]. Prefers the production web
+/// link once the domain is live, and otherwise falls back to the custom-scheme
+/// link (which opens the app directly).
+String groupJoinLinkFor(String code) => kInviteHostConfigured
+    ? 'https://$kInviteHost/join/$code'
+    : groupJoinSchemeLinkFor(code);
+
+/// The custom-scheme group link for [code].
+String groupJoinSchemeLinkFor(String code) => '$kInviteScheme://join/$code';
+
+/// The group invite code carried by an incoming link [uri], or null when the
+/// URI isn't a Ranmap group invite. Accepts both the web
+/// (`https://<host>/join/<code>`) and custom-scheme
+/// (`com.ranmap.app://join/<code>`) forms.
+String? groupJoinCodeFromUri(Uri uri) {
+  final isWebJoin = uri.scheme == 'https' && uri.host == kInviteHost;
+  final isSchemeJoin = uri.scheme == kInviteScheme && uri.host == 'join';
+  if (!isWebJoin && !isSchemeJoin) return null;
+
+  if (isWebJoin) {
+    final segments = uri.pathSegments;
+    if (segments.length >= 2 && segments.first == 'join') return segments[1];
+    return null;
+  }
+
+  final segments = uri.pathSegments;
+  if (segments.isNotEmpty) return segments.first;
+  return null;
+}

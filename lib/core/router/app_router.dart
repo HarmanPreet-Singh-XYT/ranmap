@@ -8,6 +8,7 @@ import '../../features/home/home_shell.dart';
 import '../../features/onboarding/onboarding_screen.dart';
 import '../../features/onboarding/phone_verification_screen.dart';
 import '../../features/premium/paywall_screen.dart';
+import '../../features/social/group_join_screen.dart';
 import '../../features/social/invite_landing_screen.dart';
 import '../../features/splash/splash_screen.dart';
 import '../../features/tour/tour_screen.dart';
@@ -44,6 +45,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       // auth-still-loading) state, so the recipient can see who invited them
       // before signing up.
       final inviteRoute = loc.startsWith('/invite/');
+      // A group join link, with the same "survive auth" requirement.
+      final joinRoute = loc.startsWith('/join/');
 
       // Until the session is known, hold on the splash instead of treating
       // "loading" as "signed out" — which would flash the tour/welcome at a
@@ -51,7 +54,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       // invite stays put rather than bouncing through the splash (which would
       // lose it).
       if (authAsync.isLoading) {
-        return (splashRoute || inviteRoute) ? null : '/splash';
+        return (splashRoute || inviteRoute || joinRoute) ? null : '/splash';
       }
 
       final signedIn = authAsync.valueOrNull?.session != null;
@@ -61,7 +64,11 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         // forward/back navigation between them (landing → welcome → auth) is
         // never bounced. From the splash, land on the correct intro step.
         if (splashRoute) return prefs.introV1Seen ? '/welcome' : '/tour';
-        if (tourRoute || welcomeRoute || loggingInRoute || inviteRoute) {
+        if (tourRoute ||
+            welcomeRoute ||
+            loggingInRoute ||
+            inviteRoute ||
+            joinRoute) {
           return null;
         }
 
@@ -83,7 +90,11 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       // never leave a signed-in user stranded on the splash or a pre-auth
       // screen; send them to the home shell, which surfaces its own errors.
       if (profileAsync.hasError) {
-        if (splashRoute || onboardingRoute || loggingInRoute || welcomeRoute || tourRoute) {
+        if (splashRoute ||
+            onboardingRoute ||
+            loggingInRoute ||
+            welcomeRoute ||
+            tourRoute) {
           return '/';
         }
         return null;
@@ -110,7 +121,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(path: '/', builder: (context, state) => const HomeShell()),
-      GoRoute(path: '/splash', builder: (context, state) => const SplashScreen()),
+      GoRoute(
+        path: '/splash',
+        builder: (context, state) => const SplashScreen(),
+      ),
       GoRoute(path: '/tour', builder: (context, state) => const TourScreen()),
       GoRoute(
         path: '/welcome',
@@ -145,6 +159,13 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => InviteLandingScreen(
           username: state.pathParameters['username'] ?? '',
         ),
+      ),
+      // Opened by a group invite link (`https://<host>/join/<code>` or
+      // `com.ranmap.app://join/<code>`). Reachable signed in or out.
+      GoRoute(
+        path: '/join/:code',
+        builder: (context, state) =>
+            GroupJoinScreen(code: state.pathParameters['code'] ?? ''),
       ),
     ],
   );

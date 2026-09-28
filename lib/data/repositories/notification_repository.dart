@@ -8,27 +8,33 @@ class NotificationPreferences {
     this.tripInvites = true,
     this.chatMessages = true,
     this.tripUpdates = true,
+    this.groupInvites = true,
   });
 
   final bool tripInvites;
   final bool chatMessages;
   final bool tripUpdates;
+  final bool groupInvites;
 
-  factory NotificationPreferences.fromRow(Map<String, dynamic> row) => NotificationPreferences(
+  factory NotificationPreferences.fromRow(Map<String, dynamic> row) =>
+      NotificationPreferences(
         tripInvites: row['trip_invites'] as bool? ?? true,
         chatMessages: row['chat_messages'] as bool? ?? true,
         tripUpdates: row['trip_updates'] as bool? ?? true,
+        groupInvites: row['group_invites'] as bool? ?? true,
       );
 
   NotificationPreferences copyWith({
     bool? tripInvites,
     bool? chatMessages,
     bool? tripUpdates,
+    bool? groupInvites,
   }) => NotificationPreferences(
-        tripInvites: tripInvites ?? this.tripInvites,
-        chatMessages: chatMessages ?? this.chatMessages,
-        tripUpdates: tripUpdates ?? this.tripUpdates,
-      );
+    tripInvites: tripInvites ?? this.tripInvites,
+    chatMessages: chatMessages ?? this.chatMessages,
+    tripUpdates: tripUpdates ?? this.tripUpdates,
+    groupInvites: groupInvites ?? this.groupInvites,
+  );
 }
 
 /// Reads and writes the owner's `notification_prefs` row. RLS scopes both to
@@ -43,7 +49,9 @@ class NotificationRepository {
         .select()
         .eq('user_id', uid)
         .maybeSingle();
-    return row == null ? const NotificationPreferences() : NotificationPreferences.fromRow(row);
+    return row == null
+        ? const NotificationPreferences()
+        : NotificationPreferences.fromRow(row);
   }
 
   Future<void> save(NotificationPreferences prefs) async {
@@ -53,6 +61,7 @@ class NotificationRepository {
       'trip_invites': prefs.tripInvites,
       'chat_messages': prefs.chatMessages,
       'trip_updates': prefs.tripUpdates,
+      'group_invites': prefs.groupInvites,
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     });
   }

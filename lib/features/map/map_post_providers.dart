@@ -12,6 +12,12 @@ final tripMapPostsProvider = FutureProvider.autoDispose
       return ref.watch(mapPostRepositoryProvider).postsForTrip(tripId);
     });
 
+/// Photos shared with a group (via "Share to a group"), for the crew gallery.
+final groupSharedPostsProvider = FutureProvider.autoDispose
+    .family<List<MapPost>, String>((ref, groupId) {
+      return ref.watch(mapPostRepositoryProvider).postsSharedWithGroup(groupId);
+    });
+
 final mapPostSignedUrlProvider = FutureProvider.autoDispose
     .family<String, String>((ref, storagePath) {
       return ref.watch(mapPostRepositoryProvider).signedUrl(storagePath);

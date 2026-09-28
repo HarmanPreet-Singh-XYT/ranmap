@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../../core/providers/settings_provider.dart';
 import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/units.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_data.dart';
 import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/error_retry.dart';
@@ -22,6 +25,14 @@ class TripHistoryScreen extends ConsumerWidget {
     final h = d.inHours;
     final m = d.inMinutes.remainder(60);
     return h > 0 ? '${h}h ${m}m' : '${m}m';
+  }
+
+  /// A short month/day label for a chart bar, or '' when the timestamp is
+  /// missing or unparseable.
+  String _chartLabel(String? iso) {
+    if (iso == null) return '';
+    final parsed = DateTime.tryParse(iso);
+    return parsed == null ? '' : DateFormat.Md().format(parsed);
   }
 
   BrandListRow _historyTile(Map<String, dynamic> stats, DistanceUnit unit) {
@@ -111,6 +122,23 @@ class TripHistoryScreen extends ConsumerWidget {
             (sum, r) => sum + ((r['duration_seconds'] as num?)?.toInt() ?? 0),
           );
 
+          // Distance per trip, oldest→newest and capped so the chart stays
+          // legible. `rows` is newest-first (updated_at desc), so reverse it.
+          final chronological = rows.reversed.toList();
+          final charted = chronological.length > 8
+              ? chronological.sublist(chronological.length - 8)
+              : chronological;
+          final distanceBars = <({String label, double value})>[
+            for (final r in charted)
+              (
+                label: _chartLabel(r['updated_at'] as String?),
+                value: distanceInUnit(
+                  (r['total_distance_km'] as num?)?.toDouble() ?? 0,
+                  unit,
+                ),
+              ),
+          ];
+
           return ListView(
             padding: const EdgeInsets.only(
               top: BrandSpace.md,
@@ -147,6 +175,30 @@ class TripHistoryScreen extends ConsumerWidget {
                   ],
                 ),
               ),
+              if (distanceBars.length >= 2) ...[
+                const SizedBox(height: BrandSpace.md),
+                BrandCard(
+                  padding: const EdgeInsets.all(BrandSpace.md),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const BrandSectionHeader(
+                        icon: Icons.bar_chart_rounded,
+                        title: 'Distance per trip',
+                      ),
+                      const SizedBox(height: BrandSpace.md),
+                      BrandBarChart(bars: distanceBars),
+                      const SizedBox(height: BrandSpace.xs),
+                      Text(
+                        'Last ${distanceBars.length} trips · ${distanceUnitSymbol(unit)}',
+                        style: BrandText.bodySm.copyWith(
+                          color: BrandColors.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: BrandSpace.md),
               BrandCard(
                 padding: const EdgeInsets.symmetric(

@@ -8,6 +8,7 @@ import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/validation.dart';
+import '../../core/widgets/app_choice_sheet.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/avatar_view.dart';
 import '../../core/widgets/brand/brand_alert.dart';
@@ -17,6 +18,7 @@ import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/brand/brand_sheet_surface.dart';
 import '../../core/widgets/brand/brand_text_field.dart';
+import '../../data/models/group.dart';
 import '../../data/models/trip.dart';
 import '../../data/services/supabase_service.dart';
 import '../premium/paywall.dart';
@@ -24,6 +26,17 @@ import '../premium/premium_providers.dart';
 import '../social/social_providers.dart';
 import 'plan_route_screen.dart';
 import 'trip_providers.dart';
+
+/// The currencies offered when creating a trip. Stored as an ISO 4217 code on
+/// the trip and used to label its ledger and fuel figures.
+const _kTripCurrencies = <({String code, String label})>[
+  (code: 'USD', label: 'USD — US dollar'),
+  (code: 'EUR', label: 'EUR — Euro'),
+  (code: 'GBP', label: 'GBP — British pound'),
+  (code: 'INR', label: 'INR — Indian rupee'),
+  (code: 'CAD', label: 'CAD — Canadian dollar'),
+  (code: 'AUD', label: 'AUD — Australian dollar'),
+];
 
 /// "Start a trip" flow: give it a title, optionally plan a route (origin +
 /// destination + a chosen alternate route from the Directions API), invite
@@ -52,6 +65,14 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
   /// soon as the creator goes active. Sent through as `scheduled_start` on
   /// create — see [Trip.scheduledStart].
   DateTime? _scheduledStart;
+
+  /// ISO 4217 code the trip's expenses and ledger will use.
+  String _currency = 'USD';
+
+  /// The group this trip is being planned for, if any. Sent through as
+  /// `group_id` on create so the trip is associated with (and visible to) the
+  /// crew.
+  String? _groupId;
 
   /// Bumped when the schedule is cleared so the date/time fields rebuild empty.
   /// Their managed controls hold their own state, so a plain `initial: null`
@@ -206,6 +227,22 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
     });
   }
 
+  /// Choose the group this trip belongs to (or none). Uses an empty-string
+  /// sentinel for "none" so the choice sheet has a concrete value.
+  Future<void> _pickGroup(List<Group> groups) async {
+    final choice = await showAppChoiceSheet<String>(
+      context,
+      title: 'Group',
+      selected: _groupId ?? '',
+      options: [
+        (value: '', label: 'No group — standalone trip'),
+        for (final g in groups) (value: g.id, label: g.name),
+      ],
+    );
+    if (choice == null) return;
+    setState(() => _groupId = choice.isEmpty ? null : choice);
+  }
+
   Future<void> _createTrip() async {
     final title = _titleCtrl.text.trim();
     final titleValidationError = nameError(title, label: 'Trip name');
@@ -227,6 +264,8 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
         Trip.draft(
           createdBy: uid,
           title: title,
+          groupId: _groupId,
+          currency: _currency,
           scheduledStart: _scheduledStart,
           originName: route?.originName,
           originPoint: route?.originPoint,
@@ -319,6 +358,14 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final groups = ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
+    String? selectedGroupName;
+    for (final g in groups) {
+      if (g.id == _groupId) {
+        selectedGroupName = g.name;
+        break;
+      }
+    }
     return BrandScaffold(
       header: BrandHeader(
         title: 'New trip',
@@ -437,6 +484,65 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
                     : FTime(_scheduledStart!.hour, _scheduledStart!.minute),
                 onChange: _setScheduleTime,
               ),
+            ),
+          ),
+          const SizedBox(height: BrandSpace.lg),
+          const BrandSectionHeader(
+            icon: Icons.payments_rounded,
+            title: 'Currency',
+            subtitle: "Used for this trip's expenses and ledger",
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          BrandCard(
+            padding: const EdgeInsets.symmetric(
+              horizontal: BrandSpace.md,
+              vertical: BrandSpace.xs,
+            ),
+            child: BrandListRow(
+              icon: Icons.payments_rounded,
+              iconColor: BrandColors.primary,
+              title: 'Trip currency',
+              subtitle: _kTripCurrencies
+                  .firstWhere((c) => c.code == _currency)
+                  .label,
+              onTap: () async {
+                final choice = await showAppChoiceSheet<String>(
+                  context,
+                  title: 'Trip currency',
+                  selected: _currency,
+                  options: [
+                    for (final c in _kTripCurrencies)
+                      (value: c.code, label: c.label),
+                  ],
+                );
+                if (choice != null) setState(() => _currency = choice);
+              },
+              trailing: BrandPill(label: _currency),
+            ),
+          ),
+          const SizedBox(height: BrandSpace.lg),
+          const BrandSectionHeader(
+            icon: Icons.groups_rounded,
+            title: 'Group',
+            subtitle: 'Optional — plan this trip with a crew',
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          BrandCard(
+            padding: const EdgeInsets.symmetric(
+              horizontal: BrandSpace.md,
+              vertical: BrandSpace.xs,
+            ),
+            child: BrandListRow(
+              icon: Icons.groups_rounded,
+              iconColor: BrandColors.primary,
+              title: 'Group',
+              subtitle: _groupId == null
+                  ? (groups.isEmpty
+                        ? 'No groups yet — create one from Groups'
+                        : 'Standalone trip')
+                  : (selectedGroupName ?? 'Group selected'),
+              onTap: groups.isEmpty ? null : () => _pickGroup(groups),
+              trailing: BrandPill(label: _groupId == null ? 'None' : 'Set'),
             ),
           ),
           const SizedBox(height: BrandSpace.lg),

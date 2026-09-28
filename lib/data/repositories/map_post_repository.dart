@@ -34,7 +34,9 @@ class MapPostRepository {
     final storagePath =
         '$uid/${DateTime.now().microsecondsSinceEpoch}.$extension';
 
-    await _client.storage.from('map-media').uploadBinary(
+    await _client.storage
+        .from('map-media')
+        .uploadBinary(
           storagePath,
           imageBytes,
           fileOptions: FileOptions(contentType: imageContentType(extension)),
@@ -75,22 +77,49 @@ class MapPostRepository {
         .eq('trip_id', tripId)
         .order('created_at', ascending: false)
         .limit(200);
-    return (rows as List).map((r) => MapPost.fromJson(r as Map<String, dynamic>)).toList();
+    return (rows as List)
+        .map((r) => MapPost.fromJson(r as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Photos other members have shared with [groupId] (via [shareWithGroup]).
+  /// RLS already restricts this to groups the caller belongs to.
+  Future<List<MapPost>> postsSharedWithGroup(String groupId) async {
+    final rows = await _client
+        .from('map_post_shares')
+        .select('created_at, map_posts(*, profiles(username))')
+        .eq('shared_with_group', groupId)
+        .order('created_at', ascending: false)
+        .limit(200);
+    final posts = <MapPost>[];
+    for (final raw in rows as List) {
+      final post = (raw as Map<String, dynamic>)['map_posts'];
+      if (post is Map<String, dynamic>) posts.add(MapPost.fromJson(post));
+    }
+    return posts;
   }
 
   /// A signed URL for the post's photo (the bucket is private).
   Future<String> signedUrl(String storagePath, {int expiresInSeconds = 3600}) {
-    return _client.storage.from('map-media').createSignedUrl(storagePath, expiresInSeconds);
+    return _client.storage
+        .from('map-media')
+        .createSignedUrl(storagePath, expiresInSeconds);
   }
 
-  Future<void> shareWithGroup({required String postId, required String groupId}) async {
+  Future<void> shareWithGroup({
+    required String postId,
+    required String groupId,
+  }) async {
     await _client.from('map_post_shares').insert({
       'post_id': postId,
       'shared_with_group': groupId,
     });
   }
 
-  Future<void> shareWithUser({required String postId, required String userId}) async {
+  Future<void> shareWithUser({
+    required String postId,
+    required String userId,
+  }) async {
     await _client.from('map_post_shares').insert({
       'post_id': postId,
       'shared_with_user': userId,

@@ -4,16 +4,29 @@ import express from "express";
 import type { NextFunction, Request, Response } from "express";
 import { env } from "./lib/env.js";
 import { rateLimit } from "./lib/rate-limit.js";
-import { startScheduler } from "./lib/scheduler.js";
+import { useSharedRateLimit } from "./lib/rate-limit-store.js";
+import { getRedis, closeRedis } from "./lib/redis.js";
+import { startPruner, startScheduler } from "./lib/scheduler.js";
 import { accountRouter } from "./routes/account.js";
 import { aiRouter } from "./routes/ai.js";
 import { billingRouter } from "./routes/billing.js";
 import { mapsRouter } from "./routes/maps.js";
 import { notificationsRouter } from "./routes/notifications.js";
 import { phoneRouter } from "./routes/phone.js";
+import { planRouter } from "./routes/plan.js";
 import { voiceRouter } from "./routes/voice.js";
 
 const app = express();
+
+// Share rate-limit buckets across instances. Uses Redis when REDIS_URL is set,
+// otherwise Postgres; the default in-memory store is per-process and would
+// multiply every limit by the instance count.
+useSharedRateLimit();
+console.log(
+  getRedis()
+    ? "cache: Redis configured — rate limits, allowances and plan/membership lookups use it"
+    : "cache: REDIS_URL not set — rate limits, allowances and lookups fall back to Postgres",
+);
 
 // Don't advertise the framework.
 app.disable("x-powered-by");
@@ -39,7 +52,10 @@ const preAuthLimit = rateLimit({
   max: 300,
   message: "Too many requests — please slow down.",
 });
-app.use(["/ai", "/phone", "/voice", "/maps", "/account", "/notifications"], preAuthLimit);
+app.use(
+  ["/ai", "/phone", "/voice", "/maps", "/account", "/notifications", "/plan"],
+  preAuthLimit,
+);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 app.use("/ai", aiRouter);
@@ -48,6 +64,7 @@ app.use("/voice", voiceRouter);
 app.use("/maps", mapsRouter);
 app.use("/account", accountRouter);
 app.use("/notifications", notificationsRouter);
+app.use("/plan", planRouter);
 // Not behind the pre-auth IP limit above: RevenueCat's webhook has no session
 // and a burst of events shouldn't get rate-limited; it authenticates with a
 // shared secret (see billing.ts) instead.
@@ -109,7 +126,7 @@ const server = app.listen(env.port, () => {
 });
 
 // Close keep-alive sockets a little ahead of Node's 5s default timeout so a
-// slow upstream (Anthropic/Twilio) can't pin a connection indefinitely.
+// slow upstream (Gemini/Twilio) can't pin a connection indefinitely.
 server.keepAliveTimeout = 65_000;
 server.headersTimeout = 66_000;
 server.requestTimeout = 120_000;
@@ -117,6 +134,8 @@ server.requestTimeout = 120_000;
 // Drain in-flight requests on redeploy instead of cutting them mid-response.
 function shutdown(signal: string) {
   console.log(`received ${signal}, shutting down…`);
+  // Release the Redis connection too (no-op when it isn't configured).
+  void closeRedis();
   server.close(() => process.exit(0));
   // Fail-safe: don't hang forever on a stuck keep-alive connection.
   setTimeout(() => process.exit(0), 10_000).unref();
@@ -125,3 +144,4 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 
 startScheduler();
+startPruner();

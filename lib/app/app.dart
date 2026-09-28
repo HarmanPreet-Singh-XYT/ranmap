@@ -8,6 +8,7 @@ import 'package:forui/forui.dart';
 import '../core/constants/invite_links.dart';
 import '../core/providers/settings_provider.dart';
 import '../core/router/app_router.dart';
+import '../core/router/auth_state_provider.dart';
 import '../core/theme/brand_palette.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/forui_theme.dart';
@@ -56,6 +57,24 @@ class _RanmapAppState extends ConsumerState<RanmapApp> {
   }
 
   void _handleUri(Uri uri) {
+    // A group join link (`.../join/<code>`) takes precedence: it's a distinct
+    // scheme host / path from a friend invite.
+    final code = groupJoinCodeFromUri(uri);
+    if (code != null && code.isNotEmpty) {
+      // A signed-in user joins now; a signed-out one keeps the code so
+      // [HomeShell] re-opens this screen after sign-up. Clearing it here for
+      // the signed-in case avoids [HomeShell] pushing a duplicate on top of
+      // the `go` below.
+      final signedIn = ref.read(authStateProvider).valueOrNull?.session != null;
+      if (signedIn) {
+        unawaited(ref.read(pendingGroupJoinProvider.notifier).clear());
+      } else {
+        unawaited(ref.read(pendingGroupJoinProvider.notifier).set(code));
+      }
+      ref.read(goRouterProvider).go('/join/$code');
+      return;
+    }
+
     final username = inviteUsernameFromUri(uri);
     if (username == null || username.isEmpty) return;
     // Persist before navigating: the value must outlive this process for the

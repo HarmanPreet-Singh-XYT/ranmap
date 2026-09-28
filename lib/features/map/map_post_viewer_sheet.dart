@@ -9,9 +9,13 @@ import '../../core/util/error_text.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
+import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_sheet_surface.dart';
+import '../../data/models/group.dart';
 import '../../data/models/map_post.dart';
 import '../../data/services/supabase_service.dart';
+import '../social/social_providers.dart';
 import 'map_post_providers.dart';
 
 Future<void> showMapPostViewerSheet(BuildContext context, MapPost post) {
@@ -27,6 +31,55 @@ class _MapPostViewerSheet extends ConsumerWidget {
   final MapPost post;
 
   const _MapPostViewerSheet({required this.post});
+
+  /// Shares this photo with one of the user's groups, which makes it readable
+  /// to every member (see `can_view_map_post` / `map_post_shares`).
+  Future<void> _shareToGroup(BuildContext context, WidgetRef ref) async {
+    final groups = ref.read(myGroupsProvider).valueOrNull ?? const <Group>[];
+    if (groups.isEmpty) {
+      showAppToast(
+        context,
+        'Create a group first, then share with it.',
+        error: true,
+      );
+      return;
+    }
+    final selected = await showFSheet<String>(
+      context: context,
+      side: FLayout.btt,
+      builder: (context) => BrandSheetSurface(
+        child: BrandCard(
+          padding: const EdgeInsets.symmetric(
+            horizontal: BrandSpace.md,
+            vertical: BrandSpace.xs,
+          ),
+          child: Column(
+            children: [
+              for (final (i, group) in groups.indexed) ...[
+                if (i > 0) const BrandRowDivider(),
+                BrandListRow(
+                  icon: Icons.groups_rounded,
+                  iconColor: BrandColors.primary,
+                  title: group.name,
+                  showChevron: false,
+                  onTap: () => Navigator.of(context).pop(group.id),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected == null || !context.mounted) return;
+    try {
+      await ref
+          .read(mapPostRepositoryProvider)
+          .shareWithGroup(postId: post.id, groupId: selected);
+      if (context.mounted) showAppToast(context, 'Shared with the group.');
+    } catch (e) {
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -106,6 +159,16 @@ class _MapPostViewerSheet extends ConsumerWidget {
           ],
           if (isMine) ...[
             const SizedBox(height: BrandSpace.md),
+            BrandSecondaryButton(
+              label: 'Share to a group',
+              leading: Icon(
+                Icons.groups_rounded,
+                size: 18,
+                color: BrandColors.textHeadlineAlt,
+              ),
+              onPressed: () => _shareToGroup(context, ref),
+            ),
+            const SizedBox(height: BrandSpace.sm),
             BrandPressable(
               onTap: () async {
                 final confirmed = await showAppConfirmDialog(

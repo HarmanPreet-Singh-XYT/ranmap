@@ -51,8 +51,22 @@ class PaywallScreen extends ConsumerStatefulWidget {
 
 class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   PaywallPlan _plan = PaywallPlan.annual;
+  late final PageController _spotlightController;
+  int _spotlightIndex = 0;
   bool _busy = false;
   bool _closing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _spotlightController = PageController();
+  }
+
+  @override
+  void dispose() {
+    _spotlightController.dispose();
+    super.dispose();
+  }
 
   void _close() {
     if (_closing) return;
@@ -154,7 +168,15 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
         : 'Unlock Monthly Pass ($monthlyPrice/mo)';
 
     return BrandScaffold(
-      header: _PaywallHeader(onBack: _close),
+      header: _PaywallHeader(
+        onBack: _close,
+        dotIndex: _spotlightIndex,
+        onDotTap: (i) => _spotlightController.animateToPage(
+          i,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOutCubic,
+        ),
+      ),
       child: ListView(
         padding: const EdgeInsets.only(
           top: BrandSpace.sm,
@@ -163,7 +185,10 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
         children: [
           const _Hero(),
           const SizedBox(height: BrandSpace.lg),
-          const _AmbientTripCard(),
+          _AmbientTripCard(
+            controller: _spotlightController,
+            onPageChanged: (i) => setState(() => _spotlightIndex = i),
+          ),
           const SizedBox(height: BrandSpace.lg),
           const _ComparisonTable(),
           const SizedBox(height: BrandSpace.lg),
@@ -287,11 +312,18 @@ bool _annualIsBest(Package? annual, Package? monthly) {
 }
 
 /// The top bar carries only the design's "other" affordances: a back button,
-/// the step dots, and the brand nav glyph. Close / Restore live under the CTA.
+/// The top bar carries the design's navigation affordances: back button,
+/// interactive step dots connected to the feature spotlight, and the brand nav glyph.
 class _PaywallHeader extends StatelessWidget {
-  const _PaywallHeader({required this.onBack});
+  const _PaywallHeader({
+    required this.onBack,
+    this.dotIndex = 0,
+    this.onDotTap,
+  });
 
   final VoidCallback onBack;
+  final int dotIndex;
+  final ValueChanged<int>? onDotTap;
 
   @override
   Widget build(BuildContext context) {
@@ -327,14 +359,19 @@ class _PaywallHeader extends StatelessWidget {
               children: [
                 for (var i = 0; i < 3; i++) ...[
                   if (i > 0) const SizedBox(width: 5),
-                  Container(
-                    height: 8,
-                    width: 8,
-                    decoration: BoxDecoration(
-                      color: i == 0
-                          ? BrandColors.primaryContainer
-                          : BrandColors.surfaceContainerHighest,
-                      shape: BoxShape.circle,
+                  GestureDetector(
+                    onTap: onDotTap == null ? null : () => onDotTap!(i),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 250),
+                      curve: Curves.easeOut,
+                      height: 8,
+                      width: i == dotIndex ? 22 : 8,
+                      decoration: BoxDecoration(
+                        color: i == dotIndex
+                            ? BrandColors.primaryContainer
+                            : BrandColors.surfaceContainerHighest,
+                        borderRadius: BrandRadii.pill,
+                      ),
                     ),
                   ),
                 ],
@@ -492,13 +529,32 @@ class _Hero extends StatelessWidget {
   }
 }
 
+class _SpotlightCardData {
+  const _SpotlightCardData({
+    required this.tag,
+    required this.title,
+    required this.subtitle,
+    required this.imageAsset,
+  });
+
+  final String tag;
+  final String title;
+  final String subtitle;
+  final String imageAsset;
+}
+
 class _AmbientTripCard extends ConsumerWidget {
-  const _AmbientTripCard();
+  const _AmbientTripCard({
+    required this.controller,
+    required this.onPageChanged,
+  });
+
+  final PageController controller;
+  final ValueChanged<int> onPageChanged;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Shows the user's *real* convoy when one is live — never sample data. With
-    // no active trip it falls back to a neutral brand line.
+    // Shows the user's real convoy or Pro spotlight previews.
     final trip = ref.watch(activeTripProvider).valueOrNull;
     final members = trip == null
         ? const <Map<String, dynamic>>[]
@@ -509,85 +565,123 @@ class _AmbientTripCard extends ConsumerWidget {
         (m['profiles'] as Map<String, dynamic>?)?['avatar_id'] as String? ??
             kDefaultAvatarSeed,
     ];
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: BrandColors.surface,
-        borderRadius: BrandRadii.podRadius,
-        boxShadow: BrandShadows.ambient,
+
+    final cards = [
+      _SpotlightCardData(
+        tag: trip != null ? 'CONVOY SYNC ACTIVE' : 'CONVOY LIVE MESH',
+        title: trip?.title ?? 'Live Location & Voice Channels',
+        subtitle: trip != null
+            ? '${members.length} in convoy • Pro unlocks full mesh.'
+            : 'Sub-second GPS telemetry & hands-free walkie-talkie.',
+        imageAsset: 'assets/images/paywall/trip.jpg',
       ),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BrandRadii.miniRadius,
-            child: Image.asset(
-              'assets/images/paywall/trip.jpg',
-              height: 64,
-              width: 64,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => SizedBox(
-                height: 64,
-                width: 64,
-                child: ColoredBox(color: BrandColors.surfaceContainerHigh),
-              ),
+      const _SpotlightCardData(
+        tag: '3D TERRAIN NAVIGATION',
+        title: 'Topographical Maps & Radar',
+        subtitle: 'Offline mountain elevation profiles & full radar tracking.',
+        imageAsset: 'assets/images/paywall/paywall_terrain.jpg',
+      ),
+      const _SpotlightCardData(
+        tag: 'UNLIMITED EXPEDITIONS',
+        title: '20+ Vehicles & Shared Vault',
+        subtitle: 'One Pro member unlocks large convoys & shared albums.',
+        imageAsset: 'assets/images/paywall/paywall_crew.jpg',
+      ),
+    ];
+
+    return SizedBox(
+      height: 98,
+      child: PageView.builder(
+        controller: controller,
+        itemCount: cards.length,
+        onPageChanged: onPageChanged,
+        itemBuilder: (context, i) {
+          final card = cards[i];
+          return Container(
+            margin: const EdgeInsets.symmetric(horizontal: 2),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: BrandColors.surface,
+              borderRadius: BrandRadii.podRadius,
+              boxShadow: BrandShadows.ambient,
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    if (trip != null) ...[
-                      Container(
-                        height: 8,
-                        width: 8,
-                        decoration: BoxDecoration(
-                          color: BrandColors.primaryContainer,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                    ],
-                    Flexible(
-                      child: Text(
-                        trip != null ? 'CONVOY SYNC ACTIVE' : 'RANMAP CONVOY',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: BrandText.weight(BrandText.labelSm, 700)
-                            .copyWith(
-                              color: trip != null
-                                  ? BrandColors.primary
-                                  : BrandColors.textMuted,
-                            ),
+                ClipRRect(
+                  borderRadius: BrandRadii.miniRadius,
+                  child: Image.asset(
+                    card.imageAsset,
+                    height: 64,
+                    width: 64,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => SizedBox(
+                      height: 64,
+                      width: 64,
+                      child: ColoredBox(
+                        color: BrandColors.surfaceContainerHigh,
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  trip?.title ?? 'Your crew, one map',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: BrandText.labelMd.copyWith(
-                    color: BrandColors.onSurface,
                   ),
                 ),
-                Text(
-                  trip != null ? '${members.length} in convoy' : 'Live location, voice and stops sync for everyone on the trip.',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: BrandText.bodySm.copyWith(color: BrandColors.textBody),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            height: 7,
+                            width: 7,
+                            decoration: BoxDecoration(
+                              color: BrandColors.primaryContainer,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              card.tag,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: BrandText.weight(BrandText.labelSm, 700)
+                                  .copyWith(
+                                color: BrandColors.primary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        card.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: BrandText.titleSm.copyWith(
+                          color: BrandColors.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        card.subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: BrandText.bodySm.copyWith(
+                          color: BrandColors.textBody,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
+                if (i == 0 && avatars.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  _AvatarStack(avatars: avatars),
+                ],
               ],
             ),
-          ),
-          if (avatars.isNotEmpty) ...[
-            const SizedBox(width: 8),
-            _AvatarStack(avatars: avatars),
-          ],
-        ],
+          );
+        },
       ),
     );
   }

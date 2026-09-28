@@ -16,6 +16,8 @@ const _kIntroV1SeenKey = 'intro_seen_v1';
 const _kIntroV2SeenKey = 'intro_seen_v2';
 const _kPaywallLastShownKey = 'paywall_last_shown_v1';
 const _kPendingInviteKey = 'pending_invite_v1';
+const _kPendingGroupCodeKey = 'pending_group_code_v1';
+const _kConvoyGroupKey = 'convoy_group_v1';
 const _kIntroFlagsVersionKey = 'intro_flags_version';
 
 /// Bump when the *meaning* of the intro flags changes, so existing installs
@@ -83,6 +85,28 @@ class AppPrefs {
   Future<void> setPendingInvite(String? username) {
     if (username == null) return _prefs.remove(_kPendingInviteKey);
     return _prefs.setString(_kPendingInviteKey, username);
+  }
+
+  /// The invite code from a group join link that hasn't been redeemed yet, or
+  /// null. Persisted for the same reason as [pendingInvite]: a signed-out
+  /// recipient must land back on the join screen after signing up.
+  String? get pendingGroupCode => _prefs.getString(_kPendingGroupCodeKey);
+
+  /// Records (or clears, when [code] is null) the pending group invite code.
+  Future<void> setPendingGroupCode(String? code) {
+    if (code == null) return _prefs.remove(_kPendingGroupCodeKey);
+    return _prefs.setString(_kPendingGroupCodeKey, code);
+  }
+
+  /// The group whose live convoy the user is currently in, or null. At most
+  /// one convoy at a time — it's the crew you're riding with right now — so a
+  /// single id is enough, and it survives a restart so presence resumes.
+  String? get convoyGroupId => _prefs.getString(_kConvoyGroupKey);
+
+  /// Records (or clears, when [groupId] is null) the active convoy group.
+  Future<void> setConvoyGroupId(String? groupId) {
+    if (groupId == null) return _prefs.remove(_kConvoyGroupKey);
+    return _prefs.setString(_kConvoyGroupKey, groupId);
   }
 }
 

@@ -35,6 +35,7 @@ class TripRepository {
         'p_destination_lat': trip.destinationPoint?.lat,
         'p_destination_lng': trip.destinationPoint?.lng,
         'p_route_polyline': trip.routePolyline,
+        'p_currency': trip.currency,
       },
     );
     final row = data is List
@@ -240,6 +241,29 @@ class TripRepository {
       params: {'p_trip': tripId},
     );
     return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  /// Publishes this device's position to the trip's live channel (see
+  /// 0023_broadcast_position.sql). The server checks membership and stamps the
+  /// sender's user id, so a client can't forge another member's position — and
+  /// nothing is written to `location_pings`.
+  Future<void> broadcastPosition({
+    required String tripId,
+    required double lat,
+    required double lng,
+    double? speedMps,
+    double? heading,
+  }) async {
+    await _client.rpc(
+      'broadcast_position',
+      params: {
+        'p_trip': tripId,
+        'p_lat': lat,
+        'p_lng': lng,
+        'p_speed': speedMps,
+        'p_heading': heading,
+      },
+    );
   }
 
   /// Appends the stop at the end of the trip's current ordering. When [id] is
@@ -598,5 +622,26 @@ class TripRepository {
         .from('trip_stats')
         .upsert(stats.toUpsertJson(), onConflict: 'trip_id,user_id');
     return stats;
+  }
+
+  /// The current user's speed samples (km/h) for a trip, in time order, for a
+  /// speed-over-time profile. Reads only the `speed_mps` column and skips
+  /// samples with no reading (geolocator reports a negative speed when it has
+  /// none), so it stays cheap even for a long trip.
+  Future<List<double>> speedProfile(String tripId, {int limit = 500}) async {
+    final uid = SupabaseService.currentUserId;
+    final rows = await _client
+        .from('location_pings')
+        .select('speed_mps')
+        .eq('trip_id', tripId)
+        .eq('user_id', uid)
+        .order('recorded_at')
+        .limit(limit);
+    return [
+      for (final r in rows as List)
+        if ((r as Map<String, dynamic>)['speed_mps'] is num &&
+            (r['speed_mps'] as num) >= 0)
+          (r['speed_mps'] as num).toDouble() * 3.6,
+    ];
   }
 }

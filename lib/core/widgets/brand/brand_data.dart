@@ -220,3 +220,205 @@ class BrandSparklineRow extends StatelessWidget {
     );
   }
 }
+
+/// A labelled share-of-total row: a label + value caption over a proportional
+/// brand bar. For a ledger's category split or any "X of Y" breakdown.
+class BrandBreakdownRow extends StatelessWidget {
+  const BrandBreakdownRow({
+    super.key,
+    required this.label,
+    required this.fraction,
+    this.valueLabel,
+    this.color,
+    this.height = 6,
+  });
+
+  final String label;
+
+  /// 0..1; clamped. Usually the row's value over the largest row's value.
+  final double fraction;
+  final String? valueLabel;
+  final Color? color;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: BrandText.bodySm.copyWith(color: BrandColors.textBody),
+            ),
+          ),
+          if (valueLabel != null)
+            Text(
+              valueLabel!,
+              style: BrandText.weight(
+                BrandText.labelSm,
+                700,
+              ).copyWith(color: BrandColors.textHeadline),
+            ),
+        ],
+      ),
+      const SizedBox(height: 4),
+      BrandProgressBar(value: fraction, color: color, height: height),
+    ],
+  );
+}
+
+/// A bar centred on zero: a negative value fills leftward (what a member owes),
+/// a positive one rightward (what they're owed), both scaled to [maxAbs]. For a
+/// ledger's "paid vs owed" diverging chart.
+class BrandDivergingBar extends StatelessWidget {
+  const BrandDivergingBar({
+    super.key,
+    required this.value,
+    required this.maxAbs,
+    this.height = 8,
+    this.positiveColor,
+    this.negativeColor,
+  });
+
+  final double value;
+  final double maxAbs;
+  final double height;
+  final Color? positiveColor;
+  final Color? negativeColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final scale = maxAbs <= 0 ? 1.0 : maxAbs;
+    final fraction = (value.abs() / scale).clamp(0.0, 1.0);
+    final color = value >= 0
+        ? (positiveColor ?? BrandColors.primary)
+        : (negativeColor ?? BrandColors.error);
+
+    return SizedBox(
+      height: height,
+      child: Row(
+        children: [
+          _half(
+            fraction: value < 0 ? fraction : 0,
+            color: color,
+            alignment: Alignment.centerRight,
+          ),
+          const SizedBox(width: 2),
+          _half(
+            fraction: value >= 0 ? fraction : 0,
+            color: color,
+            alignment: Alignment.centerLeft,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// One half of the centred bar: a light track with the fill anchored to the
+  /// centre ([alignment] is centerRight on the left half, centerLeft on the
+  /// right half).
+  Widget _half({
+    required double fraction,
+    required Color color,
+    required Alignment alignment,
+  }) => Expanded(
+    child: ClipRRect(
+      borderRadius: BrandRadii.pill,
+      child: Container(
+        color: BrandColors.surfaceContainerHigh,
+        child: Align(
+          alignment: alignment,
+          child: FractionallySizedBox(
+            widthFactor: fraction,
+            child: Container(color: color),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// A compact vertical bar chart: a value caption above each bar and an x-axis
+/// label below. For "distance per trip" style series where order matters.
+class BrandBarChart extends StatelessWidget {
+  const BrandBarChart({
+    super.key,
+    required this.bars,
+    this.height = 132,
+    this.color,
+    this.valueFormatter,
+  });
+
+  final List<({String label, double value})> bars;
+  final double height;
+  final Color? color;
+
+  /// Formats the value caption above each bar; defaults to a rounded integer.
+  final String Function(double value)? valueFormatter;
+
+  @override
+  Widget build(BuildContext context) {
+    if (bars.isEmpty) return const SizedBox.shrink();
+    final maxV = bars.fold<double>(0, (m, b) => b.value > m ? b.value : m);
+    final barColor = color ?? BrandColors.primaryContainer;
+
+    return SizedBox(
+      height: height,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          for (final (i, bar) in bars.indexed) ...[
+            if (i > 0) const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text(
+                    valueFormatter?.call(bar.value) ??
+                        bar.value.round().toString(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: BrandText.weight(
+                      BrandText.labelSm,
+                      700,
+                    ).copyWith(color: BrandColors.textHeadline),
+                  ),
+                  const SizedBox(height: 4),
+                  Flexible(
+                    child: FractionallySizedBox(
+                      alignment: Alignment.bottomCenter,
+                      heightFactor: maxV <= 0
+                          ? 0
+                          : (bar.value / maxV).clamp(0.0, 1.0),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: barColor,
+                          borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(6),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    bar.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: BrandText.bodySm.copyWith(
+                      color: BrandColors.textMuted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}

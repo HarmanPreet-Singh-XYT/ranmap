@@ -27,4 +27,32 @@ class SavedPlaceRepository {
         .map((r) => SavedPlace.fromJson(r as Map<String, dynamic>))
         .toList();
   }
+
+  /// Saves a place for the current user. Coordinates are optional (a
+  /// name-only place stores no point), matching how the AI tool writes rows.
+  Future<SavedPlace> createPlace({
+    required String name,
+    double? lat,
+    double? lng,
+    String? notes,
+  }) async {
+    final uid = SupabaseService.currentUserId;
+    final hasPoint = lat != null && lng != null;
+    final row = await _client
+        .from('ai_saved_places')
+        .insert({
+          'user_id': uid,
+          'name': name,
+          'notes': notes,
+          'point': hasPoint
+              ? {
+                  'type': 'Point',
+                  'coordinates': [lng, lat],
+                }
+              : null,
+        })
+        .select()
+        .single();
+    return SavedPlace.fromJson(row);
+  }
 }

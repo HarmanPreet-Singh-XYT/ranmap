@@ -41,6 +41,7 @@ class Trip {
     this.startedAt,
     this.endedAt,
     this.routePolyline,
+    this.currency = 'USD',
   });
 
   /// A not-yet-created trip, for building the insert payload. [id] is unset
@@ -56,6 +57,7 @@ class Trip {
     this.destinationName,
     this.destinationPoint,
     this.routePolyline,
+    this.currency = 'USD',
   })  : id = '',
         status = TripStatus.planned,
         startedAt = null,
@@ -74,6 +76,9 @@ class Trip {
   final DateTime? startedAt;
   final DateTime? endedAt;
   final String? routePolyline;
+
+  /// ISO 4217 code the trip's expenses and ledger are denominated in.
+  final String currency;
 
   factory Trip.fromJson(Map<String, dynamic> json) => Trip(
         id: json['id'] as String,
@@ -95,5 +100,6 @@ class Trip {
         startedAt: json['started_at'] != null ? DateTime.parse(json['started_at'] as String) : null,
         endedAt: json['ended_at'] != null ? DateTime.parse(json['ended_at'] as String) : null,
         routePolyline: json['route_polyline'] as String?,
+        currency: json['currency'] as String? ?? 'USD',
       );
 }

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { asyncHandler } from "../lib/async-handler.js";
+import { mapsSearchAllowance } from "../lib/allowances.js";
 import { env } from "../lib/env.js";
 import { fail, notConfigured } from "../lib/errors.js";
 import { normalizePlaceDetails, PLACE_DETAILS_FIELD_MASK } from "../lib/google-places.js";
@@ -51,15 +52,12 @@ const mapboxTokenVendor = createMapboxTokenVendor({
 
 // Route planning + POI search spend paid provider quota, so free accounts get a
 // daily allowance and Pro is uncapped. Applied to the paid GET endpoints below.
-const FREE_SEARCHES_PER_DAY = 100;
-const DAY_MS = 24 * 60 * 60 * 1000;
 const freeSearchTier = requireProOrTrial(
-  "maps_search",
+  mapsSearchAllowance.feature,
   {
-    max: FREE_SEARCHES_PER_DAY,
-    windowMs: DAY_MS,
-    message:
-      "You've hit today's free limit for route & place search. Upgrade to Ranmap Pro for unlimited search.",
+    max: mapsSearchAllowance.max,
+    windowMs: mapsSearchAllowance.windowMs,
+    message: mapsSearchAllowance.message,
   },
   isPro,
   consumeUsage,

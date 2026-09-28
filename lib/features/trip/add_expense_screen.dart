@@ -26,9 +26,17 @@ const _kExpenseCategories = [
 ];
 
 class AddExpenseScreen extends ConsumerStatefulWidget {
-  const AddExpenseScreen({super.key, required this.tripId});
+  const AddExpenseScreen({
+    super.key,
+    required this.tripId,
+    this.currency = 'USD',
+  });
 
   final String tripId;
+
+  /// The trip's ISO 4217 currency; stored on the expense so the row is
+  /// truthful rather than always defaulting to USD.
+  final String currency;
 
   @override
   ConsumerState<AddExpenseScreen> createState() => _AddExpenseScreenState();
@@ -78,6 +86,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
       userId: SupabaseService.currentUserId,
       amount: validAmount,
       category: _category,
+      currency: widget.currency,
       fuelLiters: double.tryParse(_fuelLitersCtrl.text.trim()),
       odometerKm: double.tryParse(_odometerCtrl.text.trim()),
       note: note.isEmpty ? null : note,
@@ -166,7 +175,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
             }).toList(),
           ),
           const SizedBox(height: BrandSpace.lg),
-          const _FieldLabel('Amount'),
+          _FieldLabel('Amount (${widget.currency})'),
           BrandTextField(
             controller: _amountCtrl,
             hint: '0.00',

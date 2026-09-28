@@ -20,6 +20,9 @@ import '../../core/theme/nav_palette.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/geo_distance.dart';
 import '../../core/util/units.dart';
+import '../../core/util/validation.dart';
+import '../../core/widgets/app_dialog.dart';
+import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/avatar_view.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
@@ -34,6 +37,7 @@ import '../../data/models/trip_stop.dart';
 import '../../data/services/google_maps_api_service.dart';
 import '../trip/new_trip_screen.dart';
 import '../trip/trip_providers.dart';
+import '../social/social_providers.dart';
 import 'add_map_post_screen.dart';
 import 'live_sync_providers.dart';
 import 'map_engine/map_engine.dart';
@@ -281,11 +285,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
   }
 
   Widget _buildLocationView(BuildContext context) {
-    // Keep the location broadcast alive while this screen is mounted and a
-    // trip is active; it's a no-op provider when there's no active trip. Only
-    // watched once permission is granted, so the GPS stream never errors.
-    ref.watch(locationBroadcastProvider);
-
     final activeTrip = ref.watch(activeTripProvider).valueOrNull;
     final positionAsync = ref.watch(devicePositionProvider);
 
@@ -339,20 +338,37 @@ class _MapScreenState extends ConsumerState<MapScreen>
     final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
 
     // Keep the AsyncValue around (not just valueOrNull) so a failed live-sync
-    // fetch is surfaced instead of silently rendering as "0 teammates".
-    final memberLocationsAsync = activeTrip == null
-        ? null
-        : ref.watch(tripMemberLocationsProvider(activeTrip.id));
+    // fetch is surfaced instead of silently rendering as "0 teammates". The
+    // provider also owns this device's outgoing position sharing, so watching
+    // it here — only while a trip is active — keeps that alive too.
+    // Live source: an active trip takes precedence; otherwise, if the user has
+    // joined a group convoy, that crew's live positions. Either way the
+    // teammate layer below is identical — it only cares about positions keyed
+    // by user id.
+    final convoyGroupId = ref.watch(convoyGroupIdProvider);
+    final liveGroupId = activeTrip == null ? convoyGroupId : null;
+    final hasLiveScope = activeTrip != null || liveGroupId != null;
+
+    final memberLocationsAsync = activeTrip != null
+        ? ref.watch(tripLiveSyncProvider(activeTrip.id))
+        : liveGroupId != null
+        ? ref.watch(groupLiveSyncProvider(liveGroupId))
+        : null;
     final memberLocations =
         memberLocationsAsync?.valueOrNull ?? const <String, MemberLocation>{};
 
-    final memberProfiles = activeTrip == null
-        ? const <Map<String, dynamic>>[]
-        : ref.watch(tripMembersProvider(activeTrip.id)).valueOrNull ?? const [];
+    final memberProfiles = activeTrip != null
+        ? ref.watch(tripMembersProvider(activeTrip.id)).valueOrNull ?? const []
+        : liveGroupId != null
+        ? ref.watch(groupMembersProvider(liveGroupId)).valueOrNull ?? const []
+        : const <Map<String, dynamic>>[];
     final profileByUserId = {
       for (final m in memberProfiles)
         m['user_id'] as String: m['profiles'] as Map<String, dynamic>?,
     };
+    final convoyGroupName = liveGroupId == null
+        ? null
+        : ref.watch(groupProvider(liveGroupId)).valueOrNull?.name;
 
     final teammates = <_Teammate>[];
     final poses = <VehiclePose>[];
@@ -403,6 +419,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
     final userVehicleType =
         _activeLegMode(activeTrip, tripStops, tripLegs) ?? profileVehicleType;
     final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
+    final shareLocation = ref.watch(
+      appSettingsProvider.select((s) => s.shareLocation),
+    );
 
     // Only show telemetry when the platform actually reported a speed:
     // geolocator returns a negative value (e.g. -1 on iOS) when it has none,
@@ -457,15 +476,19 @@ class _MapScreenState extends ConsumerState<MapScreen>
             userVehicleType: userVehicleType,
             onStyleReady: _onStyleReady,
           ),
-          if (activeTripId != null && liveError != null)
+          if (liveError != null)
             Positioned(
               top: 16 + topInset,
               left: 16,
               child: _LiveSyncErrorChip(
                 detail: friendlyError(liveError),
                 onRetry: () {
-                  ref.invalidate(tripMemberLocationsProvider(activeTripId));
-                  ref.invalidate(tripMapPostsProvider(activeTripId));
+                  if (activeTripId != null) {
+                    ref.invalidate(tripLiveSyncProvider(activeTripId));
+                    ref.invalidate(tripMapPostsProvider(activeTripId));
+                  } else if (liveGroupId != null) {
+                    ref.invalidate(groupLiveSyncProvider(liveGroupId));
+                  }
                 },
               ),
             ),
@@ -511,6 +534,11 @@ class _MapScreenState extends ConsumerState<MapScreen>
                     tooltip: 'Search nearby places',
                     onTap: () => _searchNearby(here),
                   ),
+                  _MapControl(
+                    icon: Icons.bookmark_add_outlined,
+                    tooltip: 'Save this place',
+                    onTap: () => _savePlace(deviceLat, deviceLng),
+                  ),
                   if (activeTrip != null)
                     _MapControl(
                       icon: Icons.add_a_photo_outlined,
@@ -524,6 +552,19 @@ class _MapScreenState extends ConsumerState<MapScreen>
                           ),
                         ),
                       ),
+                    ),
+                  if (activeTrip != null || liveGroupId != null)
+                    _MapControl(
+                      icon: shareLocation
+                          ? Icons.share_location_rounded
+                          : Icons.location_disabled_rounded,
+                      tooltip: shareLocation
+                          ? 'Pause location sharing'
+                          : 'Resume location sharing',
+                      active: shareLocation,
+                      onTap: () => ref
+                          .read(appSettingsProvider.notifier)
+                          .setShareLocation(!shareLocation),
                     ),
                 ],
               ),
@@ -555,7 +596,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
                           height: 8,
                           width: 8,
                           decoration: BoxDecoration(
-                            color: activeTrip == null
+                            color: (!hasLiveScope || !shareLocation)
                                 ? BrandColors.textMuted
                                 : BrandColors.primaryContainer,
                             shape: BoxShape.circle,
@@ -563,9 +604,11 @@ class _MapScreenState extends ConsumerState<MapScreen>
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          activeTrip == null
+                          !hasLiveScope
                               ? 'No active convoy'
-                              : 'Convoy live · ${memberLocations.length}',
+                              : shareLocation
+                              ? 'Convoy live · ${memberLocations.length}'
+                              : 'Location sharing paused',
                           style: BrandText.labelSm.copyWith(
                             color: BrandColors.textHeadline,
                           ),
@@ -662,7 +705,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
                       ),
                     const SizedBox(height: BrandSpace.sm),
                   ],
-                  if (activeTrip == null)
+                  if (!hasLiveScope)
                     _buildGetStartedCard(
                       context,
                       deviceLat,
@@ -699,7 +742,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  activeTrip.title,
+                                  activeTrip?.title ??
+                                      convoyGroupName ??
+                                      'Your crew',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: BrandText.weight(
@@ -822,6 +867,34 @@ class _MapScreenState extends ConsumerState<MapScreen>
         zoom: kPlaceZoom,
       ),
     );
+  }
+
+  /// Saves the device's current location as a named bookmark, independent of
+  /// any trip. It then appears as a pin and in the no-convoy card below.
+  Future<void> _savePlace(double lat, double lng) async {
+    final name = await showAppTextDialog(
+      context,
+      title: 'Save this place',
+      label: 'Name',
+      hint: 'Great viewpoint',
+      confirmLabel: 'Save',
+      maxLength: kNameMaxLength,
+    );
+    if (name == null) return;
+    final validationError = nameError(name, label: 'Name');
+    if (validationError != null) {
+      if (mounted) showAppToast(context, validationError, error: true);
+      return;
+    }
+    try {
+      await ref
+          .read(savedPlaceRepositoryProvider)
+          .createPlace(name: name, lat: lat, lng: lng);
+      ref.invalidate(savedPlacesProvider);
+      if (mounted) showAppToast(context, 'Saved "$name".');
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    }
   }
 
   /// Renders the user's saved places as bookmark pins, reusing the same marker
