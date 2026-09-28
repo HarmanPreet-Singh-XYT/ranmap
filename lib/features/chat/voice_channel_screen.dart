@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:forui/forui.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 
 import '../../core/theme/brand_palette.dart';
@@ -44,6 +45,11 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
   Timer? _reconnectTimer;
   bool _connecting = true;
   bool _muted = false;
+
+  /// Push-to-talk: the mic is muted until the button is held. [talking] tracks
+  /// the held state so the button can read as live.
+  bool _ptt = false;
+  bool _talking = false;
   bool _reconnecting = false;
   bool _leaving = false;
   bool _joining = false;
@@ -246,6 +252,42 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
     });
   }
 
+  /// Switches between open-mic and push-to-talk. Entering PTT mutes the mic
+  /// until the button is held; leaving restores the current mute state.
+  Future<void> _setPtt(bool on) async {
+    setState(() {
+      _ptt = on;
+      _talking = false;
+      if (on) _muted = true;
+    });
+    final room = _room;
+    if (room?.localParticipant == null) return;
+    try {
+      await room!.localParticipant!.setMicrophoneEnabled(!_muted);
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
+
+  /// While the push-to-talk button is held, the mic opens; releasing closes it.
+  Future<void> _setTalking(bool talking) async {
+    if (!_ptt) return;
+    final room = _room;
+    if (room?.localParticipant == null) return;
+    try {
+      await room!.localParticipant!.setMicrophoneEnabled(talking);
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _talking = talking;
+      _muted = !talking;
+      if (talking) _micDenied = false;
+    });
+  }
+
   Future<void> _leave() async {
     _leaving = true;
     await _teardownRoom();
@@ -359,25 +401,125 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
           if (room != null)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: BrandSpace.md),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              child: Column(
                 children: [
-                  BrandSecondaryButton(
-                    label: _muted ? 'Unmute' : 'Mute',
-                    expand: false,
-                    leading: Icon(
-                      _muted ? Icons.mic_off_rounded : Icons.mic_rounded,
-                      size: 20,
-                      color: BrandColors.textHeadlineAlt,
-                    ),
-                    onPressed: _toggleMute,
+                  _PttToggle(value: _ptt, onChanged: _setPtt),
+                  const SizedBox(height: BrandSpace.md),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (_ptt)
+                        _HoldToTalkButton(
+                          talking: _talking,
+                          onStart: () => _setTalking(true),
+                          onStop: () => _setTalking(false),
+                        )
+                      else
+                        BrandSecondaryButton(
+                          label: _muted ? 'Unmute' : 'Mute',
+                          expand: false,
+                          leading: Icon(
+                            _muted ? Icons.mic_off_rounded : Icons.mic_rounded,
+                            size: 20,
+                            color: BrandColors.textHeadlineAlt,
+                          ),
+                          onPressed: _toggleMute,
+                        ),
+                      const SizedBox(width: BrandSpace.md),
+                      _LeaveButton(onPressed: _leave),
+                    ],
                   ),
-                  const SizedBox(width: BrandSpace.md),
-                  _LeaveButton(onPressed: _leave),
                 ],
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// A "push-to-talk" mode switch, sitting above the call controls.
+class _PttToggle extends StatelessWidget {
+  const _PttToggle({required this.value, required this.onChanged});
+
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: BrandSpace.md),
+      child: Row(
+        children: [
+          Icon(
+            Icons.record_voice_over_rounded,
+            size: 18,
+            color: BrandColors.primary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Push to talk',
+              style: BrandText.titleSm.copyWith(
+                color: BrandColors.textHeadline,
+              ),
+            ),
+          ),
+          FSwitch(value: value, onChange: onChanged),
+        ],
+      ),
+    );
+  }
+}
+
+/// A press-and-hold mic button: open while held, closed on release. The
+/// convoy's walkie-talkie affordance.
+class _HoldToTalkButton extends StatelessWidget {
+  const _HoldToTalkButton({
+    required this.talking,
+    required this.onStart,
+    required this.onStop,
+  });
+
+  final bool talking;
+  final VoidCallback onStart;
+  final VoidCallback onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = talking ? BrandColors.onPrimary : BrandColors.textHeadline;
+    final iconColor = talking ? BrandColors.onPrimary : BrandColors.primary;
+    return GestureDetector(
+      onTapDown: (_) => onStart(),
+      onTapUp: (_) => onStop(),
+      onTapCancel: onStop,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        height: 56,
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        decoration: BoxDecoration(
+          color: talking
+              ? BrandColors.primaryContainer
+              : BrandColors.neutralButton,
+          borderRadius: BrandRadii.pill,
+          boxShadow: talking ? BrandShadows.primaryGlow : BrandShadows.subtle,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              talking ? Icons.mic_rounded : Icons.mic_none_rounded,
+              size: 20,
+              color: iconColor,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              talking ? 'Talking…' : 'Hold to talk',
+              style: BrandText.labelLg.copyWith(color: fg),
+            ),
+          ],
+        ),
       ),
     );
   }

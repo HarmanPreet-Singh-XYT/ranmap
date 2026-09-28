@@ -1,16 +1,25 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/models/checklist_item.dart';
+import '../../data/models/route_template.dart';
 import '../../data/models/stop_proposal.dart';
 import '../../data/models/trip.dart';
 import '../../data/models/trip_expense.dart';
 import '../../data/models/trip_leg.dart';
 import '../../data/models/trip_stats.dart';
 import '../../data/models/trip_stop.dart';
+import '../../data/models/weather.dart';
+import '../../data/providers/repository_providers.dart';
+import '../../data/repositories/route_template_repository.dart';
 import '../../data/repositories/trip_repository.dart';
 import '../../data/services/supabase_service.dart';
 
 final tripRepositoryProvider = Provider<TripRepository>(
   (ref) => TripRepository(),
+);
+
+final routeTemplateRepositoryProvider = Provider<RouteTemplateRepository>(
+  (ref) => RouteTemplateRepository(),
 );
 
 /// All trips the current user is part of, newest first.
@@ -89,3 +98,56 @@ final myTripStatsProvider =
     FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) {
       return ref.watch(tripRepositoryProvider).myTripStats();
     });
+
+/// The trip's shared prep checklist.
+final tripChecklistProvider = FutureProvider.autoDispose
+    .family<List<ChecklistItem>, String>((ref, tripId) {
+      return ref.watch(tripRepositoryProvider).checklistFor(tripId);
+    });
+
+/// The current user's saved route templates, newest first.
+final routeTemplatesProvider = FutureProvider.autoDispose<List<RouteTemplate>>((
+  ref,
+) {
+  return ref.watch(routeTemplateRepositoryProvider).fetchTemplates();
+});
+
+/// Weather at each stop, keyed by stop id, for the stop's planned arrival.
+/// Only stops with a planned time are forecast; the rest are omitted. Weather
+/// is best-effort — a failure yields an empty map rather than an error.
+final tripStopWeatherProvider = FutureProvider.autoDispose
+    .family<Map<String, WeatherPoint>, String>((ref, tripId) async {
+      final stops = await ref.watch(tripStopsProvider(tripId).future);
+      final timed = stops.where((s) => s.plannedArrival != null).toList();
+      if (timed.isEmpty) return const {};
+      try {
+        final results = await ref
+            .watch(weatherRepositoryProvider)
+            .pointForecasts([
+              for (final s in timed)
+                (lat: s.point.lat, lng: s.point.lng, at: s.plannedArrival!),
+            ]);
+        return {
+          for (var i = 0; i < timed.length && i < results.length; i++)
+            timed[i].id: results[i],
+        };
+      } catch (_) {
+        return const {};
+      }
+    });
+
+/// The trip's public watch token, or null when it isn't being shared.
+final tripWatchTokenProvider = FutureProvider.autoDispose
+    .family<String?, String>((ref, tripId) {
+      return ref.watch(tripRepositoryProvider).watchToken(tripId);
+    });
+
+/// The user's total recorded distance across every trip — their odometer,
+/// derived from the stats the app already keeps (no manual mileage entry).
+final odometerKmProvider = FutureProvider.autoDispose<double>((ref) async {
+  final rows = await ref.watch(myTripStatsProvider.future);
+  return rows.fold<double>(
+    0,
+    (sum, r) => sum + ((r['total_distance_km'] as num?)?.toDouble() ?? 0),
+  );
+});

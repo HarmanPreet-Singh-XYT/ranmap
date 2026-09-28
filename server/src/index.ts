@@ -15,6 +15,8 @@ import { notificationsRouter } from "./routes/notifications.js";
 import { phoneRouter } from "./routes/phone.js";
 import { planRouter } from "./routes/plan.js";
 import { voiceRouter } from "./routes/voice.js";
+import { watchRouter } from "./routes/watch.js";
+import { weatherRouter } from "./routes/weather.js";
 
 const app = express();
 
@@ -53,7 +55,7 @@ const preAuthLimit = rateLimit({
   message: "Too many requests — please slow down.",
 });
 app.use(
-  ["/ai", "/phone", "/voice", "/maps", "/account", "/notifications", "/plan"],
+  ["/ai", "/phone", "/voice", "/maps", "/account", "/notifications", "/plan", "/weather"],
   preAuthLimit,
 );
 
@@ -65,6 +67,9 @@ app.use("/maps", mapsRouter);
 app.use("/account", accountRouter);
 app.use("/notifications", notificationsRouter);
 app.use("/plan", planRouter);
+app.use("/weather", weatherRouter);
+// Public (no session): the "watch my ride" page, authorized by its share token.
+app.use("/watch", watchRouter);
 // Not behind the pre-auth IP limit above: RevenueCat's webhook has no session
 // and a burst of events shouldn't get rate-limited; it authenticates with a
 // shared secret (see billing.ts) instead.

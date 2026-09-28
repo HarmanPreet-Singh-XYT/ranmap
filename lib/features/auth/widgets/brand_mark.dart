@@ -11,28 +11,19 @@ class BrandMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return SizedBox(
       height: size,
       width: size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(size * 0.3),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [BrandColors.primaryContainer, BrandColors.primary],
+      child: Image.asset(
+        'assets/images/logo/ranmap_logo.png',
+        width: size,
+        height: size,
+        fit: BoxFit.contain,
+        errorBuilder: (_, _, _) => Icon(
+          Icons.navigation_rounded,
+          color: BrandColors.primary,
+          size: size * 0.75,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: BrandColors.primaryContainer.withValues(alpha: 0.35),
-            offset: const Offset(0, 10),
-            blurRadius: 24,
-          ),
-        ],
-      ),
-      child: Icon(
-        Icons.navigation_rounded,
-        color: Colors.white,
-        size: size * 0.55,
       ),
     );
   }

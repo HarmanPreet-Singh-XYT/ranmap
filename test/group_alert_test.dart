@@ -70,8 +70,21 @@ void main() {
       expect(groupAlertKindFromString('regroup'), GroupAlertKind.regroup);
       expect(groupAlertKindFromString('arrived'), GroupAlertKind.arrived);
       expect(groupAlertKindFromString('departed'), GroupAlertKind.departed);
+      expect(groupAlertKindFromString('wait'), GroupAlertKind.wait);
+      expect(groupAlertKindFromString('stopping'), GroupAlertKind.stopping);
+      expect(groupAlertKindFromString('fuel'), GroupAlertKind.fuel);
       expect(groupAlertKindFromString(null), GroupAlertKind.departed);
       expect(groupAlertKindFromString('garbage'), GroupAlertKind.departed);
+    });
+
+    test('quick statuses round-trip through their wire value', () {
+      for (final kind in [
+        GroupAlertKind.wait,
+        GroupAlertKind.stopping,
+        GroupAlertKind.fuel,
+      ]) {
+        expect(groupAlertKindFromString(kind.wire), kind);
+      }
     });
   });
 }

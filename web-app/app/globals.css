@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+/*
+ * Ranmap Pure Light-Mode Design System — Editorial Luxury Travel & Overland
+ * Inspired by Airbnb, Travelwise, and Monocle
+ */
+:root {
+  --color-primary: #15803d;
+  --color-primary-deep: #166534;
+  --color-primary-light: #22c55e;
+  --color-mint: #059669;
+  --color-mint-soft: #ecfdf5;
+  --color-terracotta: #c2410c;
+  --color-amber: #d97706;
+
+  --color-background: #faf8f5;
+  --color-surface: #ffffff;
+  --color-surface-raised: #f3f0e8;
+  --color-surface-card: #ffffff;
+  --color-surface-translucent: rgba(250, 248, 245, 0.9);
+
+  --color-border: #e6e3da;
+  --color-border-strong: #d4cfc3;
+
+  --color-ink: #0f172a;
+  --color-ink-secondary: #334155;
+  --color-ink-muted: #64748b;
+
+  --background: var(--color-background);
+  --foreground: var(--color-ink);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-primary: var(--color-primary);
+  --color-primary-deep: var(--color-primary-deep);
+  --color-mint: var(--color-mint);
+  --color-terracotta: var(--color-terracotta);
+
+  --color-surface: var(--color-surface);
+  --color-surface-raised: var(--color-surface-raised);
+  --color-surface-card: var(--color-surface-card);
+
+  --color-border: var(--color-border);
+  --color-border-strong: var(--color-border-strong);
+
+  --color-ink: var(--color-ink);
+  --color-ink-secondary: var(--color-ink-secondary);
+  --color-ink-muted: var(--color-ink-muted);
+
+  --font-sans: var(--font-jakarta), var(--font-inter), system-ui, sans-serif;
+  --font-display: var(--font-jakarta), system-ui, sans-serif;
+}
+
+/* Tactile Surface Treatments */
+.panel-card {
+  background: #ffffff;
+  border: 1px solid #e6e3da;
+  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.04);
+}
+
+.panel-elevated {
+  background: #ffffff;
+  border: 1px solid #d4cfc3;
+  box-shadow: 0 20px 40px -10px rgba(15, 23, 42, 0.08);
+}
+
+/* Subtle Animated Waveform for Voice Card */
+@keyframes voice-wave {
+  0%, 100% { height: 6px; }
+  50% { height: 22px; }
+}
+
+.animate-voice-1 { animation: voice-wave 0.8s ease-in-out infinite; }
+.animate-voice-2 { animation: voice-wave 0.6s ease-in-out infinite 0.15s; }
+.animate-voice-3 { animation: voice-wave 0.9s ease-in-out infinite 0.3s; }
+.animate-voice-4 { animation: voice-wave 0.7s ease-in-out infinite 0.45s; }
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

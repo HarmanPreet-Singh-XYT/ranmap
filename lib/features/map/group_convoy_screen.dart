@@ -8,7 +8,9 @@ import 'package:forui/forui.dart';
 // `Position` (GeoJSON) is hidden so `Geo.pos` can still be used for the
 // navigate-to-member hand-off.
 import 'package:geolocator/geolocator.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/providers/emergency_contact_provider.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
@@ -128,6 +130,83 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
     }
   }
 
+  /// Raises a quick one-tap status (wait up / stopping / need fuel).
+  Future<void> _quick(GroupAlertKind kind, String message) async {
+    final pos = ref.read(devicePositionProvider).valueOrNull;
+    try {
+      await ref
+          .read(convoyRepositoryProvider)
+          .sendAlert(
+            groupId: widget.groupId,
+            kind: kind,
+            message: message,
+            lat: pos?.latitude,
+            lng: pos?.longitude,
+          );
+      if (mounted) showAppToast(context, 'Sent to your crew.');
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
+
+  Widget _quickStatuses() {
+    return Wrap(
+      spacing: BrandSpace.sm,
+      runSpacing: BrandSpace.sm,
+      children: [
+        _QuickChip(
+          icon: Icons.pan_tool_alt_rounded,
+          label: 'Wait up',
+          onTap: () => _quick(GroupAlertKind.wait, 'Wait up — hold on'),
+        ),
+        _QuickChip(
+          icon: Icons.pause_circle_outline_rounded,
+          label: 'Stopping',
+          onTap: () => _quick(GroupAlertKind.stopping, "I'm stopping"),
+        ),
+        _QuickChip(
+          icon: Icons.local_gas_station_rounded,
+          label: 'Need fuel',
+          onTap: () => _quick(GroupAlertKind.fuel, 'Need fuel'),
+        ),
+      ],
+    );
+  }
+
+  /// Opens the device SMS composer, pre-filled with an SOS + location, to the
+  /// emergency contact. SMS needs no data, so this is the no-signal fallback.
+  Future<void> _textContact() async {
+    final contact = ref.read(emergencyContactProvider);
+    if (!contact.isSet) {
+      showAppToast(
+        context,
+        'Add an emergency contact in Settings.',
+        error: true,
+      );
+      return;
+    }
+    final pos = ref.read(devicePositionProvider).valueOrNull;
+    final body = pos == null
+        ? 'SOS from Ranmap — I need help.'
+        : 'SOS from Ranmap — I need help. My location: '
+              'https://maps.google.com/?q=${pos.latitude},${pos.longitude}';
+    final uri = Uri(
+      scheme: 'sms',
+      path: contact.phone,
+      queryParameters: {'body': body},
+    );
+    try {
+      final launched = await launchUrl(uri);
+      if (!launched && mounted) {
+        showAppToast(context, 'Could not open Messages.', error: true);
+      }
+    } catch (_) {
+      if (mounted) {
+        showAppToast(context, 'Could not open Messages.', error: true);
+      }
+    }
+  }
+
   Future<void> _resolve(GroupAlert alert) async {
     try {
       await ref.read(convoyRepositoryProvider).resolveAlert(alert.id);
@@ -237,8 +316,7 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
                   imageAsset: 'assets/images/scenic/convoy_pack_scenic.jpg',
                   icon: Icons.groups_outlined,
                   title: 'Assemble your convoy crew',
-                  message:
-                      'Invite members to this group to track live road positions and telemetry on the map.',
+                  message: 'Invite members to this group to track live road positions and telemetry on the map.',
                 );
               }
               final rows = [
@@ -256,6 +334,20 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
           ),
           const SizedBox(height: BrandSpace.lg),
           _actions(ownPos != null),
+          const SizedBox(height: BrandSpace.md),
+          _quickStatuses(),
+          if (ref.watch(emergencyContactProvider).isSet) ...[
+            const SizedBox(height: BrandSpace.md),
+            BrandSecondaryButton(
+              label: 'Text emergency contact',
+              leading: Icon(
+                Icons.sms_outlined,
+                size: 18,
+                color: BrandColors.textHeadlineAlt,
+              ),
+              onPressed: _textContact,
+            ),
+          ],
           const SizedBox(height: BrandSpace.lg),
           BrandSectionHeader(icon: Icons.campaign_rounded, title: 'Alerts'),
           const SizedBox(height: BrandSpace.sm),
@@ -533,6 +625,27 @@ class _AlertCard extends StatelessWidget {
     final name = alert.creatorUsername != null
         ? '@${alert.creatorUsername}'
         : 'A member';
+    final icon = switch (alert.kind) {
+      GroupAlertKind.sos => Icons.sos_rounded,
+      GroupAlertKind.regroup => Icons.pin_drop_rounded,
+      GroupAlertKind.wait => Icons.pan_tool_alt_rounded,
+      GroupAlertKind.stopping => Icons.pause_circle_outline_rounded,
+      GroupAlertKind.fuel => Icons.local_gas_station_rounded,
+      _ => Icons.info_outline_rounded,
+    };
+    final title = switch (alert.kind) {
+      GroupAlertKind.sos => 'SOS from $name',
+      GroupAlertKind.regroup => 'Rendezvous · $name',
+      GroupAlertKind.wait => '$name: wait up',
+      GroupAlertKind.stopping => '$name is stopping',
+      GroupAlertKind.fuel => '$name needs fuel',
+      _ => '$name: ${alert.kind.label}',
+    };
+    final subtitle = alert.message?.isNotEmpty == true
+        ? alert.message!
+        : alert.kind == GroupAlertKind.regroup
+        ? '${alert.presentCount}/$activeCount arrived'
+        : alert.kind.label;
 
     return BrandCard(
       padding: const EdgeInsets.all(BrandSpace.md),
@@ -550,11 +663,7 @@ class _AlertCard extends StatelessWidget {
                       : BrandColors.secondaryFixed.withValues(alpha: 0.5),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(
-                  isSos ? Icons.sos_rounded : Icons.pin_drop_rounded,
-                  color: accent,
-                  size: 20,
-                ),
+                child: Icon(icon, color: accent, size: 20),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -562,7 +671,7 @@ class _AlertCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      isSos ? 'SOS from $name' : 'Rendezvous · $name',
+                      title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: BrandText.titleSm.copyWith(
@@ -570,11 +679,7 @@ class _AlertCard extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      alert.message?.isNotEmpty == true
-                          ? alert.message!
-                          : isSos
-                          ? 'Needs help — see their live location'
-                          : '${alert.presentCount}/$activeCount arrived',
+                      subtitle,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: BrandText.bodySm.copyWith(
@@ -596,6 +701,46 @@ class _AlertCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A one-tap convoy status chip ("wait up", "stopping", "need fuel").
+class _QuickChip extends StatelessWidget {
+  const _QuickChip({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return BrandPressable(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: BrandColors.surfaceContainerLow,
+          borderRadius: BrandRadii.pill,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: BrandColors.primary),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: BrandText.labelSm.copyWith(
+                color: BrandColors.textHeadline,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

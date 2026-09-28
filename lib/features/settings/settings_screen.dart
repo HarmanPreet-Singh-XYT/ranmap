@@ -5,18 +5,24 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/offline/outbox_providers.dart';
+import '../../core/providers/emergency_contact_provider.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../core/push/push_service.dart';
 import '../../core/router/auth_state_provider.dart';
 import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
+import '../../core/util/validation.dart';
 import '../../core/widgets/app_choice_sheet.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_alert.dart';
+import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_sheet_surface.dart';
+import '../../core/widgets/brand/brand_text_field.dart';
 import '../../data/providers/repository_providers.dart';
 import '../../data/repositories/notification_repository.dart';
 import '../../data/services/supabase_service.dart';
@@ -303,6 +309,30 @@ class SettingsScreen extends ConsumerWidget {
           const _LocationSharingNote(),
           const SizedBox(height: BrandSpace.lg),
           const BrandSectionHeader(
+            icon: Icons.health_and_safety_outlined,
+            title: 'Safety',
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          _Card(
+            children: [
+              Builder(
+                builder: (context) {
+                  final contact = ref.watch(emergencyContactProvider);
+                  return BrandListRow(
+                    icon: Icons.emergency_share_outlined,
+                    iconColor: BrandColors.primary,
+                    title: 'Emergency contact',
+                    subtitle: contact.isSet
+                        ? '${contact.label} · ${contact.phone}'
+                        : 'Text someone your location when you send an SOS',
+                    onTap: () => _editEmergencyContact(context, ref),
+                  );
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: BrandSpace.lg),
+          const BrandSectionHeader(
             icon: Icons.cloud_done_rounded,
             title: 'Data',
           ),
@@ -391,6 +421,31 @@ class SettingsScreen extends ConsumerWidget {
     'public' => 'Public',
     _ => 'Trip members',
   };
+
+  /// Edits the locally-stored emergency contact (never uploaded).
+  Future<void> _editEmergencyContact(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final current = ref.read(emergencyContactProvider);
+    final result = await showFDialog<(String?, String?)>(
+      context: context,
+      builder: (context, style, animation) => FDialog(
+        animation: animation,
+        builder: (context, style) => BrandSheetSurface.dialog(
+          child: _EmergencyContactContent(
+            initialName: current.name,
+            initialPhone: current.phone,
+          ),
+        ),
+      ),
+    );
+    if (result == null) return;
+    await ref
+        .read(emergencyContactProvider.notifier)
+        .save(name: result.$1, phone: result.$2);
+    if (context.mounted) showAppToast(context, 'Emergency contact saved.');
+  }
 }
 
 /// A white card holding a stack of rows.
@@ -577,6 +632,110 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
               },
             ),
       ],
+    );
+  }
+}
+
+/// Collects a name + phone for the emergency contact. Returns
+/// `(name, phone)`; both may be empty (clearing it).
+class _EmergencyContactContent extends StatefulWidget {
+  const _EmergencyContactContent({this.initialName, this.initialPhone});
+
+  final String? initialName;
+  final String? initialPhone;
+
+  @override
+  State<_EmergencyContactContent> createState() =>
+      _EmergencyContactContentState();
+}
+
+class _EmergencyContactContentState extends State<_EmergencyContactContent> {
+  late final TextEditingController _nameCtrl = TextEditingController(
+    text: widget.initialName,
+  );
+  late final TextEditingController _phoneCtrl = TextEditingController(
+    text: widget.initialPhone,
+  );
+  String? _error;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _phoneCtrl.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final phone = _phoneCtrl.text.trim();
+    if (phone.isNotEmpty) {
+      final validationError = phoneError(phone);
+      if (validationError != null) {
+        setState(() => _error = validationError);
+        return;
+      }
+    }
+    Navigator.of(context).pop((_nameCtrl.text.trim(), phone));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(22),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Emergency contact',
+            style: BrandText.titleMd.copyWith(color: BrandColors.textHeadline),
+          ),
+          const SizedBox(height: BrandSpace.md),
+          BrandTextField(
+            controller: _nameCtrl,
+            hint: 'Name (optional)',
+            leadingIcon: Icons.person_outline_rounded,
+            maxLength: 60,
+          ),
+          const SizedBox(height: BrandSpace.md),
+          BrandTextField(
+            controller: _phoneCtrl,
+            hint: '+15551234567',
+            leadingIcon: Icons.phone_outlined,
+            keyboardType: TextInputType.phone,
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: BrandSpace.sm),
+            Text(
+              _error!,
+              style: BrandText.bodySm.copyWith(color: BrandColors.error),
+            ),
+          ],
+          const SizedBox(height: BrandSpace.sm),
+          Text(
+            'Stored on this device only. Used when you send an SOS with no data.',
+            style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
+          ),
+          const SizedBox(height: BrandSpace.lg),
+          Row(
+            children: [
+              Expanded(
+                child: BrandSecondaryButton(
+                  label: 'Cancel',
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ),
+              const SizedBox(width: BrandSpace.sm),
+              Expanded(
+                child: BrandPrimaryButton(
+                  label: 'Save',
+                  glow: false,
+                  onPressed: _save,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

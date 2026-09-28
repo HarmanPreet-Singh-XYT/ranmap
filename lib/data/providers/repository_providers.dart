@@ -8,6 +8,7 @@ import '../repositories/phone_repository.dart';
 import '../repositories/premium_repository.dart';
 import '../repositories/profile_repository.dart';
 import '../repositories/usage_repository.dart';
+import '../repositories/weather_repository.dart';
 
 /// Repository providers live in the data layer so both core (router/auth) and
 /// features can depend on them without a feature layer importing another
@@ -36,4 +37,7 @@ final usageRepositoryProvider = Provider<UsageRepository>(
 );
 final convoyRepositoryProvider = Provider<ConvoyRepository>(
   (ref) => ConvoyRepository(),
+);
+final weatherRepositoryProvider = Provider<WeatherRepository>(
+  (ref) => WeatherRepository(),
 );

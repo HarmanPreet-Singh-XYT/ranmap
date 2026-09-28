@@ -16,6 +16,7 @@ import '../../core/widgets/brand/brand_text_field.dart';
 import '../../data/services/supabase_service.dart';
 import 'social_auth.dart';
 import 'widgets/auth_social.dart';
+import 'widgets/brand_mark.dart';
 
 /// Email / password sign-in, dressed in the brand surface and offering the same
 /// Google / Apple providers as create-account.
@@ -257,26 +258,7 @@ class _Hero extends StatelessWidget {
                   boxShadow: BrandShadows.pod,
                 ),
                 child: Center(
-                  child: Container(
-                    height: 64,
-                    width: 64,
-                    decoration: BoxDecoration(
-                      borderRadius: BrandRadii.miniRadius,
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          BrandColors.primary,
-                          BrandColors.primaryContainer,
-                        ],
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.navigation_rounded,
-                      size: 34,
-                      color: BrandColors.onPrimary,
-                    ),
-                  ),
+                  child: const BrandMark(size: 64),
                 ),
               ),
             ],

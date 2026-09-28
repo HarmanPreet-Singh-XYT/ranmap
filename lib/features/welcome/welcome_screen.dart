@@ -68,6 +68,27 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
             constraints: BoxConstraints(minHeight: constraints.maxHeight),
             child: Column(
               children: [
+                const SizedBox(height: BrandSpace.xs),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Image.asset(
+                      'assets/images/logo/ranmap_logo.png',
+                      width: 28,
+                      height: 28,
+                      fit: BoxFit.contain,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Ranmap',
+                      style: BrandText.titleMd.copyWith(
+                        color: BrandColors.textHeadline,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: BrandSpace.sm),
                 BrandDots(
                   count: _slides.length,

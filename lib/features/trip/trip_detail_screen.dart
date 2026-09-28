@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/constants/avatars.dart';
+import '../../core/constants/env.dart';
 import '../../core/constants/invite_links.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../core/router/auth_state_provider.dart';
@@ -42,9 +43,12 @@ import '../social/group_detail_screen.dart';
 import '../social/social_providers.dart';
 import 'add_expense_screen.dart';
 import 'add_stop_screen.dart';
+import 'trip_checklist_tab.dart';
 import 'trip_ledger.dart';
 import 'trip_providers.dart';
+import 'trip_recap_screen.dart';
 import 'vehicle_mode_ui.dart';
+import 'weather_ui.dart';
 
 class TripDetailScreen extends ConsumerWidget {
   const TripDetailScreen({super.key, required this.trip});
@@ -138,6 +142,10 @@ class TripDetailScreen extends ConsumerWidget {
     WidgetRef ref,
     bool isCreator,
   ) async {
+    final canSaveRoute =
+        trip.originPoint != null &&
+        trip.destinationPoint != null &&
+        trip.routePolyline != null;
     await showFSheet<void>(
       context: context,
       side: FLayout.btt,
@@ -147,24 +155,156 @@ class TripDetailScreen extends ConsumerWidget {
             horizontal: BrandSpace.md,
             vertical: BrandSpace.xs,
           ),
-          child: BrandListRow(
-            icon: isCreator ? Icons.delete_outline : Icons.logout,
-            titleColor: BrandColors.error,
-            iconColor: BrandColors.error,
-            iconBackground: BrandColors.errorContainer,
-            title: isCreator ? 'Delete trip' : 'Leave trip',
-            onTap: () {
-              Navigator.of(sheetContext).pop();
-              if (isCreator) {
-                _cancelTrip(context, ref);
-              } else {
-                _leaveTrip(context, ref);
-              }
-            },
+          child: Column(
+            children: [
+              BrandListRow(
+                icon: Icons.auto_awesome_rounded,
+                iconColor: BrandColors.primary,
+                title: 'Trip recap',
+                subtitle: 'The story of this drive — stats, spend, photos',
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => TripRecapScreen(trip: trip),
+                    ),
+                  );
+                },
+              ),
+              if (canSaveRoute) ...[
+                const BrandRowDivider(),
+                BrandListRow(
+                  icon: Icons.bookmark_add_outlined,
+                  iconColor: BrandColors.primary,
+                  title: 'Save route',
+                  subtitle: 'Reuse this drive on a future trip',
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _saveRouteTemplate(context, ref);
+                  },
+                ),
+              ],
+              if (isCreator) ...[
+                const BrandRowDivider(),
+                BrandListRow(
+                  icon: Icons.visibility_outlined,
+                  iconColor: BrandColors.primary,
+                  title: 'Share live link',
+                  subtitle:
+                      'Anyone can watch this trip live, no account needed',
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _shareWatchLink(context, ref);
+                  },
+                ),
+                const BrandRowDivider(),
+                BrandListRow(
+                  icon: Icons.link_off_rounded,
+                  title: 'Stop live link',
+                  subtitle: 'Disable any links already shared',
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _stopWatchLink(context, ref);
+                  },
+                ),
+              ],
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: isCreator ? Icons.delete_outline : Icons.logout,
+                titleColor: BrandColors.error,
+                iconColor: BrandColors.error,
+                iconBackground: BrandColors.errorContainer,
+                title: isCreator ? 'Delete trip' : 'Leave trip',
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  if (isCreator) {
+                    _cancelTrip(context, ref);
+                  } else {
+                    _leaveTrip(context, ref);
+                  }
+                },
+              ),
+            ],
           ),
         ),
       ),
     );
+  }
+
+  /// Saves this trip's route to the user's personal template library so a
+  /// familiar drive can be reused without re-planning.
+  Future<void> _saveRouteTemplate(BuildContext context, WidgetRef ref) async {
+    final name = await showAppTextDialog(
+      context,
+      title: 'Save route',
+      label: 'Name',
+      hint: trip.destinationName ?? 'My route',
+      confirmLabel: 'Save',
+      maxLength: kNameMaxLength,
+    );
+    if (name == null) return;
+    final validationError = nameError(name, label: 'Route name');
+    if (validationError != null) {
+      if (context.mounted) showAppToast(context, validationError, error: true);
+      return;
+    }
+    try {
+      await ref
+          .read(routeTemplateRepositoryProvider)
+          .createTemplate(
+            name: name,
+            originName: trip.originName,
+            originPoint: trip.originPoint,
+            destinationName: trip.destinationName,
+            destinationPoint: trip.destinationPoint,
+            routePolyline: trip.routePolyline,
+          );
+      ref.invalidate(routeTemplatesProvider);
+      if (context.mounted) showAppToast(context, 'Route saved.');
+    } catch (e) {
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
+
+  /// Creates (or reuses) this trip's public watch link and shares it.
+  Future<void> _shareWatchLink(BuildContext context, WidgetRef ref) async {
+    try {
+      final token = await ref
+          .read(tripRepositoryProvider)
+          .ensureWatchLink(trip.id);
+      ref.invalidate(tripWatchTokenProvider(trip.id));
+      final base = Env.backendUrl.replaceAll(RegExp(r'/+$'), '');
+      final url = '$base/watch/$token';
+      await SharePlus.instance.share(
+        ShareParams(
+          subject: trip.title,
+          text:
+              'Follow "${trip.title}" live on Ranmap:\n$url\n'
+              '(Anyone with this link can watch the crew on the road.)',
+        ),
+      );
+    } catch (e) {
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
+
+  /// Disables the trip's watch links.
+  Future<void> _stopWatchLink(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showAppConfirmDialog(
+      context,
+      title: 'Stop live link?',
+      message: 'Any shared link will stop working immediately.',
+      confirmLabel: 'Stop',
+      destructive: true,
+    );
+    if (!confirmed || !context.mounted) return;
+    try {
+      await ref.read(tripRepositoryProvider).revokeWatchLinks(trip.id);
+      ref.invalidate(tripWatchTokenProvider(trip.id));
+      if (context.mounted) showAppToast(context, 'Live link disabled.');
+    } catch (e) {
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+    }
   }
 
   @override
@@ -252,6 +392,10 @@ class TripDetailScreen extends ConsumerWidget {
                 FTabEntry(
                   label: const Text('Expenses'),
                   child: _ExpensesTab(tripId: trip.id, currency: trip.currency),
+                ),
+                FTabEntry(
+                  label: const Text('Pack'),
+                  child: TripChecklistTab(tripId: trip.id),
                 ),
               ],
             ),
@@ -815,11 +959,11 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
                 return Center(
                   child: SingleChildScrollView(
                     child: BrandEmptyState(
-                      imageAsset: 'assets/images/onboarding/welcome_pitstop.jpg',
+                      imageAsset:
+                          'assets/images/onboarding/welcome_pitstop.jpg',
                       icon: Icons.place_rounded,
                       title: 'Map your route stops',
-                      message:
-                          'Add scenic overlooks, coffee spots, and fuel stops. Your convoy will vote on stops and sync route ETAs in real-time.',
+                      message: 'Add scenic overlooks, coffee spots, and fuel stops. Your convoy will vote on stops and sync route ETAs in real-time.',
                     ),
                   ),
                 );
@@ -836,8 +980,7 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
                     imageAsset: 'assets/images/onboarding/welcome_pitstop.jpg',
                     icon: Icons.place_rounded,
                     title: 'Map your route stops',
-                    message:
-                        'Add scenic overlooks, coffee spots, and fuel stops. Your convoy will vote on stops and sync route ETAs in real-time.',
+                    message: 'Add scenic overlooks, coffee spots, and fuel stops. Your convoy will vote on stops and sync route ETAs in real-time.',
                   ),
                 ],
               );
@@ -854,6 +997,7 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
               children: [
                 if (nextStop != null)
                   _NextStopEta(tripId: widget.tripId, stop: nextStop),
+                _StopWeatherCard(tripId: widget.tripId),
                 if (voteCards.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
@@ -1445,11 +1589,11 @@ class _CrewTab extends ConsumerWidget {
                   const SizedBox(height: BrandSpace.md),
                   if (sorted.isEmpty)
                     const BrandEmptyState(
-                      imageAsset: 'assets/images/scenic/friends_crew_scenic.jpg',
+                      imageAsset:
+                          'assets/images/scenic/friends_crew_scenic.jpg',
                       icon: Icons.groups_rounded,
                       title: 'Invite your convoy crew',
-                      message:
-                          'Share an invite link so your friends can track the live map, broadcast GPS, and talk hands-free.',
+                      message: 'Share an invite link so your friends can track the live map, broadcast GPS, and talk hands-free.',
                     )
                   else ...[
                     BrandSectionHeader(
@@ -1831,8 +1975,7 @@ class _ExpensesTab extends ConsumerWidget {
                         'assets/images/scenic/passport_journal_scenic.jpg',
                     icon: Icons.receipt_long_rounded,
                     title: 'Shared Trip Ledger',
-                    message:
-                        'Log fuel, park passes, tolls, and coffee. RanMap automatically balances the math and settles up evenly.',
+                    message: 'Log fuel, park passes, tolls, and coffee. RanMap automatically balances the math and settles up evenly.',
                   ),
                 ),
               );
@@ -2231,6 +2374,90 @@ class _SpeedProfileCard extends StatelessWidget {
             style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Weather at each upcoming stop, for its planned arrival time. Hidden until
+/// at least one stop has both a planned time and a forecast.
+class _StopWeatherCard extends ConsumerWidget {
+  const _StopWeatherCard({required this.tripId});
+
+  final String tripId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final weather =
+        ref.watch(tripStopWeatherProvider(tripId)).valueOrNull ?? const {};
+    if (weather.isEmpty) return const SizedBox.shrink();
+    final stops =
+        ref.watch(tripStopsProvider(tripId)).valueOrNull ?? const <TripStop>[];
+
+    final rows = <Widget>[];
+    for (final stop in stops) {
+      final w = weather[stop.id];
+      if (w == null || !w.hasData) continue;
+      final v = weatherVisual(w.weatherCode);
+      final rain = w.precipitationProbability;
+      rows.add(
+        BrandListRow(
+          icon: v.icon,
+          iconColor: BrandColors.primary,
+          title: stop.name,
+          subtitle: v.label,
+          showChevron: false,
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (w.temperatureC != null)
+                Text(
+                  '${w.temperatureC!.round()}°C',
+                  style: BrandText.weight(
+                    BrandText.labelSm,
+                    700,
+                  ).copyWith(color: BrandColors.textHeadline),
+                ),
+              if (rain != null && rain >= 20) ...[
+                const SizedBox(width: BrandSpace.sm),
+                BrandPill(
+                  label: '$rain%',
+                  icon: Icons.water_drop_rounded,
+                  iconColor: BrandColors.primary,
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+    if (rows.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        BrandSpace.md,
+        BrandSpace.md,
+        BrandSpace.md,
+        0,
+      ),
+      child: BrandCard(
+        padding: const EdgeInsets.symmetric(
+          horizontal: BrandSpace.md,
+          vertical: BrandSpace.xs,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(top: BrandSpace.sm),
+              child: BrandSectionHeader(
+                icon: Icons.cloud_outlined,
+                title: 'Weather en route',
+              ),
+            ),
+            ...rows,
+          ],
+        ),
       ),
     );
   }

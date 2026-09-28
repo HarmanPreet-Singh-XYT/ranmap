@@ -45,6 +45,7 @@ import 'map_post_providers.dart';
 import 'map_post_viewer_sheet.dart';
 import 'nearby_places_sheet.dart';
 import 'navigate_to_member_sheet.dart';
+import 'offline_maps_screen.dart';
 import 'saved_place_providers.dart';
 
 /// A teammate shown in the live-teammates sheet.
@@ -539,6 +540,15 @@ class _MapScreenState extends ConsumerState<MapScreen>
                     tooltip: 'Save this place',
                     onTap: () => _savePlace(deviceLat, deviceLng),
                   ),
+                  _MapControl(
+                    icon: Icons.download_for_offline_outlined,
+                    tooltip: 'Offline maps',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const OfflineMapsScreen(),
+                      ),
+                    ),
+                  ),
                   if (activeTrip != null)
                     _MapControl(
                       icon: Icons.add_a_photo_outlined,
@@ -835,8 +845,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
         const SizedBox(height: BrandSpace.md),
         Text(
           'POPULAR CONVOY DRIVES',
-          style: BrandText.weight(BrandText.labelSm, 700)
-              .copyWith(color: BrandColors.textMuted),
+          style: BrandText.weight(
+            BrandText.labelSm,
+            700,
+          ).copyWith(color: BrandColors.textMuted),
         ),
         const SizedBox(height: BrandSpace.xs),
         SizedBox(
@@ -1576,10 +1588,7 @@ const List<_ScenicRoute> _kScenicDrives = [
 ];
 
 class _ScenicDriveCard extends StatelessWidget {
-  const _ScenicDriveCard({
-    required this.route,
-    required this.onTap,
-  });
+  const _ScenicDriveCard({required this.route, required this.onTap});
 
   final _ScenicRoute route;
   final VoidCallback onTap;
@@ -1603,9 +1612,8 @@ class _ScenicDriveCard extends StatelessWidget {
               Image.asset(
                 route.imageAsset,
                 fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => ColoredBox(
-                  color: BrandColors.surfaceContainerHigh,
-                ),
+                errorBuilder: (_, _, _) =>
+                    ColoredBox(color: BrandColors.surfaceContainerHigh),
               ),
               DecoratedBox(
                 decoration: BoxDecoration(
@@ -1630,7 +1638,9 @@ class _ScenicDriveCard extends StatelessWidget {
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: BrandColors.primaryContainer.withValues(alpha: 0.85),
+                        color: BrandColors.primaryContainer.withValues(
+                          alpha: 0.85,
+                        ),
                         borderRadius: BrandRadii.pill,
                       ),
                       child: Text(
@@ -1647,9 +1657,10 @@ class _ScenicDriveCard extends StatelessWidget {
                       route.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: BrandText.weight(BrandText.labelMd, 700).copyWith(
-                        color: Colors.white,
-                      ),
+                      style: BrandText.weight(
+                        BrandText.labelMd,
+                        700,
+                      ).copyWith(color: Colors.white),
                     ),
                     Row(
                       children: [

@@ -19,6 +19,7 @@ import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/brand/brand_sheet_surface.dart';
 import '../../core/widgets/brand/brand_text_field.dart';
 import '../../data/models/group.dart';
+import '../../data/models/route_template.dart';
 import '../../data/models/trip.dart';
 import '../../data/services/supabase_service.dart';
 import '../premium/paywall.dart';
@@ -93,6 +94,68 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
       MaterialPageRoute(builder: (_) => const PlanRouteScreen()),
     );
     if (result != null) setState(() => _plannedRoute = result);
+  }
+
+  /// Populates the route from one of the user's saved route templates.
+  Future<void> _pickTemplate() async {
+    final List<RouteTemplate> templates;
+    try {
+      templates = await ref.read(routeTemplatesProvider.future);
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+      return;
+    }
+    final usable = templates.where((t) => t.isUsable).toList();
+    if (usable.isEmpty) {
+      if (mounted) {
+        showAppToast(
+          context,
+          'No saved routes yet — save one from a trip\'s menu.',
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
+    final selected = await showFSheet<RouteTemplate>(
+      context: context,
+      side: FLayout.btt,
+      builder: (context) => BrandSheetSurface(
+        child: BrandCard(
+          padding: const EdgeInsets.symmetric(
+            horizontal: BrandSpace.md,
+            vertical: BrandSpace.xs,
+          ),
+          child: Column(
+            children: [
+              for (final (i, t) in usable.indexed) ...[
+                if (i > 0) const BrandRowDivider(),
+                BrandListRow(
+                  icon: Icons.alt_route_rounded,
+                  iconColor: BrandColors.primary,
+                  title: t.name,
+                  subtitle: [
+                    t.originName,
+                    t.destinationName,
+                  ].whereType<String>().join(' → '),
+                  showChevron: false,
+                  onTap: () => Navigator.of(context).pop(t),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected == null) return;
+    setState(
+      () => _plannedRoute = PlannedRoute(
+        originName: selected.originName ?? 'Start',
+        originPoint: selected.originPoint!,
+        destinationName: selected.destinationName ?? 'Finish',
+        destinationPoint: selected.destinationPoint!,
+        routePolyline: selected.routePolyline!,
+      ),
+    );
   }
 
   void _addInvitee() {
@@ -418,6 +481,24 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
                     ],
                   ),
                 ),
+                GestureDetector(
+                  onTap: _pickTemplate,
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    height: 44,
+                    width: 44,
+                    decoration: BoxDecoration(
+                      color: BrandColors.surfaceContainerLow,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.bookmark_outline_rounded,
+                      size: 20,
+                      color: BrandColors.primary,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: BrandSpace.sm),
                 BrandSecondaryButton(
                   label: _plannedRoute == null ? 'Plan route' : 'Change',
                   expand: false,

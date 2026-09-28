@@ -31,8 +31,11 @@ import '../social/friends_screen.dart';
 import '../social/groups_screen.dart';
 import '../social/social_providers.dart';
 import '../trip/trip_providers.dart';
+import 'documents_screen.dart';
 import 'linked_socials_screen.dart';
+import 'profile_extras_providers.dart';
 import 'profile_providers.dart';
+import 'service_screen.dart';
 import 'trip_history_screen.dart';
 
 /// The Profile tab — the pilot's hub: identity, Pro status, vehicle garage,
@@ -221,21 +224,19 @@ class BrandMarkGlyph extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return SizedBox(
       height: size,
       width: size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(size * 0.3),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [BrandColors.primaryContainer, BrandColors.primary],
+      child: Image.asset(
+        'assets/images/logo/ranmap_logo.png',
+        width: size,
+        height: size,
+        fit: BoxFit.contain,
+        errorBuilder: (_, _, _) => Icon(
+          Icons.navigation_rounded,
+          size: size * 0.75,
+          color: BrandColors.primary,
         ),
-      ),
-      child: Icon(
-        Icons.navigation_rounded,
-        size: size * 0.55,
-        color: BrandColors.onPrimary,
       ),
     );
   }
@@ -696,7 +697,8 @@ class _PlanUsageCard extends ConsumerWidget {
                     BrandBreakdownRow(
                       label: '${q.label} · ${q.cadence}',
                       fraction: q.fraction,
-                      valueLabel: '${q.usedLabel} / ${q.limitLabel}${q.unitSuffix}',
+                      valueLabel:
+                          '${q.usedLabel} / ${q.limitLabel}${q.unitSuffix}',
                       color: _quotaColor(q.fraction),
                     ),
                   ],
@@ -1098,6 +1100,12 @@ class _MenuCard extends ConsumerWidget {
         ref.watch(incomingRequestsProvider).valueOrNull?.length ?? 0;
     final groups = ref.watch(myGroupsProvider).valueOrNull?.length ?? 0;
     final outbox = ref.watch(outboxProvider);
+    final service = ref.watch(vehicleServiceProvider).valueOrNull;
+    final odometer = ref.watch(odometerKmProvider).valueOrNull;
+    final serviceDue =
+        service != null &&
+        odometer != null &&
+        (odometer - service.lastServiceKm) >= service.intervalKm;
 
     return BrandCard(
       padding: const EdgeInsets.symmetric(horizontal: BrandSpace.md),
@@ -1158,6 +1166,32 @@ class _MenuCard extends ConsumerWidget {
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const TripHistoryScreen()),
             ),
+            trailing: null,
+          ),
+          const BrandRowDivider(),
+          BrandListRow(
+            icon: Icons.build_circle_outlined,
+            title: 'Service & maintenance',
+            subtitle: 'Reminders from your mileage',
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const ServiceScreen())),
+            trailing: serviceDue
+                ? BrandPill(
+                    label: 'Due',
+                    bold: true,
+                    background: BrandColors.errorContainer,
+                    foreground: BrandColors.error,
+                  )
+                : null,
+          ),
+          const BrandRowDivider(),
+          BrandListRow(
+            icon: Icons.folder_copy_outlined,
+            title: 'Documents',
+            subtitle: 'Licence, insurance & tickets',
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const DocumentsScreen())),
             trailing: null,
           ),
           const BrandRowDivider(),

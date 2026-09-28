@@ -49,5 +49,23 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
-# Environment secrets
-.env
+# Environment secrets (but keep committed .env.example templates)
+.env*
+!.env.example
+!server/.env.example
+!web-app/.env.example
+
+# web-app (Next.js)
+web-app/.pnp
+web-app/.pnp.*
+web-app/.yarn/*
+!web-app/.yarn/patches
+!web-app/.yarn/plugins
+!web-app/.yarn/releases
+!web-app/.yarn/versions
+web-app/coverage
+web-app/.next/
+web-app/out/
+web-app/*.tsbuildinfo
+web-app/next-env.d.ts
+web-app/.vercel

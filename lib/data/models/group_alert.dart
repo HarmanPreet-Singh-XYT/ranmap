@@ -1,11 +1,15 @@
 /// A convoy alert raised by a group member: an SOS, a rendezvous ("regroup")
-/// point, or an arrival/departure check-in notification.
-enum GroupAlertKind { sos, regroup, arrived, departed }
+/// point, an arrival/departure check-in, or a quick status (wait / stopping /
+/// need fuel).
+enum GroupAlertKind { sos, regroup, arrived, departed, wait, stopping, fuel }
 
 GroupAlertKind groupAlertKindFromString(String? value) => switch (value) {
   'sos' => GroupAlertKind.sos,
   'regroup' => GroupAlertKind.regroup,
   'arrived' => GroupAlertKind.arrived,
+  'wait' => GroupAlertKind.wait,
+  'stopping' => GroupAlertKind.stopping,
+  'fuel' => GroupAlertKind.fuel,
   _ => GroupAlertKind.departed,
 };
 
@@ -17,6 +21,9 @@ extension GroupAlertKindX on GroupAlertKind {
     GroupAlertKind.regroup => 'Regroup',
     GroupAlertKind.arrived => 'Arrived',
     GroupAlertKind.departed => 'Departed',
+    GroupAlertKind.wait => 'Wait up',
+    GroupAlertKind.stopping => 'Stopping',
+    GroupAlertKind.fuel => 'Need fuel',
   };
 }
 

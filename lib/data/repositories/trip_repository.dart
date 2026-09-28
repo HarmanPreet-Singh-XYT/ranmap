@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../core/network/backend_client.dart';
+import '../models/checklist_item.dart';
 import '../models/profile.dart';
 import '../models/stop_proposal.dart';
 import '../models/trip.dart';
@@ -111,11 +112,10 @@ class TripRepository {
     required String userId,
   }) async {
     try {
-      await BackendClient.postJson(
-        '/notifications/trip-invite',
-        {'tripId': tripId, 'userId': userId},
-        fallbackMessage: 'Could not send the invite notification',
-      );
+      await BackendClient.postJson('/notifications/trip-invite', {
+        'tripId': tripId,
+        'userId': userId,
+      }, fallbackMessage: 'Could not send the invite notification');
     } catch (_) {
       // Best-effort: the invite already succeeded, so a push failure is silent.
     }
@@ -643,5 +643,96 @@ class TripRepository {
             (r['speed_mps'] as num) >= 0)
           (r['speed_mps'] as num).toDouble() * 3.6,
     ];
+  }
+
+  /// The trip's shared prep checklist, in creation order.
+  Future<List<ChecklistItem>> checklistFor(String tripId) async {
+    final rows = await _client
+        .from('trip_checklist_items')
+        .select()
+        .eq('trip_id', tripId)
+        .order('sort_order')
+        .order('created_at')
+        .limit(200);
+    return (rows as List)
+        .map((r) => ChecklistItem.fromJson(r as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Appends an item to the trip's checklist.
+  Future<ChecklistItem> addChecklistItem({
+    required String tripId,
+    required String label,
+  }) async {
+    final existing = await _client
+        .from('trip_checklist_items')
+        .select('sort_order')
+        .eq('trip_id', tripId)
+        .order('sort_order', ascending: false)
+        .limit(1)
+        .maybeSingle();
+    final nextSortOrder = existing == null
+        ? 0
+        : (existing['sort_order'] as num).toInt() + 1;
+
+    final row = await _client
+        .from('trip_checklist_items')
+        .insert({
+          'trip_id': tripId,
+          'created_by': SupabaseService.currentUserId,
+          'label': label,
+          'sort_order': nextSortOrder,
+        })
+        .select()
+        .single();
+    return ChecklistItem.fromJson(row);
+  }
+
+  Future<void> setChecklistItemDone({
+    required String id,
+    required bool done,
+  }) async {
+    await _client
+        .from('trip_checklist_items')
+        .update({'done': done})
+        .eq('id', id);
+  }
+
+  Future<void> deleteChecklistItem(String id) async {
+    await _client.from('trip_checklist_items').delete().eq('id', id);
+  }
+
+  /// The trip's current share token, or null when it isn't being shared.
+  Future<String?> watchToken(String tripId) async {
+    final row = await _client
+        .from('trip_shares')
+        .select('token')
+        .eq('trip_id', tripId)
+        .filter('revoked_at', 'is', null)
+        .order('created_at', ascending: false)
+        .limit(1)
+        .maybeSingle();
+    return row?['token'] as String?;
+  }
+
+  /// The trip's public watch token, creating one if none exists. Only the
+  /// trip's creator may create one (RLS).
+  Future<String> ensureWatchLink(String tripId) async {
+    final existing = await watchToken(tripId);
+    if (existing != null) return existing;
+    final row = await _client
+        .from('trip_shares')
+        .insert({
+          'trip_id': tripId,
+          'created_by': SupabaseService.currentUserId,
+        })
+        .select('token')
+        .single();
+    return row['token'] as String;
+  }
+
+  /// Removes the trip's share links, disabling the public watch page.
+  Future<void> revokeWatchLinks(String tripId) async {
+    await _client.from('trip_shares').delete().eq('trip_id', tripId);
   }
 }

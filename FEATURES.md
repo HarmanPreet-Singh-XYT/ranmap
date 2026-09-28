@@ -101,9 +101,18 @@ directly from the code (real limits, real copy, real field names).
 
 ### Profile screen
 - Avatar, display name (or just `@username` if none set), vehicle label (e.g. "Vehicle: Car").
-- Tiles: **Friends** (badge = incoming request count), **Groups**, **Linked socials**, **Trip stats & history**.
+- Tiles: **Friends** (badge = incoming request count), **Groups**, **Linked socials**, **Trip stats & history**, **Service & maintenance** (badge "Due" when a service is overdue), **Documents**.
 - **Ranmap Pro tile**: "Active — thanks for the support" (green) if subscribed, else "Unlock AI, voice & unlimited search" (amber) — tapping opens the paywall.
 - **Sign out** with confirmation dialog.
+
+### Service & maintenance
+- Odometer is the **sum of recorded trip distance** — no manual mileage entry.
+- Set a service interval (5,000–30,000 km presets); the screen shows distance since the last service, distance remaining, a progress bar, and a "Service due / Overdue by N" state.
+- **"Mark as serviced"** records the current odometer as the last service. The Profile menu shows a "Due" badge when overdue.
+
+### Documents
+- A private wallet for **licence, insurance, registration, tickets** — stored in a private storage bucket (`documents`) that only the owner can read.
+- Add a document by naming it, choosing its type, and picking an image; tap to open it (short-lived signed URL); delete removes both the row and the file.
 
 ### Edit profile
 - Username (same validation as onboarding, only re-checks availability if actually changed).
@@ -127,6 +136,7 @@ directly from the code (real limits, real copy, real field names).
 - **Account**: Edit profile, Change password/email, "Sign out other devices".
 - **Delete account** (double-confirmed): first dialog "Delete your account? This permanently deletes your profile, trips, photos, chats and messages. It cannot be undone." → second "Are you absolutely sure? There is no way to recover your data after this." → calls the server, which best-effort deletes storage files then the auth user (everything else cascades via FK).
 - **Privacy**: default photo visibility (Only me / Trip members / Public); static note explaining location sharing stops when a trip ends or you leave it.
+- **Safety**: an **Emergency contact** (name + phone, stored on-device only) used by the convoy's "Text emergency contact" SOS fallback.
 - **Data**: "Clear offline queue" — shows live pending-write count, confirms, then wipes the outbox.
 - **About**: version/build number, open-source licenses page.
 
@@ -142,12 +152,12 @@ directly from the code (real limits, real copy, real field names).
 
 ### New trip
 - Name required, ≤60 chars.
-- **"Plan route"** card (optional) — opens route planning; shows "No route planned" / "Route planned" state.
+- **"Plan route"** card (optional) — opens route planning; shows "No route planned" / "Route planned" state. A **"Saved"** button beside it fills the route from one of your saved route templates.
 - Invite members by typed username (chip on submit) or "From friends" picker sheet; duplicate usernames silently ignored.
 - On create: creates the trip, then invites each username — unresolvable usernames are reported after the fact via **"Trip created. Could not find: name1, name2"** without blocking creation.
 - Hitting the free-plan trip cap surfaces the Pro paywall instead of a raw error.
 
-### Trip detail — 3 tabs
+### Trip detail — 5 tabs: Stats · Stops · Crew · Expenses · Pack
 
 **Stats tab**
 - 2×2 grid: Distance, Max speed, Avg speed, Duration (unit-aware).
@@ -164,7 +174,11 @@ directly from the code (real limits, real copy, real field names).
 - Running total + per-category breakdown chips (e.g. "fuel: $40.00").
 - Swipe-to-delete with confirm dialog.
 
-**Header actions**: photo-gallery icon, "Complete" button (active trips only), overflow menu — Delete (creator only, "This permanently deletes the trip, its stops and expenses for everyone.") or Leave ("You will stop sharing your location on this trip.").
+**Pack tab**
+- A shared per-trip packing/prep checklist ("who's bringing what") — any participant can add, tick off, or remove an item.
+- Header shows a "Packed N/M" pill and progress bar.
+
+**Header actions**: photo-gallery icon, "Complete" button (active trips only), overflow menu — **Trip recap**, **Save route** (when the trip has a planned route), **Share live link** / **Stop live link** (creator only), and Delete (creator only) / Leave.
 
 ### Add stop
 - Auto-resolves device GPS as the default pin location; "Pick on map" opens a drag-to-place picker.
@@ -184,6 +198,16 @@ directly from the code (real limits, real copy, real field names).
 - "Find routes" fetches multiple alternate routes via the Directions API, rendered as polylines — selected route highlighted, others dimmed.
 - Each route tile shows "distance · duration" (e.g. "12.3 km · 18 min").
 - "Use this route" saves the polyline onto the trip.
+
+### Trip recap & saved routes
+- **Trip recap** (trip menu → "Trip recap"): a shareable post-drive summary — the route (origin → destination), date, crew count, a 2×2 stat grid (distance, moving time, top speed, average), the speed profile sparkline, a per-category **spend** breakdown, and a link to the trip's photos. "Share recap" exports a one-line summary via the system share sheet.
+- **Saved routes**: save a trip's planned route to a personal template library (trip menu → "Save route"), then reuse it when creating a trip (New trip → "Saved"). Templates are private to their owner.
+- **Weather en route**: for each stop that has a planned arrival time, the Stops tab shows the forecast at that hour (icon, temperature, rain %) from Open-Meteo (no API key) via the server's `/weather` proxy. Best-effort — hidden when unavailable, never fabricated.
+
+### Watch live link (share a trip with anyone)
+- The trip's creator can mint a **public read-only link** (trip menu → "Share live link") that anyone can open with no account — e.g. family following the crew.
+- The page is self-contained (server-rendered HTML at `/watch/<token>`): the route drawn as an SVG with each rider's latest position, refreshing every 15s. No map SDK, no token to leak.
+- **Revocable**: "Stop live link" deletes the share (creator-only RLS on `trip_shares`); a revoked/unknown token is a plain 404.
 
 ---
 
@@ -216,6 +240,8 @@ directly from the code (real limits, real copy, real field names).
 - **Convoy intelligence**: nearest-teammate safe-gap readout, a member flagged "Behind" past ~2 km, and "Stopped" when their speed drops to a standstill.
 - **SOS**: one tap alerts the whole crew (with your live location) and pushes them a notification.
 - **Regroup here**: shares a rendezvous point with your location; members who reach it (~150 m) are **auto-checked-in**, and the alert shows real "N/M arrived" progress. Admins can mark an alert resolved.
+- **Quick statuses**: one-tap **Wait up**, **Stopping**, and **Need fuel** signals that surface to the whole crew as alerts.
+- **SMS SOS fallback**: with an emergency contact set, a **Text emergency contact** action opens the device SMS composer pre-filled with "I need help" + your live map link — SMS works with no data, so it's the no-signal backup for the in-app SOS.
 - **Crew photos**: a gallery of map photos members have shared with the group (Share to a group from any map photo).
 - On the **main map**, when there's no active trip but a convoy is joined, the crew's live vehicles and roster appear exactly as they do on a trip.
 - Presence is stored as a latest-known-position snapshot (coarse, self-pruning); live movement rides the ephemeral broadcast, so a stationary member ages out of presence after ~15 minutes.
@@ -230,6 +256,7 @@ directly from the code (real limits, real copy, real field names).
   - **25** max pinned photos
 - **Metered features** (free allowance first, then gated): AI assistant, route & place search.
 - **"Travel together" voice unlock**: voice channels unlock for an entire trip/group if *any* member is Pro — not per-seat.
+- **Crew plan (already in place)**: because Pro is evaluated per trip/group (`trip_has_pro` / `group_has_pro`), one subscriber already covers their whole convoy — voice, the group-size cap, and the trip cap are lifted for everyone they travel with. This is the "one subscription, whole crew" model; no separate product is needed.
 - **Full-screen paywall**: shown once after sign-in and weekly thereafter for non-Pro users (7-day cooldown, persisted across restarts). Shows annual vs. monthly plans (annual default, "SAVE 40%" ribbon), a benefits list, "Restore Purchases", and a "Manage Subscription" deep link.
 - **Contextual paywall sheet**: shown at the moment a specific limit is hit — "You reached a Pro limit for `<feature>`." with the same purchase/restore actions and a "Not now" dismiss.
 - Billing runs through **RevenueCat**; `profiles.plan` is writable only by the server-side webhook, never the client. Purchase-cancel (dismissing the native store sheet) is swallowed silently, not shown as an error.
@@ -252,6 +279,11 @@ directly from the code (real limits, real copy, real field names).
 - **3D buildings toggle**: only works on Standard/Satellite (Outdoors has no 3D import — toggling there silently no-ops).
 - **Terrain toggle**: works on all 3 basemaps, uses a dedicated DEM source with 1.35× exaggeration.
 - **Automatic time-of-day lighting**: night/dawn/dusk/day preset chosen from the real clock (not user-selectable) — e.g. "night" before 6am or at/after 8pm.
+
+### Offline maps
+- A map control opens **Offline maps**: download a trip's route area as Mapbox tile packs (bounding box around the decoded route, padded), for the current basemap style.
+- Saved regions are listed with their size and tile count, and can be deleted. Downloads show live progress. Once present, the SDK serves tiles from disk, so the route renders with no signal.
+- Rendered by the Mapbox `TileStore`; no extra credential — it uses the same short-lived rendering token the map does.
 
 ### Vehicle models
 - Bundled low-poly glTF models per vehicle type (car/bike/scooter/SUV), generated by a Python tool since no binary art ships in the repo.
@@ -305,6 +337,7 @@ directly from the code (real limits, real copy, real field names).
 ### Voice channels
 - LiveKit-powered audio room per trip/group, joined explicitly (not auto-joined).
 - Mute/unmute toggle, leave button, live participant list with **speaking indicators** (green highlight) and mute icons per participant.
+- **Push-to-talk**: a mode switch turns the channel into a walkie-talkie — the mic stays muted until you hold **"Hold to talk"**, opening only while pressed (the convoy's native interaction).
 - **Auto-reconnect** with exponential backoff (1s → 2s → 4s → 8s → 16s, capped at 30s, up to 5 attempts) if the connection drops, showing "Reconnecting…" without tearing down the UI.
 - Unlocked for an entire trip/group if any member has Ranmap Pro — shown via a "Pro voice — unlocked for everyone here" banner.
 - Server enforces trip/group membership before minting a voice token (403 if you're not a member), plus a rate limit of 30 joins per 10 minutes.

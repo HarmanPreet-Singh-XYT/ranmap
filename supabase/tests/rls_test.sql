@@ -31,7 +31,9 @@ select ok(
         'trip_members', 'trip_stops', 'location_pings', 'trip_stats',
         'trip_expenses', 'map_posts', 'map_post_shares', 'chat_messages',
         'ai_conversations', 'ai_messages', 'ai_saved_places', 'scheduled_trips',
-        'group_locations', 'group_alerts', 'alert_checkins'
+        'group_locations', 'group_alerts', 'alert_checkins',
+        'trip_checklist_items', 'route_templates', 'trip_shares',
+        'vehicle_service', 'user_documents'
       )
   ),
   'RLS is enabled on every application table'
