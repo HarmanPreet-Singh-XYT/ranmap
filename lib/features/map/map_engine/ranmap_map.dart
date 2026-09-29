@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -100,11 +101,23 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
   Future<void> _onStyleLoaded(StyleLoadedEventData _) async {
     final map = _map;
     if (map == null) return;
-    await Scene3D.apply(map, buildings: _threeD, terrain: _terrain);
+    await Scene3D.apply(
+      map,
+      buildings: _threeD,
+      terrain: _terrain,
+      dark: _dark,
+    );
     await _applyLocationPuck(map);
     if (!mounted) return;
     widget.onStyleReady?.call(map);
   }
+
+  // The simulator sets no marker env var, but its app sandbox and binary
+  // always live under a `CoreSimulator` directory.
+  static final bool _isIosSimulator =
+      Platform.isIOS &&
+      (Platform.resolvedExecutable.contains('/CoreSimulator/') ||
+          (Platform.environment['HOME']?.contains('/CoreSimulator/') ?? false));
 
   Future<void> _applyLocationPuck(MapboxMap map) async {
     final vehicleType = widget.userVehicleType;
@@ -113,7 +126,10 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
         LocationComponentSettings(
           enabled: widget.showUserLocation,
           puckBearingEnabled: true,
-          locationPuck: vehicleType == null
+          // Mapbox's model parser segfaults on the iOS simulator (null deref in
+          // MapboxCoreMaps on `com.mapbox.threadpool`), so the simulator gets the
+          // default puck; real devices get the 3D vehicle.
+          locationPuck: vehicleType == null || _isIosSimulator
               ? null
               : LocationPuck(
                   locationPuck3D: LocationPuck3D(
@@ -159,7 +175,7 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
       await Scene3D.applyStandard3d(
         map,
         buildings: enabled,
-        lightPreset: Scene3D.lightPresetFor(DateTime.now()),
+        lightPreset: Scene3D.lightPresetFor(DateTime.now(), dark: _dark),
       );
     }
   }
@@ -169,6 +185,31 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
     setState(() => _terrain = enabled);
     final map = _map;
     if (map != null) await Scene3D.setTerrain(map, enabled);
+  }
+
+  bool get _dark => Theme.brightnessOf(context) == Brightness.dark;
+
+  Brightness? _lastBrightness;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final brightness = Theme.brightnessOf(context);
+    final changed = _lastBrightness != null && _lastBrightness != brightness;
+    _lastBrightness = brightness;
+    final map = _map;
+    if (changed && map != null) {
+      unawaited(
+        Scene3D.applyStandard3d(
+          map,
+          buildings: _threeD,
+          lightPreset: Scene3D.lightPresetFor(
+            DateTime.now(),
+            dark: brightness == Brightness.dark,
+          ),
+        ),
+      );
+    }
   }
 
   @override

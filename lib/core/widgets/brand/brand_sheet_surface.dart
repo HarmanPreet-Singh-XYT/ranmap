@@ -69,9 +69,15 @@ class BrandSheetSurface extends StatelessWidget {
     // through unchanged, so it never alters the content's layout.
     final surface = Container(
       decoration: BoxDecoration(color: background, borderRadius: radius),
-      child: SafeArea(
-        top: false,
-        child: Padding(padding: padding, child: child),
+      // ForUI sheets/dialogs sit outside any Material, but text fields, list
+      // tiles and inkwells inside them need one. Sitting below the coloured
+      // container keeps ink effects visible.
+      child: Material(
+        type: MaterialType.transparency,
+        child: SafeArea(
+          top: false,
+          child: Padding(padding: padding, child: child),
+        ),
       ),
     );
 

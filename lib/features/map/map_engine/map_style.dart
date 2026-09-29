@@ -28,10 +28,6 @@ enum RanmapMapStyle {
   /// that 3D buildings / lighting are configured through.
   bool get isStandard => this == standard || this == satellite;
 
-  /// The next basemap in the cycle, for the layers button.
-  RanmapMapStyle get next =>
-      RanmapMapStyle.values[(index + 1) % RanmapMapStyle.values.length];
-
   /// Resolves a persisted id (matching [name]) to a style, defaulting to
   /// [standard] for an unknown/absent value.
   static RanmapMapStyle fromId(String? id) =>

@@ -287,7 +287,7 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('No trips yet'), findsOneWidget);
-    expect(find.text('New trip'), findsOneWidget);
+    expect(find.text('Plan a trip'), findsOneWidget);
   });
 
   testWidgets('brand profile tab lays out', (tester) async {

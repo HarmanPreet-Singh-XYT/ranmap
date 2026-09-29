@@ -151,10 +151,10 @@ export function requireProOrTrial(
 /**
  * The token-metered counterpart to `requireProOrTrial`: it enforces the cap up
  * front but does NOT consume anything here (token cost is only known after the
- * model responds; the route records it with `addUsage`). Free accounts are
- * capped at `max`, Pro at `proMax`; the over-limit response is the paywall for
- * free users and a plain "limit reached" for Pro. A request can overshoot by
- * its own size, which is expected.
+ * model responds; the route holds a reservation and then settles it with
+ * `settleUsage`). Free accounts are capped at `max`, Pro at `proMax`; the
+ * over-limit response is the paywall for free users and a plain "limit reached"
+ * for Pro. A request can overshoot by its own size, which is expected.
  */
 export function requireWithinAllowance(
   feature: PremiumFeature,

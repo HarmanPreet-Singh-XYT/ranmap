@@ -26,8 +26,10 @@ import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/avatar_view.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
+import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_sheet_surface.dart';
 import '../../core/widgets/nav_surface.dart';
+import '../../data/models/group.dart';
 import '../../data/models/map_post.dart';
 import '../../data/models/route_option.dart';
 import '../../data/models/saved_place.dart';
@@ -35,10 +37,13 @@ import '../../data/models/trip.dart';
 import '../../data/models/trip_leg.dart';
 import '../../data/models/trip_stop.dart';
 import '../../data/services/google_maps_api_service.dart';
+import '../notifications/notifications_providers.dart';
+import '../notifications/notifications_screen.dart';
+import '../social/social_providers.dart';
 import '../trip/new_trip_screen.dart';
 import '../trip/trip_providers.dart';
-import '../social/social_providers.dart';
 import 'add_map_post_screen.dart';
+import 'group_convoy_screen.dart';
 import 'live_sync_providers.dart';
 import 'map_engine/map_engine.dart';
 import 'map_post_providers.dart';
@@ -47,6 +52,7 @@ import 'nearby_places_sheet.dart';
 import 'navigate_to_member_sheet.dart';
 import 'offline_maps_screen.dart';
 import 'saved_place_providers.dart';
+import 'saved_places_screen.dart';
 
 /// A teammate shown in the live-teammates sheet.
 typedef _Teammate = ({
@@ -358,52 +364,71 @@ class _MapScreenState extends ConsumerState<MapScreen>
             );
           }
 
-          return BrandSheetSurface(
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  sectionTitle('Map type'),
-                  Row(
-                    children: [
-                      for (final style in RanmapMapStyle.values) ...[
-                        styleTile(style),
-                        if (style != RanmapMapStyle.values.last)
-                          const SizedBox(width: BrandSpace.sm),
+          // ForUI sheets have no Material ancestor; the ink/list/switch widgets
+          // below need one.
+          return Material(
+            type: MaterialType.transparency,
+            child: BrandSheetSurface(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    sectionTitle('Map type'),
+                    Row(
+                      children: [
+                        for (final style in RanmapMapStyle.values) ...[
+                          styleTile(style),
+                          if (style != RanmapMapStyle.values.last)
+                            const SizedBox(width: BrandSpace.sm),
+                        ],
                       ],
-                    ],
-                  ),
-                  const SizedBox(height: BrandSpace.lg),
-                  sectionTitle('Map details'),
-                  toggleTile(
-                    Icons.apartment_rounded,
-                    '3D buildings',
-                    _threeD,
-                    _toggleThreeD,
-                  ),
-                  toggleTile(
-                    Icons.landscape_rounded,
-                    'Terrain',
-                    _terrain,
-                    _toggleTerrain,
-                  ),
-                  const SizedBox(height: BrandSpace.sm),
-                  actionTile(
-                    Icons.bookmark_add_outlined,
-                    'Save this place',
-                    () => _savePlace(deviceLat, deviceLng),
-                  ),
-                  actionTile(
-                    Icons.download_for_offline_outlined,
-                    'Offline maps',
-                    () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const OfflineMapsScreen(),
+                    ),
+                    const SizedBox(height: BrandSpace.lg),
+                    sectionTitle('Map details'),
+                    toggleTile(
+                      Icons.apartment_rounded,
+                      '3D buildings',
+                      _threeD,
+                      _toggleThreeD,
+                    ),
+                    toggleTile(
+                      Icons.landscape_rounded,
+                      'Terrain',
+                      _terrain,
+                      _toggleTerrain,
+                    ),
+                    const SizedBox(height: BrandSpace.sm),
+                    actionTile(
+                      Icons.bookmark_add_outlined,
+                      'Save this place',
+                      () => _savePlace(deviceLat, deviceLng),
+                    ),
+                    actionTile(
+                      Icons.bookmarks_outlined,
+                      'Saved places',
+                      () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const SavedPlacesScreen(),
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                    actionTile(
+                      Icons.diversity_3_rounded,
+                      'Live convoys',
+                      _openConvoys,
+                    ),
+                    actionTile(
+                      Icons.download_for_offline_outlined,
+                      'Offline maps',
+                      () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const OfflineMapsScreen(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           );
@@ -423,6 +448,69 @@ class _MapScreenState extends ConsumerState<MapScreen>
     if (place == null || !mounted) return;
     setState(() => _selectedPlace = place);
     await _mapKey.currentState?.flyTo(place.location, zoom: kPlaceZoom);
+  }
+
+  /// The map's entry into the group-convoy loop: pick one of your groups and
+  /// open its live-convoy screen. Previously the only way in was
+  /// Profile → Convoy Groups → group → Live convoy, so the core "roll together"
+  /// surface wasn't reachable from the map at all.
+  Future<void> _openConvoys() async {
+    final List<Group> groups;
+    try {
+      groups = await ref.read(myGroupsProvider.future);
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+      return;
+    }
+    if (!mounted) return;
+    if (groups.isEmpty) {
+      showAppToast(
+        context,
+        'No convoy groups yet — create one to roll together live.',
+      );
+      return;
+    }
+    final activeId = ref.read(convoyGroupIdProvider);
+    final selected = await showFSheet<({String id, String name})>(
+      context: context,
+      side: FLayout.btt,
+      builder: (sheetContext) => BrandSheetSurface(
+        child: BrandCard(
+          padding: const EdgeInsets.symmetric(
+            horizontal: BrandSpace.md,
+            vertical: BrandSpace.xs,
+          ),
+          child: Column(
+            children: [
+              for (final (i, group) in groups.indexed) ...[
+                if (i > 0) const BrandRowDivider(),
+                BrandListRow(
+                  icon: Icons.diversity_3_rounded,
+                  iconColor: BrandColors.primary,
+                  title: group.name,
+                  subtitle: 'Live convoy',
+                  trailing: activeId == group.id
+                      ? const BrandPill(label: 'Riding', bold: true)
+                      : null,
+                  onTap: () => Navigator.of(sheetContext).pop(
+                    (id: group.id, name: group.name),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => GroupConvoyScreen(
+          groupId: selected.id,
+          groupName: selected.name,
+        ),
+      ),
+    );
   }
 
   @override
@@ -661,6 +749,22 @@ class _MapScreenState extends ConsumerState<MapScreen>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  _MapControl(
+                    icon: Icons.notifications_none_rounded,
+                    tooltip: 'Notifications',
+                    badgeCount: ref
+                        .watch(unreadNotificationsProvider)
+                        .valueOrNull ??
+                        0,
+                    onTap: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const NotificationsScreen(),
+                        ),
+                      );
+                      ref.invalidate(unreadNotificationsProvider);
+                    },
+                  ),
                   _MapControl(
                     icon: Icons.my_location_rounded,
                     tooltip: 'Recenter on me',
@@ -1438,6 +1542,7 @@ class _MapControl extends StatelessWidget {
     required this.tooltip,
     required this.onTap,
     this.active,
+    this.badgeCount = 0,
   });
 
   final IconData icon;
@@ -1446,6 +1551,9 @@ class _MapControl extends StatelessWidget {
 
   /// Null for plain actions; true/false for toggles.
   final bool? active;
+
+  /// A count badge over the icon (e.g. unread notifications); hidden when 0.
+  final int badgeCount;
 
   @override
   Widget build(BuildContext context) {
@@ -1464,7 +1572,14 @@ class _MapControl extends StatelessWidget {
         child: SizedBox(
           width: 46,
           height: 46,
-          child: Icon(icon, size: 23, color: color),
+          child: Center(
+            child: Badge(
+              isLabelVisible: badgeCount > 0,
+              label: Text(badgeCount > 99 ? '99+' : '$badgeCount'),
+              backgroundColor: BrandColors.error,
+              child: Icon(icon, size: 23, color: color),
+            ),
+          ),
         ),
       ),
     );
@@ -1667,4 +1782,3 @@ class _SavedPlaceRow extends StatelessWidget {
     );
   }
 }
-

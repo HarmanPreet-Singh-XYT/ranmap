@@ -81,8 +81,10 @@ abstract final class Scene3D {
   }
 
   /// A Mapbox Standard light preset matched to the user's local time, so the
-  /// 3D scene roughly agrees with the world outside the phone.
-  static String lightPresetFor(DateTime now) {
+  /// 3D scene roughly agrees with the world outside the phone. Dark mode
+  /// always gets the night preset.
+  static String lightPresetFor(DateTime now, {bool dark = false}) {
+    if (dark) return 'night';
     final hour = now.hour;
     if (hour < 6 || hour >= 20) return 'night';
     if (hour < 8) return 'dawn';
@@ -95,11 +97,12 @@ abstract final class Scene3D {
     MapboxMap map, {
     required bool buildings,
     required bool terrain,
+    bool dark = false,
   }) async {
     await applyStandard3d(
       map,
       buildings: buildings,
-      lightPreset: lightPresetFor(DateTime.now()),
+      lightPreset: lightPresetFor(DateTime.now(), dark: dark),
     );
     await setTerrain(map, terrain);
   }

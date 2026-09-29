@@ -31,7 +31,7 @@ import '../../data/services/supabase_service.dart';
 import '../social/group_photos_screen.dart';
 import '../social/social_providers.dart';
 import 'live_sync_providers.dart';
-import 'map_engine/map_engine.dart' hide Position;
+import 'map_engine/map_engine.dart' hide LocationSettings, Position;
 import 'navigate_to_member_sheet.dart';
 
 /// A crew member's live state in the convoy roster.
@@ -87,6 +87,24 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
     }
   }
 
+  /// The device's position for an alert: the live stream when it's running,
+  /// otherwise a one-off fix. That stream is auto-disposed and only kept alive
+  /// while something is watching it, so a plain read is often still empty here.
+  Future<Position?> _currentPosition() async {
+    final streamed = ref.read(devicePositionProvider).valueOrNull;
+    if (streamed != null) return streamed;
+    try {
+      return await Geolocator.getLastKnownPosition() ??
+          await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              timeLimit: Duration(seconds: 6),
+            ),
+          );
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _sos() async {
     final confirmed = await showAppConfirmDialog(
       context,
@@ -98,7 +116,7 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
       destructive: true,
     );
     if (!confirmed || !mounted) return;
-    final pos = ref.read(devicePositionProvider).valueOrNull;
+    final pos = await _currentPosition();
     try {
       await ref
           .read(convoyRepositoryProvider)
@@ -110,14 +128,21 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
           );
       if (mounted) showAppToast(context, 'SOS sent to your crew.');
     } catch (e) {
+      debugPrint('convoy alert failed: $e');
       if (mounted) showAppToast(context, friendlyError(e), error: true);
     }
   }
 
   Future<void> _regroup() async {
-    final pos = ref.read(devicePositionProvider).valueOrNull;
+    final pos = await _currentPosition();
     if (pos == null) {
-      showAppToast(context, 'Waiting for your location…', error: true);
+      if (mounted) {
+        showAppToast(
+          context,
+          'Couldn\'t get your location. Check location permission.',
+          error: true,
+        );
+      }
       return;
     }
     try {
@@ -138,7 +163,7 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
 
   /// Raises a quick one-tap status (wait up / stopping / need fuel).
   Future<void> _quick(GroupAlertKind kind, String message) async {
-    final pos = ref.read(devicePositionProvider).valueOrNull;
+    final pos = await _currentPosition();
     try {
       await ref
           .read(convoyRepositoryProvider)

@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 
 import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_sheet_surface.dart';
 import '../../data/models/place_details.dart';
 import '../../data/models/route_option.dart';
 import '../../data/services/google_maps_api_service.dart';
+import 'saved_place_providers.dart';
 
 /// Shows richer metadata for [place] (rating, review count, opening hours) —
 /// fetched from Google on demand, since the search results themselves come
@@ -23,22 +26,47 @@ Future<bool?> showPlaceDetailsSheet(BuildContext context, NearbyPlace place) {
   );
 }
 
-class _PlaceDetailsSheet extends StatefulWidget {
+class _PlaceDetailsSheet extends ConsumerStatefulWidget {
   const _PlaceDetailsSheet({required this.place});
 
   final NearbyPlace place;
 
   @override
-  State<_PlaceDetailsSheet> createState() => _PlaceDetailsSheetState();
+  ConsumerState<_PlaceDetailsSheet> createState() => _PlaceDetailsSheetState();
 }
 
-class _PlaceDetailsSheetState extends State<_PlaceDetailsSheet> {
+class _PlaceDetailsSheetState extends ConsumerState<_PlaceDetailsSheet> {
   late Future<PlaceDetails> _future;
+  bool _saving = false;
+  bool _saved = false;
 
   @override
   void initState() {
     super.initState();
     _future = GoogleMapsApiService.placeDetails(widget.place);
+  }
+
+  /// Saves this place to the user's saved places, carrying its real
+  /// coordinates — so a place found via search is bookmarkable directly,
+  /// instead of only being pinnable for the current session.
+  Future<void> _save(String name) async {
+    if (_saving || _saved) return;
+    setState(() => _saving = true);
+    try {
+      await ref.read(savedPlaceRepositoryProvider).createPlace(
+            name: name,
+            lat: widget.place.location.lat.toDouble(),
+            lng: widget.place.location.lng.toDouble(),
+          );
+      ref.invalidate(savedPlacesProvider);
+      if (!mounted) return;
+      setState(() => _saved = true);
+      showAppToast(context, 'Saved "$name" to your places.');
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -47,12 +75,13 @@ class _PlaceDetailsSheetState extends State<_PlaceDetailsSheet> {
       child: FutureBuilder<PlaceDetails>(
         future: _future,
         builder: (context, snapshot) {
+          final name = snapshot.data?.name ?? widget.place.name;
           return Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                snapshot.data?.name ?? widget.place.name,
+                name,
                 style: BrandText.headlineMd.copyWith(
                   color: BrandColors.textHeadline,
                 ),
@@ -64,6 +93,18 @@ class _PlaceDetailsSheetState extends State<_PlaceDetailsSheet> {
                 label: 'Pin on map',
                 leadingIcon: Icons.place_rounded,
                 onPressed: () => Navigator.of(context).pop(true),
+              ),
+              const SizedBox(height: BrandSpace.sm),
+              BrandSecondaryButton(
+                label: _saved ? 'Saved to my places' : 'Save to my places',
+                leading: Icon(
+                  _saved
+                      ? Icons.bookmark_added_rounded
+                      : Icons.bookmark_add_outlined,
+                  size: 20,
+                  color: BrandColors.textHeadlineAlt,
+                ),
+                onPressed: (_saved || _saving) ? null : () => _save(name),
               ),
             ],
           );

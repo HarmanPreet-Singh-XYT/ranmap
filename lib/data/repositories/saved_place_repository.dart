@@ -55,4 +55,10 @@ class SavedPlaceRepository {
         .single();
     return SavedPlace.fromJson(row);
   }
+
+  /// Removes a saved place (RLS scopes the delete to the owner via the `for all`
+  /// `ai_saved_places_owner` policy).
+  Future<void> deletePlace(String id) async {
+    await _client.from('ai_saved_places').delete().eq('id', id);
+  }
 }

@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
+import '../../core/util/save_image.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
@@ -147,6 +148,21 @@ class _MapPostViewerSheet extends ConsumerWidget {
               Text(
                 DateFormat.yMMMd().add_jm().format(post.createdAt),
                 style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
+              ),
+              IconButton(
+                tooltip: 'Save to Photos',
+                visualDensity: VisualDensity.compact,
+                icon: Icon(
+                  Icons.download_rounded,
+                  color: BrandColors.textHeadline,
+                ),
+                onPressed: signedUrlAsync.valueOrNull == null
+                    ? null
+                    : () => saveImageUrlToGallery(
+                        context,
+                        signedUrlAsync.requireValue,
+                        name: 'ranmap_${post.id}',
+                      ),
               ),
             ],
           ),

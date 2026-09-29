@@ -27,11 +27,6 @@ void main() {
   });
 
   group('RanmapMapStyle', () {
-    test('cycles through the basemaps', () {
-      expect(RanmapMapStyle.standard.next, RanmapMapStyle.satellite);
-      expect(RanmapMapStyle.outdoors.next, RanmapMapStyle.standard);
-    });
-
     test('only the Standard styles carry the 3D style import', () {
       expect(RanmapMapStyle.standard.isStandard, isTrue);
       expect(RanmapMapStyle.satellite.isStandard, isTrue);

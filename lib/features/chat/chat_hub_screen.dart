@@ -23,11 +23,11 @@ class ChatHubScreen extends StatelessWidget {
       child: FTabs(
         expands: true,
         children: const [
+          FTabEntry(label: Text('Groups'), child: ChatChannelsScreen()),
           FTabEntry(
             label: Text('AI Assistant'),
             child: AiConversationsScreen(showAppBar: false),
           ),
-          FTabEntry(label: Text('Group Chat'), child: ChatChannelsScreen()),
         ],
       ),
     );

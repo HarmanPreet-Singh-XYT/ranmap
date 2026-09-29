@@ -8,7 +8,8 @@ export type NotificationKind =
   | "trip_invites"
   | "chat_messages"
   | "trip_updates"
-  | "group_invites";
+  | "group_invites"
+  | "convoy_alerts";
 
 /** FCM accepts at most 500 tokens per multicast request. */
 const MULTICAST_BATCH = 500;
@@ -40,17 +41,28 @@ function messaging() {
  * Sends a push notification to every device belonging to [userIds], skipping
  * users who have opted out of [kind].
  *
+ * Also records one row per recipient in the `notifications` table (the in-app
+ * feed) — that happens *first* and is independent of push configuration, so the
+ * inbox still fills even on a server with no Firebase credentials.
+ *
  * Best-effort by design: delivery problems are logged, never thrown, so a push
- * failure can't fail the request that triggered it.
+ * (or feed write) failure can't fail the request that triggered it.
  */
 export async function notifyUsers(
   userIds: string[],
   message: { title: string; body: string; data?: Record<string, string> },
   kind: NotificationKind = "trip_updates",
 ): Promise<void> {
-  const client = messaging();
   const recipients = [...new Set(userIds)].filter(Boolean);
-  if (!client || recipients.length === 0) return;
+  if (recipients.length === 0) return;
+
+  // The durable in-app feed first: unlike push, it isn't gated on the opt-out
+  // (muting a category silences the OS buzz, not the user's own record of it)
+  // and it isn't gated on Firebase being configured.
+  await recordNotifications(recipients, message, kind);
+
+  const client = messaging();
+  if (!client) return;
 
   try {
     const optedOut = await optedOutUserIds(recipients, kind);
@@ -95,6 +107,38 @@ export async function notifyUsers(
     }
   } catch (err) {
     console.error("push: send failed:", err);
+  }
+}
+
+/** Column limits enforced by `notifications` (see 0039_notifications_feed.sql). */
+const FEED_TITLE_MAX = 200;
+const FEED_BODY_MAX = 1000;
+
+/**
+ * Writes one `notifications` row per recipient — the durable in-app feed. The
+ * title/body are clamped to the table's constraints so an over-long message
+ * can't fail the whole insert. Best-effort: a feed write must never break the
+ * action that triggered the notification.
+ */
+async function recordNotifications(
+  recipients: string[],
+  message: { title: string; body: string; data?: Record<string, string> },
+  kind: NotificationKind,
+): Promise<void> {
+  try {
+    const rows = recipients.map((user_id) => ({
+      user_id,
+      kind,
+      title: message.title.slice(0, FEED_TITLE_MAX) || "Notification",
+      body: message.body ? message.body.slice(0, FEED_BODY_MAX) : null,
+      data: message.data ?? {},
+    }));
+    const { error } = await supabaseAdmin.from("notifications").insert(rows);
+    if (error) {
+      console.error("push: recording notifications failed:", error.message);
+    }
+  } catch (err) {
+    console.error("push: recording notifications failed:", err);
   }
 }
 

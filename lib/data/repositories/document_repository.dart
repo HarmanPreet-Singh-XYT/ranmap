@@ -70,6 +70,12 @@ class DocumentRepository {
     }
   }
 
+  /// The file's bytes, fetched with the user's session (the bucket is private),
+  /// so the app can render it in place rather than hand off a URL.
+  Future<Uint8List> download(String storagePath) {
+    return _client.storage.from('documents').download(storagePath);
+  }
+
   /// A short-lived signed URL for the file (the bucket is private).
   Future<String> signedUrl(String storagePath, {int expiresInSeconds = 3600}) {
     return _client.storage

@@ -19,35 +19,40 @@ import '../../data/services/supabase_service.dart';
 import 'group_detail_screen.dart';
 import 'social_providers.dart';
 
+/// Prompts for a name, creates the group and opens it. Shared by the Groups
+/// screen and the Chat tab so both offer the same "New group" flow.
+Future<void> createGroupFlow(BuildContext context, WidgetRef ref) async {
+  final name = await showAppTextDialog(
+    context,
+    title: 'New group',
+    label: 'Group name',
+    hint: 'Weekend crew',
+    maxLength: kNameMaxLength,
+  );
+  if (name == null) return;
+  final validationError = nameError(name, label: 'Group name');
+  if (validationError != null) {
+    if (context.mounted) showAppToast(context, validationError, error: true);
+    return;
+  }
+  try {
+    final group = await ref.read(groupRepositoryProvider).createGroup(name);
+    ref.invalidate(myGroupsProvider);
+    if (context.mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => GroupDetailScreen(group: group)),
+      );
+    }
+  } catch (e) {
+    if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+  }
+}
+
 class GroupsScreen extends ConsumerWidget {
   const GroupsScreen({super.key});
 
-  Future<void> _createGroup(BuildContext context, WidgetRef ref) async {
-    final name = await showAppTextDialog(
-      context,
-      title: 'New group',
-      label: 'Group name',
-      hint: 'Weekend crew',
-      maxLength: kNameMaxLength,
-    );
-    if (name == null) return;
-    final validationError = nameError(name, label: 'Group name');
-    if (validationError != null) {
-      if (context.mounted) showAppToast(context, validationError, error: true);
-      return;
-    }
-    try {
-      final group = await ref.read(groupRepositoryProvider).createGroup(name);
-      ref.invalidate(myGroupsProvider);
-      if (context.mounted) {
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => GroupDetailScreen(group: group)),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
-    }
-  }
+  Future<void> _createGroup(BuildContext context, WidgetRef ref) =>
+      createGroupFlow(context, ref);
 
   Future<void> _joinWithCode(BuildContext context, WidgetRef ref) async {
     final code = await showAppTextDialog(
@@ -122,8 +127,7 @@ class GroupsScreen extends ConsumerWidget {
                       imageAsset: 'assets/images/scenic/convoy_pack_scenic.jpg',
                       icon: Icons.groups_rounded,
                       title: 'Build your convoy pack',
-                      message:
-                          'Groups are persistent crews that roll together. Track live member GPS positions, send emergency SOS alerts, and voice chat on the open road.',
+                      message: 'Groups are persistent crews that roll together. Track live member GPS positions, send emergency SOS alerts, and voice chat on the open road.',
                       tint: BrandColors.accentSky,
                       quickChips: [
                         BrandTag(
@@ -214,11 +218,9 @@ class GroupsScreen extends ConsumerWidget {
           Positioned(
             right: BrandSpace.md,
             bottom: BrandSpace.md,
-            child: BrandPrimaryButton(
-              label: 'New group',
-              leadingIcon: Icons.add_rounded,
-              trailingIcon: null,
-              expand: false,
+            child: BrandFab(
+              icon: Icons.add_rounded,
+              tooltip: 'New group',
               onPressed: () => _createGroup(context, ref),
             ),
           ),

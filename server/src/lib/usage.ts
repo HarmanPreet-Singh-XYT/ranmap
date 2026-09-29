@@ -6,7 +6,8 @@ import { supabaseAdmin } from "./supabase.js";
  * Metered free allowances.
  *
  * Postgres is the source of truth (`consume_usage` / `usage_status` /
- * `add_usage`, migrations 0010/0020/0021/0025). Redis is a *read-through cache*
+ * `reserve_usage` / `release_usage` / `settle_usage`, migrations
+ * 0010/0020/0025/0036). Redis is a *read-through cache*
  * in front of it: a cached value is returned when present, and refreshed from
  * Postgres on a miss and after every write. So a Redis flush or eviction costs
  * one extra Postgres read — it can never hand back a fresh allowance, because
@@ -39,9 +40,10 @@ export interface UsageBackend {
     max: number,
     windowSeconds: number,
   ): Promise<{ allowed: boolean } & AllowanceState>;
-  /** Atomically adds [units] if it stays within [max]; otherwise nothing is
-   *  added and `allowed` is false. Used for token metering, where the cost is
-   *  only known after the call. */
+  /** Atomically holds [units] in flight if `used + held + units` stays within
+   *  [max]; otherwise nothing is held and `allowed` is false. Used for token
+   *  metering, where the cost is only known after the call. The hold is not
+   *  part of the settled state, so it never shows up as usage. */
   reserve(
     userId: string,
     feature: PremiumFeature,
@@ -49,22 +51,24 @@ export interface UsageBackend {
     max: number,
     windowSeconds: number,
   ): Promise<{ allowed: boolean } & AllowanceState>;
-  /** Refunds unused reserved [units] (never below zero). */
+  /** Releases a hold of [units] without recording spend (never below zero). */
   release(
     userId: string,
     feature: PremiumFeature,
     units: number,
     windowSeconds: number,
   ): Promise<AllowanceState>;
+  /** Atomically records the real spend [actual] and releases its hold [held]. */
+  settle(
+    userId: string,
+    feature: PremiumFeature,
+    held: number,
+    actual: number,
+    windowSeconds: number,
+  ): Promise<AllowanceState>;
   status(
     userId: string,
     feature: PremiumFeature,
-    windowSeconds: number,
-  ): Promise<AllowanceState>;
-  add(
-    userId: string,
-    feature: PremiumFeature,
-    units: number,
     windowSeconds: number,
   ): Promise<AllowanceState>;
 }
@@ -124,11 +128,12 @@ const supabaseUsageBackend: UsageBackend = {
     if (error) throw new Error(error.message);
     return stateFrom(firstRow(data));
   },
-  async add(userId, feature, units, windowSeconds) {
-    const { data, error } = await supabaseAdmin.rpc("add_usage", {
+  async settle(userId, feature, held, actual, windowSeconds) {
+    const { data, error } = await supabaseAdmin.rpc("settle_usage", {
       p_user: userId,
       p_feature: feature,
-      p_units: units,
+      p_held: held,
+      p_actual: actual,
       p_window_seconds: windowSeconds,
     });
     if (error) throw new Error(error.message);
@@ -211,29 +216,11 @@ export async function getUsage(
 }
 
 /**
- * Adds [units] to an allowance, rolling the window if it has elapsed. Used for
- * token metering, where the real cost is only known after the call.
- */
-export async function addUsage(
-  userId: string,
-  feature: PremiumFeature,
-  units: number,
-  windowSeconds: number,
-  redis: RedisLike | null = getRedis(),
-  backend: UsageBackend = supabaseUsageBackend,
-): Promise<void> {
-  if (units <= 0) return;
-  const state = await backend.add(userId, feature, units, windowSeconds);
-  if (redis) {
-    await cacheState(redis, usageKey(feature, userId), state, windowSeconds);
-  }
-}
-
-/**
- * Atomically reserves an up-front upper-bound of [units] against the ceiling,
+ * Atomically holds an up-front upper-bound of [units] against the ceiling,
  * returning whether it was allowed. Used to bound token spend: unlike the
  * read-then-write `getUsage` check, concurrent requests can't all observe the
- * same under-limit value and proceed.
+ * same under-limit value and proceed. The hold is tracked separately from
+ * settled usage, so it is never reported by `getUsage` / the quota meter.
  */
 export async function reserveUsage(
   userId: string,
@@ -252,8 +239,9 @@ export async function reserveUsage(
 }
 
 /**
- * Refunds an unused reservation. Best-effort: a refund failure only means the
- * counter stays slightly high, which is the safe direction.
+ * Releases a hold without recording spend — a turn that produced nothing.
+ * Best-effort: a release failure only means the hold stays, which is the safe
+ * direction (a stuck hold bounds the next request rather than letting it slip).
  */
 export async function releaseUsage(
   userId: string,
@@ -265,6 +253,26 @@ export async function releaseUsage(
 ): Promise<void> {
   if (units <= 0) return;
   const state = await backend.release(userId, feature, units, windowSeconds);
+  if (redis) {
+    await cacheState(redis, usageKey(feature, userId), state, windowSeconds);
+  }
+}
+
+/**
+ * Settles a hold against the real spend: records [actual] units of usage and
+ * releases the [held] reservation, in one atomic call. Used after a metered
+ * call whose cost is only known afterwards (the AI turn).
+ */
+export async function settleUsage(
+  userId: string,
+  feature: PremiumFeature,
+  held: number,
+  actual: number,
+  windowSeconds: number,
+  redis: RedisLike | null = getRedis(),
+  backend: UsageBackend = supabaseUsageBackend,
+): Promise<void> {
+  const state = await backend.settle(userId, feature, held, actual, windowSeconds);
   if (redis) {
     await cacheState(redis, usageKey(feature, userId), state, windowSeconds);
   }

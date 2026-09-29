@@ -7,8 +7,14 @@ process.env.SUPABASE_URL ??= "https://example.supabase.co";
 process.env.SUPABASE_SECRET_KEY ??= "test-secret";
 process.env.GEMINI_API_KEY ??= "test-gemini";
 
-const { addUsage, consumeUsage, getUsage, releaseUsage, reserveUsage, remainingWindowSeconds } =
-  await import("./usage.js");
+const {
+  consumeUsage,
+  getUsage,
+  releaseUsage,
+  reserveUsage,
+  settleUsage,
+  remainingWindowSeconds,
+} = await import("./usage.js");
 
 function fakeRedis(overrides: Partial<RedisLike> = {}) {
   const calls = { sets: [] as [string, string, string, number][] };
@@ -36,9 +42,9 @@ function fakeBackend(state: AllowanceState, allowed = true) {
   const calls = {
     status: 0,
     consume: 0,
-    add: [] as number[],
     reserve: [] as number[],
     release: [] as number[],
+    settle: [] as [number, number][],
   };
   const backend: UsageBackend = {
     async consume() {
@@ -49,10 +55,6 @@ function fakeBackend(state: AllowanceState, allowed = true) {
       calls.status += 1;
       return state;
     },
-    async add(_user, _feature, units) {
-      calls.add.push(units);
-      return { ...state, used: state.used + units };
-    },
     async reserve(_user, _feature, units) {
       calls.reserve.push(units);
       return { allowed, ...state };
@@ -60,6 +62,10 @@ function fakeBackend(state: AllowanceState, allowed = true) {
     async release(_user, _feature, units) {
       calls.release.push(units);
       return { ...state, used: Math.max(state.used - units, 0) };
+    },
+    async settle(_user, _feature, held, actual) {
+      calls.settle.push([held, actual]);
+      return { ...state, used: state.used + actual };
     },
   };
   return { backend, calls };
@@ -109,24 +115,6 @@ test("consumeUsage delegates to Postgres and refreshes the cache", async () => {
   assert.equal(calls.sets[0]![1], "5");
 });
 
-test("addUsage is a no-op for non-positive units", async () => {
-  const { redis, calls } = fakeRedis();
-  const { backend, calls: backendCalls } = fakeBackend({ used: 1, windowStart: NOW });
-
-  await addUsage("u1", "ai_assistant", 0, 3600, redis, backend);
-  assert.equal(backendCalls.add.length, 0);
-  assert.equal(calls.sets.length, 0);
-});
-
-test("addUsage writes Postgres then seeds the cache with the new count", async () => {
-  const { redis, calls } = fakeRedis();
-  const { backend, calls: backendCalls } = fakeBackend({ used: 100, windowStart: NOW });
-
-  await addUsage("u1", "ai_assistant", 250, 3600, redis, backend);
-  assert.deepEqual(backendCalls.add, [250]);
-  assert.equal(calls.sets[0]![1], "350");
-});
-
 test("reserveUsage reserves atomically and reports whether it was allowed", async () => {
   const { redis, calls } = fakeRedis();
   const { backend, calls: backendCalls } = fakeBackend({ used: 5, windowStart: NOW }, false);
@@ -145,6 +133,21 @@ test("releaseUsage refunds a reservation, and no-ops for non-positive units", as
 
   await releaseUsage("u1", "ai_assistant", 0, 3600, redis, backend);
   assert.deepEqual(backendCalls.release, [8_000], "zero releases are skipped");
+});
+
+test("settleUsage records the real spend, releases the hold, and seeds the cache", async () => {
+  const { redis, calls } = fakeRedis();
+  const { backend, calls: backendCalls } = fakeBackend({ used: 100, windowStart: NOW });
+
+  await settleUsage("u1", "ai_assistant", 8_000, 1_200, 3600, redis, backend);
+
+  assert.deepEqual(backendCalls.settle, [[8_000, 1_200]]);
+  assert.equal(calls.sets.length, 1, "the cache is refreshed from the settled state");
+  assert.equal(
+    calls.sets[0]![1],
+    "1300",
+    "the cached meter reflects the real spend, not the hold",
+  );
 });
 
 test("remainingWindowSeconds never outlives the window", () => {

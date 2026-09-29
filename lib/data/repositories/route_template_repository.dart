@@ -51,4 +51,10 @@ class RouteTemplateRepository {
   Future<void> deleteTemplate(String id) async {
     await _client.from('route_templates').delete().eq('id', id);
   }
+
+  /// Renames a saved route (RLS scopes the update to the owner via the `for
+  /// all` `route_templates_owner` policy).
+  Future<void> renameTemplate(String id, String name) async {
+    await _client.from('route_templates').update({'name': name}).eq('id', id);
+  }
 }

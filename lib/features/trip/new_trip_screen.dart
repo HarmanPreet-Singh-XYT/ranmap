@@ -75,6 +75,10 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
   /// crew.
   String? _groupId;
 
+  /// Usernames pre-selected from [_groupId]'s roster; a subset of [_invitees].
+  /// Tracked separately so switching group drops only what the group added.
+  final Set<String> _fromGroup = {};
+
   /// Bumped when the schedule is cleared so the date/time fields rebuild empty.
   /// Their managed controls hold their own state, so a plain `initial: null`
   /// change wouldn't reset them.
@@ -310,7 +314,130 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
       ],
     );
     if (choice == null) return;
-    setState(() => _groupId = choice.isEmpty ? null : choice);
+    setState(() {
+      _groupId = choice.isEmpty ? null : choice;
+      // The previous group's picks don't carry over to a different crew.
+      for (final username in _fromGroup) {
+        _invitees.remove(username);
+        _inviteeAvatarIds.remove(username);
+      }
+      _fromGroup.clear();
+    });
+  }
+
+  /// The group's active members other than me, as (username, avatarId).
+  List<({String username, String avatarId})> _groupCandidates(
+    List<Map<String, dynamic>> members,
+  ) {
+    final me = SupabaseService.currentUserId;
+    return [
+      for (final m in members)
+        if (m['status'] == 'active' &&
+            m['user_id'] != me &&
+            (m['profiles'] as Map<String, dynamic>?)?['username'] != null)
+          (
+            username:
+                (m['profiles'] as Map<String, dynamic>)['username'] as String,
+            avatarId:
+                (m['profiles'] as Map<String, dynamic>)['avatar_id']
+                    as String? ??
+                kDefaultAvatarSeed,
+          ),
+    ];
+  }
+
+  void _setGroupMember(
+    ({String username, String avatarId}) member,
+    bool selected,
+  ) {
+    setState(() {
+      if (selected) {
+        _invitees.add(member.username);
+        _inviteeAvatarIds[member.username] = member.avatarId;
+        _fromGroup.add(member.username);
+      } else {
+        _invitees.remove(member.username);
+        _inviteeAvatarIds.remove(member.username);
+        _fromGroup.remove(member.username);
+      }
+    });
+  }
+
+  void _setAllGroupMembers(
+    List<({String username, String avatarId})> members,
+    bool selected,
+  ) {
+    for (final m in members) {
+      _setGroupMember(m, selected);
+    }
+  }
+
+  Widget _groupCrewSection(List<({String username, String avatarId})> members) {
+    final allSelected =
+        members.isNotEmpty &&
+        members.every((m) => _fromGroup.contains(m.username));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: BrandSpace.lg),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                "Who's coming from this group?",
+                style: BrandText.weight(
+                  BrandText.titleSm,
+                  700,
+                ).copyWith(color: BrandColors.textHeadline),
+              ),
+            ),
+            if (members.isNotEmpty)
+              TextButton(
+                onPressed: () => _setAllGroupMembers(members, !allSelected),
+                child: Text(allSelected ? 'Clear' : 'Select all'),
+              ),
+          ],
+        ),
+        const SizedBox(height: BrandSpace.sm),
+        BrandCard(
+          padding: const EdgeInsets.symmetric(
+            horizontal: BrandSpace.md,
+            vertical: BrandSpace.xs,
+          ),
+          child: members.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text(
+                    'No other active members in this group yet.',
+                    style: BrandText.bodySm.copyWith(
+                      color: BrandColors.textMuted,
+                    ),
+                  ),
+                )
+              : Column(
+                  children: [
+                    for (final m in members)
+                      _CrewRow(
+                        seed: m.avatarId,
+                        username: m.username,
+                        onTap: () => _setGroupMember(
+                          m,
+                          !_fromGroup.contains(m.username),
+                        ),
+                        trailing: Icon(
+                          _fromGroup.contains(m.username)
+                              ? Icons.check_circle_rounded
+                              : Icons.circle_outlined,
+                          color: _fromGroup.contains(m.username)
+                              ? BrandColors.primary
+                              : BrandColors.textMuted,
+                        ),
+                      ),
+                  ],
+                ),
+        ),
+      ],
+    );
   }
 
   Future<void> _createTrip() async {
@@ -488,20 +615,23 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
                     ],
                   ),
                 ),
-                GestureDetector(
-                  onTap: _pickTemplate,
-                  behavior: HitTestBehavior.opaque,
-                  child: Container(
-                    height: 44,
-                    width: 44,
-                    decoration: BoxDecoration(
-                      color: BrandColors.surfaceContainerLow,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      Icons.bookmark_outline_rounded,
-                      size: 20,
-                      color: BrandColors.primary,
+                Tooltip(
+                  message: 'Use a saved route',
+                  child: GestureDetector(
+                    onTap: _pickTemplate,
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      height: 44,
+                      width: 44,
+                      decoration: BoxDecoration(
+                        color: BrandColors.surfaceContainerLow,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.bookmark_outline_rounded,
+                        size: 20,
+                        color: BrandColors.primary,
+                      ),
                     ),
                   ),
                 ),
@@ -633,6 +763,13 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
               trailing: BrandPill(label: _groupId == null ? 'None' : 'Set'),
             ),
           ),
+          if (_groupId != null)
+            _groupCrewSection(
+              _groupCandidates(
+                ref.watch(groupMembersProvider(_groupId!)).valueOrNull ??
+                    const [],
+              ),
+            ),
           const SizedBox(height: BrandSpace.lg),
           Row(
             children: [

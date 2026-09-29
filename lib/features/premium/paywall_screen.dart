@@ -18,6 +18,7 @@ import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/brand/brand_tag.dart';
 import '../trip/trip_providers.dart';
+import 'manage_subscription.dart';
 import 'premium_providers.dart';
 import 'premium_purchaser.dart';
 import 'revenuecat.dart';
@@ -115,24 +116,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     }
   }
 
-  Future<void> _manageSubscription() async {
-    final uri = Uri.parse(
-      Theme.of(context).platform == TargetPlatform.iOS
-          ? 'https://apps.apple.com/account/subscriptions'
-          : 'https://play.google.com/store/account/subscriptions',
-    );
-    if (!await canLaunchUrl(uri)) {
-      if (mounted) {
-        showAppToast(
-          context,
-          'Could not open subscription settings',
-          error: true,
-        );
-      }
-      return;
-    }
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
+  Future<void> _manageSubscription() => openManageSubscription(context);
 
   @override
   Widget build(BuildContext context) {

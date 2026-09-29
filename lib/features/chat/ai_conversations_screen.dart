@@ -65,10 +65,7 @@ class AiConversationsScreen extends ConsumerWidget {
                   color: BrandColors.error,
                   borderRadius: BrandRadii.podRadius,
                 ),
-                child: Icon(
-                  Icons.delete_outline,
-                  color: BrandColors.onPrimary,
-                ),
+                child: Icon(Icons.delete_outline, color: BrandColors.onPrimary),
               ),
               confirmDismiss: (_) => showAppConfirmDialog(
                 context,
@@ -119,11 +116,9 @@ class AiConversationsScreen extends ConsumerWidget {
           Positioned(
             right: BrandSpace.md,
             bottom: BrandSpace.md,
-            child: BrandPrimaryButton(
-              label: 'New',
-              leadingIcon: Icons.add_rounded,
-              trailingIcon: null,
-              expand: false,
+            child: BrandFab(
+              icon: Icons.add_rounded,
+              tooltip: 'New chat',
               onPressed: () => _openConversation(context, null),
             ),
           ),

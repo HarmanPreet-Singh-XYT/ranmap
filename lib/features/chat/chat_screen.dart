@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/network/backend_client.dart';
 import '../../core/offline/outbox.dart';
 import '../../core/offline/outbox_providers.dart';
 import '../../core/providers/connectivity_provider.dart';
@@ -88,6 +91,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             groupId: widget.channel.groupId,
             body: text,
           );
+      // Best-effort push so members with the app closed are told; the realtime
+      // channel only reaches open apps. Failure must never affect the send.
+      unawaited(_notifyChatPush());
     } catch (e) {
       if (!mounted) return;
       if (isNetworkError(e) || ref.read(isOfflineProvider)) {
@@ -133,6 +139,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     } finally {
       if (mounted) setState(() => _sending = false);
       _scrollToBottom();
+    }
+  }
+
+  /// Tells the server to push this message to the other members. Deliberately
+  /// swallowed: the message is already stored, so a push failure isn't a send
+  /// failure. Not called from the offline-queue replay path, so a retried send
+  /// can't push twice.
+  Future<void> _notifyChatPush() async {
+    final channel = widget.channel;
+    try {
+      await BackendClient.postJson(
+        '/notifications/chat-message',
+        {
+          if (channel.tripId != null) 'tripId': channel.tripId,
+          if (channel.groupId != null) 'groupId': channel.groupId,
+        },
+        fallbackMessage: 'Could not notify the channel',
+      );
+    } catch (_) {
+      // Best-effort only.
     }
   }
 
@@ -195,33 +221,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       header: BrandHeader(
         title: widget.title,
         onBack: () => Navigator.of(context).maybePop(),
+        actionIcon: Icons.call_rounded,
+        actionTooltip: 'Voice channel',
+        onAction: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => VoiceChannelScreen(
+              channel: widget.channel,
+              title: widget.title,
+            ),
+          ),
+        ),
       ),
       child: Column(
         children: [
-          // The voice action formerly lived in the header's trailing slot.
-          Padding(
-            padding: const EdgeInsets.only(top: BrandSpace.sm),
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: BrandSecondaryButton(
-                label: 'Voice',
-                expand: false,
-                leading: Icon(
-                  Icons.call_rounded,
-                  size: 18,
-                  color: BrandColors.textHeadlineAlt,
-                ),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => VoiceChannelScreen(
-                      channel: widget.channel,
-                      title: widget.title,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
           Expanded(
             child: messagesAsync.when(
               loading: () => const Center(child: CircularProgressIndicator()),
@@ -316,11 +328,7 @@ class _SendButton extends StatelessWidget {
           shape: BoxShape.circle,
           boxShadow: BrandShadows.primaryGlow,
         ),
-        child: Icon(
-          Icons.send_rounded,
-          size: 22,
-          color: BrandColors.onPrimary,
-        ),
+        child: Icon(Icons.send_rounded, size: 22, color: BrandColors.onPrimary),
       ),
     );
   }

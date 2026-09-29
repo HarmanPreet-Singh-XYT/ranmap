@@ -37,6 +37,15 @@ const groupInviteLimit = rateLimit({
   message: "Too many group notifications — try again later.",
 });
 
+// Chat messages are far higher-frequency than invites, so this is a per-minute
+// cap sized for a lively conversation rather than an hourly one.
+const chatMessageLimit = rateLimit({
+  name: "notifications-chat-message",
+  windowMs: 60 * 1000,
+  max: 120,
+  message: "Too many message notifications — slow down.",
+});
+
 // Supabase ids are UUIDs; validate before querying so a malformed id can't
 // reach the database as an invalid-input cast error.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -337,6 +346,116 @@ notificationsRouter.post(
   }),
 );
 
+/**
+ * POST /notifications/chat-message  { tripId } | { groupId }
+ *
+ * Pushes a "New message" to the rest of a trip's or group's members after the
+ * app stores a chat message — the realtime channel delivers to open apps, but a
+ * member whose app is closed would otherwise be told nothing. Scoped: only a
+ * member of the trip/group may trigger it, and the sender is excluded.
+ */
+notificationsRouter.post(
+  "/chat-message",
+  chatMessageLimit,
+  asyncHandler(async (req, res) => {
+    const tripId = String(req.body?.tripId ?? "").trim();
+    const groupId = String(req.body?.groupId ?? "").trim();
+    const hasTrip = UUID_RE.test(tripId);
+    const hasGroup = UUID_RE.test(groupId);
+    if (hasTrip === hasGroup) {
+      res.status(400).json({ error: "exactly one of tripId or groupId (uuid) is required" });
+      return;
+    }
+
+    let recipientIds: string[];
+    let label: string;
+    const data: Record<string, string> = { type: "chat_message" };
+
+    if (hasTrip) {
+      // The sender must actually be on the trip — otherwise this endpoint could
+      // be used to notify arbitrary trips.
+      const { data: caller } = await supabaseAdmin
+        .from("trip_members")
+        .select("user_id")
+        .eq("trip_id", tripId)
+        .eq("user_id", req.userId)
+        .eq("invite_status", "accepted")
+        .maybeSingle();
+      if (!caller) {
+        res.status(403).json({ error: "You're not on that trip." });
+        return;
+      }
+      // Only accepted members are notified (a pending invitee isn't in the chat).
+      const { data: members } = await supabaseAdmin
+        .from("trip_members")
+        .select("user_id")
+        .eq("trip_id", tripId)
+        .eq("invite_status", "accepted");
+      recipientIds = (members ?? [])
+        .map((row) => row.user_id as string)
+        .filter((id) => id && id !== req.userId);
+      const { data: trip } = await supabaseAdmin
+        .from("trips")
+        .select("title")
+        .eq("id", tripId)
+        .maybeSingle();
+      label = trip?.title ? `"${trip.title}"` : "your trip";
+      data.tripId = tripId;
+    } else {
+      const { data: caller } = await supabaseAdmin
+        .from("group_members")
+        .select("user_id")
+        .eq("group_id", groupId)
+        .eq("user_id", req.userId)
+        .eq("status", "active")
+        .maybeSingle();
+      if (!caller) {
+        res.status(403).json({ error: "You're not in that group." });
+        return;
+      }
+      const { data: members } = await supabaseAdmin
+        .from("group_members")
+        .select("user_id")
+        .eq("group_id", groupId)
+        .eq("status", "active");
+      recipientIds = (members ?? [])
+        .map((row) => row.user_id as string)
+        .filter((id) => id && id !== req.userId);
+      const { data: group } = await supabaseAdmin
+        .from("groups")
+        .select("name")
+        .eq("id", groupId)
+        .maybeSingle();
+      label = group?.name ? `"${group.name}"` : "your group";
+      data.groupId = groupId;
+    }
+
+    if (recipientIds.length === 0) {
+      res.json({ ok: true, push: false });
+      return;
+    }
+
+    const { data: sender } = await supabaseAdmin
+      .from("profiles")
+      .select("username")
+      .eq("id", req.userId)
+      .maybeSingle();
+    const handle = sender?.username ? `@${sender.username}` : "Someone";
+
+    await notifyUsers(
+      recipientIds,
+      {
+        title: `New message in ${label}`,
+        body: `${handle} sent a message`,
+        data,
+      },
+      "chat_messages",
+    );
+
+    res.json({ ok: true, push: pushConfigured() });
+  }),
+);
+
 /** Human copy for a convoy alert, or null when it isn't worth a push. */
 function alertCopy(
   kind: string,
@@ -441,7 +560,7 @@ notificationsRouter.post(
         body: copy.body,
         data: { type: "group_alert", groupId: alert.group_id as string, kind: alert.kind as string },
       },
-      "group_invites",
+      "convoy_alerts",
     );
 
     res.json({ ok: true, push: pushConfigured() });

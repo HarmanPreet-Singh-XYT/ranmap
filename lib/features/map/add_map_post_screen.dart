@@ -56,6 +56,7 @@ class _AddMapPostScreenState extends ConsumerState<AddMapPostScreen> {
       );
       if (file != null && mounted) setState(() => _picked = file);
     } catch (e) {
+      debugPrint('pin photo: pick failed: $e');
       if (!mounted) return;
       showAppToast(context, friendlyError(e), error: true);
     }
@@ -85,6 +86,7 @@ class _AddMapPostScreenState extends ConsumerState<AddMapPostScreen> {
       ref.invalidate(tripMapPostsProvider(widget.tripId));
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
+      debugPrint('pin photo: save failed: $e');
       if (!mounted) return;
       // Over the free photo cap (a DB trigger): offer Pro, don't error.
       if (looksPremiumRequired(e)) {

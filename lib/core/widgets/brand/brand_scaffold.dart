@@ -82,9 +82,23 @@ class BrandHeader extends StatelessWidget {
     this.onSkip,
     this.showBack = true,
     this.showAvatar = false,
+    this.actionIcon,
+    this.actionTooltip,
+    this.onAction,
+    this.action,
   });
 
   final String title;
+
+  /// A custom trailing widget (e.g. a bell carrying an unread badge). Takes the
+  /// trailing slot ahead of [actionIcon] / [showAvatar] when provided.
+  final Widget? action;
+
+  /// An icon-only action in the trailing slot (e.g. a call button). Used
+  /// instead of the avatar / spacer when both [actionIcon] and [onAction] are set.
+  final IconData? actionIcon;
+  final String? actionTooltip;
+  final VoidCallback? onAction;
 
   /// Defaults to a back press when omitted.
   final VoidCallback? onBack;
@@ -148,7 +162,14 @@ class BrandHeader extends StatelessWidget {
                     ),
                   ),
                 ),
-              if (showAvatar)
+              if (action != null)
+                action!
+              else if (actionIcon != null && onAction != null)
+                Tooltip(
+                  message: actionTooltip ?? '',
+                  child: _RoundIconButton(icon: actionIcon!, onTap: onAction!),
+                )
+              else if (showAvatar)
                 Container(
                   height: 32,
                   width: 32,

@@ -25,12 +25,18 @@ import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/profile.dart';
 import '../../data/services/supabase_service.dart';
+import '../map/saved_places_screen.dart';
+import '../notifications/notifications_providers.dart';
+import '../notifications/notifications_screen.dart';
+import '../premium/manage_subscription.dart';
 import '../premium/premium_providers.dart';
 import '../settings/offline_queue_screen.dart';
 import '../settings/settings_screen.dart';
 import '../social/friends_screen.dart';
 import '../social/groups_screen.dart';
+import '../social/invite_share.dart';
 import '../social/social_providers.dart';
+import '../trip/saved_routes_screen.dart';
 import '../trip/trip_providers.dart';
 import 'documents_screen.dart';
 import 'linked_socials_screen.dart';
@@ -535,7 +541,12 @@ class _ProCard extends ConsumerWidget {
         : 'Unlock AI, voice & more search';
 
     return GestureDetector(
-      onTap: isPro ? null : () => context.push('/paywall'),
+      // Free users go to the paywall; an existing subscriber has no paywall to
+      // see, so the card opens the store's manage-subscription screen instead
+      // of being a dead tap target.
+      onTap: isPro
+          ? () => openManageSubscription(context)
+          : () => context.push('/paywall'),
       behavior: HitTestBehavior.opaque,
       child: BrandCard(
         padding: const EdgeInsets.all(BrandSpace.md),
@@ -1103,6 +1114,8 @@ class _MenuCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final incoming =
         ref.watch(incomingRequestsProvider).valueOrNull?.length ?? 0;
+    final unreadNotifications =
+        ref.watch(unreadNotificationsProvider).valueOrNull ?? 0;
     final groups = ref.watch(myGroupsProvider).valueOrNull?.length ?? 0;
     final outbox = ref.watch(outboxProvider);
     final service = ref.watch(vehicleServiceProvider).valueOrNull;
@@ -1116,6 +1129,19 @@ class _MenuCard extends ConsumerWidget {
       padding: const EdgeInsets.symmetric(horizontal: BrandSpace.md),
       child: Column(
         children: [
+          BrandListRow(
+            icon: Icons.notifications_none_rounded,
+            iconColor: BrandColors.primary,
+            title: 'Notifications',
+            subtitle: 'Invites, messages & convoy alerts',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+            ),
+            trailing: unreadNotifications > 0
+                ? BrandPill(label: '$unreadNotifications', bold: true)
+                : null,
+          ),
+          const BrandRowDivider(),
           BrandListRow(
             icon: Icons.group_rounded,
             iconBackground: BrandColors.accentSky.withValues(alpha: 0.3),
@@ -1131,6 +1157,16 @@ class _MenuCard extends ConsumerWidget {
                     bold: true,
                   )
                 : null,
+          ),
+          const BrandRowDivider(),
+          BrandListRow(
+            icon: Icons.ios_share_rounded,
+            iconBackground: BrandColors.secondaryFixed.withValues(alpha: 0.5),
+            iconColor: BrandColors.secondary,
+            title: 'Invite friends',
+            subtitle: 'Share your link so they can add you',
+            onTap: () => shareMyInviteLink(context, ref),
+            trailing: null,
           ),
           const BrandRowDivider(),
           BrandListRow(
@@ -1197,6 +1233,28 @@ class _MenuCard extends ConsumerWidget {
             onTap: () => Navigator.of(
               context,
             ).push(MaterialPageRoute(builder: (_) => const DocumentsScreen())),
+            trailing: null,
+          ),
+          const BrandRowDivider(),
+          BrandListRow(
+            icon: Icons.bookmark_rounded,
+            iconColor: BrandColors.primary,
+            title: 'Saved places',
+            subtitle: 'Places you and the copilot have saved',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SavedPlacesScreen()),
+            ),
+            trailing: null,
+          ),
+          const BrandRowDivider(),
+          BrandListRow(
+            icon: Icons.alt_route_rounded,
+            iconColor: BrandColors.primary,
+            title: 'Saved routes',
+            subtitle: 'Reuse a drive on a future trip',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SavedRoutesScreen()),
+            ),
             trailing: null,
           ),
           const BrandRowDivider(),

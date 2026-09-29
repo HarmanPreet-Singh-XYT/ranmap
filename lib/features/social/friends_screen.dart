@@ -16,24 +16,28 @@ import '../../core/widgets/brand/brand_text_field.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/profile.dart';
 import '../../data/services/supabase_service.dart';
+import 'invite_share.dart';
 import 'social_providers.dart';
 
-class FriendsScreen extends StatelessWidget {
+class FriendsScreen extends ConsumerWidget {
   const FriendsScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return BrandScaffold(
       header: BrandHeader(
         title: 'Friends',
         onBack: () => Navigator.of(context).maybePop(),
+        actionIcon: Icons.ios_share_rounded,
+        actionTooltip: 'Share your invite link',
+        onAction: () => shareMyInviteLink(context, ref),
       ),
       child: FTabs(
         expands: true,
         children: const [
           FTabEntry(label: Text('Friends'), child: _FriendsTab()),
           FTabEntry(label: Text('Requests'), child: _RequestsTab()),
-          FTabEntry(label: Text('Find people'), child: _FindPeopleTab()),
+          FTabEntry(label: Text('Find'), child: _FindPeopleTab()),
         ],
       ),
     );
@@ -50,14 +54,20 @@ class _FriendsTab extends ConsumerWidget {
     return friendsAsync.when(
       data: (rows) {
         if (rows.isEmpty) {
-          return const Center(
+          return Center(
             child: SingleChildScrollView(
               child: BrandEmptyState(
                 imageAsset: 'assets/images/scenic/friends_crew_scenic.jpg',
                 icon: Icons.person_add_alt_1_rounded,
                 title: 'Build your road trip crew',
                 message:
-                    'Connect with friends to invite them to live convoys, share routes, and sync pitstops. Search by username in the Find People tab.',
+                    'Connect with friends to invite them to live convoys, share routes, and sync pitstops. Share your invite link, or search by username in the Find People tab.',
+                action: BrandPrimaryButton(
+                  label: 'Invite friends',
+                  leadingIcon: Icons.ios_share_rounded,
+                  expand: false,
+                  onPressed: () => shareMyInviteLink(context, ref),
+                ),
               ),
             ),
           );

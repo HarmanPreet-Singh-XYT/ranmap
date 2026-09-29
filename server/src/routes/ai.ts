@@ -9,7 +9,7 @@ import { limitReached, premiumRequired } from "../lib/plans.js";
 import { planTier } from "../lib/plan-store.js";
 import { rateLimit } from "../lib/rate-limit.js";
 import { supabaseAdmin } from "../lib/supabase.js";
-import { addUsage, getUsage, releaseUsage, reserveUsage } from "../lib/usage.js";
+import { getUsage, releaseUsage, reserveUsage, settleUsage } from "../lib/usage.js";
 import { requireWithinAllowance } from "../middleware/require-plan.js";
 import { requireAuth } from "../middleware/require-auth.js";
 
@@ -50,10 +50,12 @@ const MAX_OUTPUT_TOKENS = 1024;
 // the client, not the upstream response).
 const GEMINI_TIMEOUT_MS = 30_000;
 
-// Tokens reserved up front against the allowance before the model runs: the
-// output budget for every possible round plus the input window. The route
-// refunds the unused part once the real spend is known, so a normal turn costs
-// its actual tokens — the reservation only bounds concurrency.
+// Upper-bound tokens held against the allowance while the model runs: the
+// output budget for every possible round plus the input window. The hold is
+// tracked apart from settled usage (migration 0036), so it never appears in the
+// quota meter; the route settles it against the real spend once the turn
+// finishes, so a turn costs its actual tokens and the hold only bounds
+// concurrency.
 const AI_RESERVE_TOKENS = MAX_OUTPUT_TOKENS * MAX_TOOL_ROUNDS + MAX_CONTENT_CHARS;
 
 /** The allowance ceiling for a tier (mirrors the middleware ladder). */
@@ -195,18 +197,19 @@ aiRouter.post(
       return;
     }
 
-    // Atomically reserve an upper-bound token cost before the model runs. The
-    // read-only `requireWithinAllowance` check above can be beaten by concurrent
-    // requests; the reservation is row-locked, so they can't all slip through.
+    // Atomically hold an upper-bound token cost for the duration of the model
+    // call. The read-only `requireWithinAllowance` check above can be beaten by
+    // concurrent requests; the hold is row-locked and counted against the
+    // ceiling without touching the settled meter, so they can't all slip through.
     const tier = await planTier(userId);
-    const reserved = await reserveUsage(
+    const held = await reserveUsage(
       userId,
       aiAssistantAllowance.feature,
       AI_RESERVE_TOKENS,
       aiLimitForTier(tier),
       AI_WINDOW_SECONDS,
     );
-    if (!reserved) {
+    if (!held) {
       if (tier === "free") {
         premiumRequired(res, aiAssistantAllowance.feature, aiAssistantAllowance.message);
       } else {
@@ -226,15 +229,17 @@ aiRouter.post(
       );
       const assistantText = rawReply.trim() || "Sorry, I didn't have a reply for that.";
 
-      // Settle the reservation against the real spend: refund the unused part,
-      // or add the overrun. Best-effort: a metering failure must not fail the
-      // reply.
+      // Record the real spend and release the hold in one atomic step, so the
+      // meter never shows the reservation and the two counters can't drift.
+      // Best-effort: a metering failure must not fail the reply.
       try {
-        if (tokens >= AI_RESERVE_TOKENS) {
-          await addUsage(userId, aiAssistantAllowance.feature, tokens - AI_RESERVE_TOKENS, AI_WINDOW_SECONDS);
-        } else {
-          await releaseUsage(userId, aiAssistantAllowance.feature, AI_RESERVE_TOKENS - tokens, AI_WINDOW_SECONDS);
-        }
+        await settleUsage(
+          userId,
+          aiAssistantAllowance.feature,
+          AI_RESERVE_TOKENS,
+          tokens,
+          AI_WINDOW_SECONDS,
+        );
       } catch (usageError) {
         console.error("ai: failed to settle token usage:", usageError);
       }
@@ -252,12 +257,12 @@ aiRouter.post(
 
       res.json({ conversationId, reply: assistantText, tools: executed, tokens });
     } catch (err) {
-      // The turn produced nothing, so refund the whole reservation rather than
+      // The turn produced nothing, so release the whole hold rather than
       // charging the user for a failed call.
       try {
         await releaseUsage(userId, aiAssistantAllowance.feature, AI_RESERVE_TOKENS, AI_WINDOW_SECONDS);
-      } catch (refundError) {
-        console.error("ai: failed to refund reservation:", refundError);
+      } catch (releaseError) {
+        console.error("ai: failed to release reservation:", releaseError);
       }
       // The user's message was already persisted above, so the client can
       // safely re-render the conversation (including that message) rather

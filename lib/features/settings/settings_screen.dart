@@ -27,6 +27,8 @@ import '../../data/providers/repository_providers.dart';
 import '../../data/repositories/notification_repository.dart';
 import '../../data/services/supabase_service.dart';
 import '../map/map_engine/map_engine.dart';
+import '../premium/manage_subscription.dart';
+import '../premium/premium_providers.dart';
 import '../profile/edit_profile_screen.dart';
 import 'change_credential_screen.dart';
 import 'settings_providers.dart';
@@ -41,6 +43,7 @@ class SettingsScreen extends ConsumerWidget {
     final settings = ref.watch(appSettingsProvider);
     final notifier = ref.read(appSettingsProvider.notifier);
     final profile = ref.watch(myProfileProvider).valueOrNull;
+    final isPro = ref.watch(isProProvider);
 
     return BrandScaffold(
       header: BrandHeader(
@@ -221,6 +224,15 @@ class SettingsScreen extends ConsumerWidget {
                   }
                 },
               ),
+              if (isPro) ...[
+                const BrandRowDivider(),
+                BrandListRow(
+                  icon: Icons.stars_rounded,
+                  title: 'Manage subscription',
+                  subtitle: 'Change or cancel your Ranmap Pro plan',
+                  onTap: () => openManageSubscription(context),
+                ),
+              ],
               const BrandRowDivider(),
               BrandListRow(
                 icon: Icons.delete_forever_outlined,
@@ -611,6 +623,20 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
                         value: prefs.groupInvites,
                         onChange: (v) =>
                             _update(prefs.copyWith(groupInvites: v)),
+                      ),
+                    ),
+                    const BrandRowDivider(),
+                    BrandListRow(
+                      icon: Icons.sos_rounded,
+                      title: 'Convoy alerts',
+                      subtitle: 'SOS and regroup signals from your crew',
+                      onTap: () => _update(
+                        prefs.copyWith(convoyAlerts: !prefs.convoyAlerts),
+                      ),
+                      trailing: FSwitch(
+                        value: prefs.convoyAlerts,
+                        onChange: (v) =>
+                            _update(prefs.copyWith(convoyAlerts: v)),
                       ),
                     ),
                     const BrandRowDivider(),

@@ -11,9 +11,9 @@
 
 begin;
 
--- 28 assertions: 23 ok() (RLS + RPC/column privilege grants) plus five
+-- 29 assertions: 24 ok() (RLS + RPC/column privilege grants) plus five
 -- behavioural checks (lives_ok / throws_ok / is_empty) below.
-select plan(28);
+select plan(29);
 
 -- ---------------------------------------------------------------------------
 -- RLS is enabled on every application table (catches a new table added without
@@ -75,8 +75,12 @@ select ok(
   'authenticated cannot execute usage_status'
 );
 select ok(
-  not has_function_privilege('authenticated', 'public.add_usage(uuid, text, integer, integer)', 'execute'),
-  'authenticated cannot execute add_usage'
+  not has_function_privilege('authenticated', 'public.reserve_usage(uuid, text, integer, integer, integer)', 'execute'),
+  'authenticated cannot execute reserve_usage'
+);
+select ok(
+  not has_function_privilege('authenticated', 'public.settle_usage(uuid, text, integer, integer, integer)', 'execute'),
+  'authenticated cannot execute settle_usage'
 );
 select ok(
   not has_function_privilege('authenticated', 'public.consume_rate_limit(text, integer, integer)', 'execute'),

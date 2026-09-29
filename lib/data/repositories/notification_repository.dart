@@ -9,12 +9,14 @@ class NotificationPreferences {
     this.chatMessages = true,
     this.tripUpdates = true,
     this.groupInvites = true,
+    this.convoyAlerts = true,
   });
 
   final bool tripInvites;
   final bool chatMessages;
   final bool tripUpdates;
   final bool groupInvites;
+  final bool convoyAlerts;
 
   factory NotificationPreferences.fromRow(Map<String, dynamic> row) =>
       NotificationPreferences(
@@ -22,6 +24,7 @@ class NotificationPreferences {
         chatMessages: row['chat_messages'] as bool? ?? true,
         tripUpdates: row['trip_updates'] as bool? ?? true,
         groupInvites: row['group_invites'] as bool? ?? true,
+        convoyAlerts: row['convoy_alerts'] as bool? ?? true,
       );
 
   NotificationPreferences copyWith({
@@ -29,11 +32,13 @@ class NotificationPreferences {
     bool? chatMessages,
     bool? tripUpdates,
     bool? groupInvites,
+    bool? convoyAlerts,
   }) => NotificationPreferences(
     tripInvites: tripInvites ?? this.tripInvites,
     chatMessages: chatMessages ?? this.chatMessages,
     tripUpdates: tripUpdates ?? this.tripUpdates,
     groupInvites: groupInvites ?? this.groupInvites,
+    convoyAlerts: convoyAlerts ?? this.convoyAlerts,
   );
 }
 
@@ -62,6 +67,7 @@ class NotificationRepository {
       'chat_messages': prefs.chatMessages,
       'trip_updates': prefs.tripUpdates,
       'group_invites': prefs.groupInvites,
+      'convoy_alerts': prefs.convoyAlerts,
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     });
   }

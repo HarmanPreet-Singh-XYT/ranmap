@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
+import 'package:geolocator/geolocator.dart' hide Position;
 import 'package:share_plus/share_plus.dart';
 
 import 'package:intl/intl.dart';
 
 import '../../core/constants/avatars.dart';
 import '../../core/constants/env.dart';
-import '../../core/constants/invite_links.dart';
 import '../../core/constants/plan_limits.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../core/router/auth_state_provider.dart';
@@ -43,6 +43,7 @@ import '../map/trip_photos_screen.dart';
 import '../premium/paywall.dart';
 import '../premium/premium_providers.dart';
 import '../social/group_detail_screen.dart';
+import '../social/invite_share.dart';
 import '../social/social_providers.dart';
 import 'add_expense_screen.dart';
 import 'add_stop_screen.dart';
@@ -61,13 +62,76 @@ class TripDetailScreen extends ConsumerWidget {
   Future<void> _startTrip(BuildContext context, WidgetRef ref) async {
     try {
       await ref.read(tripRepositoryProvider).startTrip(trip.id);
+      // Directions are best-effort: the trip is already live either way.
+      String? directionsError;
+      if (trip.routePolyline == null) {
+        directionsError = await _loadDirections(ref);
+      }
       ref.invalidate(myTripsProvider);
       ref.invalidate(activeTripProvider);
       if (!context.mounted) return;
-      showAppToast(context, 'Trip started — your crew can follow you live.');
+      showAppToast(
+        context,
+        directionsError == null
+            ? 'Trip started — your crew can follow you live.'
+            : "Trip started, but directions couldn't load: $directionsError",
+        error: directionsError != null,
+      );
       Navigator.of(context).maybePop();
     } catch (e) {
       if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
+
+  /// Plans and saves a route from the traveller's position to the trip's
+  /// destination (or its last stop) so the map has directions to draw once the
+  /// trip is live. Returns null on success, or a short reason it couldn't.
+  Future<String?> _loadDirections(WidgetRef ref) async {
+    try {
+      final repo = ref.read(tripRepositoryProvider);
+      var destinationName = trip.destinationName;
+      var destination = trip.destinationPoint;
+      if (destination == null) {
+        final stops = await repo.stopsFor(trip.id);
+        if (stops.isEmpty) return 'add a stop or destination first.';
+        final last = stops.last;
+        destinationName = last.name;
+        destination = last.point;
+      }
+
+      final origin = trip.originPoint ?? await _currentPoint();
+      if (origin == null) return 'location unavailable.';
+
+      final routes = await GoogleMapsApiService.directions(
+        origin: Geo.pos(origin.lat, origin.lng),
+        destination: Geo.pos(destination.lat, destination.lng),
+      );
+      await repo.updateRoute(
+        tripId: trip.id,
+        originName: trip.originName ?? 'Start',
+        originPoint: origin,
+        destinationName: destinationName ?? 'Destination',
+        destinationPoint: destination,
+        routePolyline: routes.first.encodedPolyline,
+      );
+      return null;
+    } catch (e) {
+      return friendlyError(e);
+    }
+  }
+
+  Future<LatLngPoint?> _currentPoint() async {
+    try {
+      final p =
+          await Geolocator.getLastKnownPosition() ??
+          await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              timeLimit: Duration(seconds: 8),
+            ),
+          );
+      return LatLngPoint(p.latitude, p.longitude);
+    } catch (_) {
+      return null;
     }
   }
 
@@ -1146,22 +1210,16 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              BrandSecondaryButton(
-                label: 'Propose',
-                trailing: Icon(
-                  Icons.how_to_vote_outlined,
-                  size: 18,
-                  color: BrandColors.textHeadlineAlt,
-                ),
-                expand: false,
+              BrandFab(
+                primary: false,
+                icon: Icons.how_to_vote_outlined,
+                tooltip: 'Propose a stop',
                 onPressed: _proposeStop,
               ),
               const SizedBox(width: BrandSpace.sm),
-              BrandPrimaryButton(
-                label: 'Add stop',
-                leadingIcon: Icons.add_location_alt_rounded,
-                trailingIcon: null,
-                expand: false,
+              BrandFab(
+                icon: Icons.add_location_alt_rounded,
+                tooltip: 'Add stop',
                 onPressed: () async {
                   await Navigator.of(context).push(
                     MaterialPageRoute(
@@ -1515,29 +1573,14 @@ class _CrewTab extends ConsumerWidget {
   final String? groupId;
 
   Future<void> _shareInvite(BuildContext context, WidgetRef ref) async {
-    final handle = ref.read(myProfileProvider).valueOrNull?.username;
-    if (handle == null) {
-      showAppToast(context, 'Set a username before inviting people.');
-      return;
-    }
-    // Until the invite domain is live, inviteLinkFor returns the app's custom
-    // scheme — which most messaging apps won't render as a tappable link and
-    // which does nothing for someone without the app. Share just the handle
-    // then; once the domain is configured, include the real web link.
-    final text = kInviteHostConfigured
-        ? 'Join me on Ranmap for "$tripTitle" — add me as a friend, my '
-              'username is @$handle.\n${inviteLinkFor(handle)}'
-        : 'Join me on Ranmap for "$tripTitle" — add me as a friend, my '
-              'username is @$handle.';
-    try {
-      await SharePlus.instance.share(
-        ShareParams(subject: 'Join me on Ranmap', text: text),
-      );
-    } catch (_) {
-      if (context.mounted) {
-        showAppToast(context, 'Could not open sharing.', error: true);
-      }
-    }
+    // The shared helper always includes the invite link (falling back to the
+    // app's custom scheme until the production domain is live), so the
+    // "Send a link" promise is actually kept.
+    await shareMyInviteLink(
+      context,
+      ref,
+      intro: 'Join me on Ranmap for "$tripTitle".',
+    );
   }
 
   Future<void> _addMember(

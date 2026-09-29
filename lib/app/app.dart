@@ -107,13 +107,52 @@ class _RanmapAppState extends ConsumerState<RanmapApp> {
         BrandColors.use(dark ? BrandPalette.dark : BrandPalette.light);
         return FTheme(
           data: dark ? darkNavTheme : lightNavTheme,
-          child: FToaster(
-            child: FTooltipGroup(
-              child: OfflineBanner(child: child ?? const SizedBox.shrink()),
+          child: _ThemeRefresher(
+            child: FToaster(
+              child: FTooltipGroup(
+                child: OfflineBanner(child: child ?? const SizedBox.shrink()),
+              ),
             ),
           ),
         );
       },
     );
   }
+}
+
+/// `BrandColors` is a global, not an inherited value, so widgets that only read
+/// it aren't told when the brightness flips and keep their old colours. When the
+/// brightness changes, this rebuilds everything below it (state is preserved).
+class _ThemeRefresher extends StatefulWidget {
+  const _ThemeRefresher({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_ThemeRefresher> createState() => _ThemeRefresherState();
+}
+
+class _ThemeRefresherState extends State<_ThemeRefresher> {
+  Brightness? _brightness;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final brightness = Theme.brightnessOf(context);
+    final changed = _brightness != null && _brightness != brightness;
+    _brightness = brightness;
+    if (changed) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _rebuildAll(context as Element);
+      });
+    }
+  }
+
+  static void _rebuildAll(Element element) {
+    element.markNeedsBuild();
+    element.visitChildren(_rebuildAll);
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

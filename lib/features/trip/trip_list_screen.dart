@@ -14,6 +14,7 @@ import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/brand/brand_skeleton.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/trip.dart';
+import '../notifications/notifications_bell.dart';
 import 'new_trip_screen.dart';
 import 'trip_detail_screen.dart';
 import 'trip_providers.dart';
@@ -42,7 +43,11 @@ class _TripListScreenState extends ConsumerState<TripListScreen> {
 
     return BrandScaffold(
       bottomSafeArea: false,
-      header: const BrandHeader(title: 'Trips', showBack: false),
+      header: const BrandHeader(
+        title: 'Trips',
+        showBack: false,
+        action: NotificationsBell(),
+      ),
       child: Stack(
         children: [
           RefreshIndicator(
@@ -158,11 +163,9 @@ class _TripListScreenState extends ConsumerState<TripListScreen> {
           Positioned(
             right: BrandSpace.md,
             bottom: BrandSpace.md,
-            child: BrandPrimaryButton(
-              label: 'New trip',
-              leadingIcon: Icons.add_rounded,
-              trailingIcon: null,
-              expand: false,
+            child: BrandFab(
+              icon: Icons.add_rounded,
+              tooltip: 'New trip',
               onPressed: _newTrip,
             ),
           ),

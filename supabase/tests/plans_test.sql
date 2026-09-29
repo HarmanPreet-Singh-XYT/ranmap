@@ -8,7 +8,7 @@
 
 begin;
 
-select plan(15);
+select plan(19);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures. alice / bob / carol plus seven plain members for the group cap.
@@ -148,6 +148,29 @@ select is(
   (select allowed from public.consume_usage('00000000-0000-0000-0000-000000000003', 'maps_search', 1, 3600)),
   false,
   'consume_usage blocks once max is reached'
+);
+
+-- Reservation accounting (0036): a hold counts against the ceiling but never as
+-- usage, and settling records the real spend rather than the hold.
+select is(
+  (select allowed from public.reserve_usage('00000000-0000-0000-0000-000000000004', 'ai_assistant', 8000, 10000, 3600)),
+  true,
+  'reserve_usage allows a hold within the ceiling'
+);
+select is(
+  (select used from public.usage_status('00000000-0000-0000-0000-000000000004', 'ai_assistant', 3600)),
+  0,
+  'a reservation is not counted as usage'
+);
+select is(
+  (select allowed from public.reserve_usage('00000000-0000-0000-0000-000000000004', 'ai_assistant', 8000, 10000, 3600)),
+  false,
+  'a second hold past the ceiling is refused'
+);
+select is(
+  (select used from public.settle_usage('00000000-0000-0000-0000-000000000004', 'ai_assistant', 8000, 1200, 3600)),
+  1200,
+  'settling records the real spend, not the hold'
 );
 
 -- ---------------------------------------------------------------------------

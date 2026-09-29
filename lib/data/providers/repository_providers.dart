@@ -4,6 +4,7 @@ import '../repositories/account_repository.dart';
 import '../repositories/avatar_repository.dart';
 import '../repositories/convoy_repository.dart';
 import '../repositories/notification_repository.dart';
+import '../repositories/notifications_feed_repository.dart';
 import '../repositories/phone_repository.dart';
 import '../repositories/premium_repository.dart';
 import '../repositories/profile_repository.dart';
@@ -28,6 +29,9 @@ final accountRepositoryProvider = Provider<AccountRepository>(
 );
 final notificationRepositoryProvider = Provider<NotificationRepository>(
   (ref) => NotificationRepository(),
+);
+final notificationsFeedRepositoryProvider = Provider<NotificationsFeedRepository>(
+  (ref) => NotificationsFeedRepository(),
 );
 final avatarRepositoryProvider = Provider<AvatarRepository>(
   (ref) => AvatarRepository(),

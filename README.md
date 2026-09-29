@@ -106,9 +106,16 @@ server/           # ranmap-server: Node/TS backend for secret-holding operations
    `0027_group_convoy.sql`, `0028_trip_planning_and_statuses.sql`,
    `0029_trip_shares.sql`, `0030_service_and_documents.sql`,
    `0031_support_requests.sql`, `0032_plan_limits_documents_routes.sql`,
-   `0033_pro_fair_use_limits.sql` and
-   `0034_extreme_tier.sql` (either paste
-   them into the SQL editor in that order, or `supabase db push`). `0034`
+   `0033_pro_fair_use_limits.sql`,
+   `0034_extreme_tier.sql`, `0035_audit_hardening.sql` and
+   `0036_usage_reservations.sql` (either paste
+   them into the SQL editor in that order, or `supabase db push`). `0036`
+   splits the AI token meter's in-flight reservation out of settled usage
+   (`usage_counters.reserved` plus a `settle_usage` RPC), so a running turn's
+   hold no longer shows as usage in the quota meter; it replaces `add_usage`
+   with reserve + settle. `0035`
+   closes a batch of audit findings (storage-path repointing, PUBLIC execute on
+   the entitlement predicates, and group-cap gaps). `0034`
    adds the Extreme tier (`plan` gains `'extreme'`; `is_pro` now means *paid* =
    pro OR extreme, plus `is_extreme`, `group_has_extreme`, and the `*_extreme`
    `plan_limit` keys); `0033`
@@ -287,12 +294,15 @@ but have no UPDATE grant on it.
 - **Gated, per user**: the AI assistant (`/ai/*`) and a daily cap on route &
   place search (`/maps/*`). Free accounts get a metered allowance first, so the
   feature is discoverable before it's paywalled. The meter lives in Postgres
-  (`consume_usage` / `usage_status` / `add_usage`), so it's shared across server
-  instances. Two shapes: **search** counts requests (`requireProOrTrial`
-  consumes one up front); the **AI assistant** is metered in **tokens** — the
-  cost is only known after the model responds, so `requireWithinAllowance`
-  checks the cap up front and the route records the real spend with
-  `add_usage` afterwards. `GET /plan/usage` reports both, and the app renders a
+  (`consume_usage` / `usage_status` / `reserve_usage` / `release_usage` /
+  `settle_usage`), so it's shared across server instances. Two shapes: **search**
+  counts requests (`requireProOrTrial` consumes one up front); the **AI
+  assistant** is metered in **tokens** — the cost is only known after the model
+  responds, so `requireWithinAllowance` checks the cap up front, the route holds
+  an upper-bound reservation while the model runs, then `settleUsage` records the
+  real spend and releases the hold. The hold is tracked separately
+  (`usage_counters.reserved`), so it never shows up as usage. `GET /plan/usage`
+  reports both, and the app renders a
   **free-plan usage meter** on the Profile tab. Paid tiers are **metered too**,
   against a larger fair-use ceiling (`proMax` for Pro, `extremeMax` for Extreme
   — 5M / 15M AI tokens per 30 days, 2,000 / 5,000 searches per day), so provider
@@ -307,7 +317,8 @@ but have no UPDATE grant on it.
     the in-memory store (single instance/tests). Fail **open** if every store
     fails, logged loudly.
   - *Allowances* — Postgres stays the **source of truth**
-    (`consume_usage` / `usage_status` / `add_usage`); Redis is a
+    (`consume_usage` / `usage_status` / `reserve_usage` / `release_usage` /
+    `settle_usage`); Redis is a
     **read-through cache** in front of it, refreshed on a miss and after every
     write. A flush or eviction costs one extra Postgres read — it can never hand
     back a fresh allowance, because the durable counter is never bypassed. (The

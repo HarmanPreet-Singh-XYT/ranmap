@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants/plan_limits.dart';
 import '../../core/theme/brand_palette.dart';
@@ -23,6 +22,7 @@ import '../../core/widgets/error_retry.dart';
 import '../../data/models/user_document.dart';
 import '../premium/paywall.dart';
 import '../premium/premium_providers.dart';
+import 'document_viewer_screen.dart';
 import 'profile_extras_providers.dart';
 
 /// The private document wallet: license, insurance, tickets. Files live in a
@@ -118,16 +118,9 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
     }
   }
 
-  Future<void> _open(UserDocument doc) async {
-    try {
-      final url = await ref
-          .read(documentRepositoryProvider)
-          .signedUrl(doc.storagePath);
-      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-    } catch (e) {
-      if (mounted) showAppToast(context, friendlyError(e), error: true);
-    }
-  }
+  Future<void> _open(UserDocument doc) => Navigator.of(context).push(
+    MaterialPageRoute(builder: (_) => DocumentViewerScreen(document: doc)),
+  );
 
   Future<void> _delete(UserDocument doc) async {
     final confirmed = await showAppConfirmDialog(

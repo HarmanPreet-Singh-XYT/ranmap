@@ -182,3 +182,57 @@ class BrandSecondaryButton extends StatelessWidget {
     );
   }
 }
+
+/// A round, icon-only floating action. The icon carries the meaning (a plus
+/// adds, a phone calls); [tooltip] is for long-press and screen readers.
+class BrandFab extends StatelessWidget {
+  const BrandFab({
+    super.key,
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+    this.primary = true,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onPressed;
+
+  /// Filled brand colour when true; a neutral raised surface when false.
+  final bool primary;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: tooltip,
+      child: Tooltip(
+        message: tooltip,
+        child: BrandPressable(
+          onTap: onPressed,
+          enabled: onPressed != null,
+          child: Container(
+            height: 56,
+            width: 56,
+            decoration: BoxDecoration(
+              color: primary
+                  ? BrandColors.primaryContainer
+                  : BrandColors.surfaceContainerHigh,
+              shape: BoxShape.circle,
+              boxShadow: primary
+                  ? BrandShadows.primaryGlow
+                  : BrandShadows.subtle,
+            ),
+            child: Icon(
+              icon,
+              size: 26,
+              color: primary
+                  ? BrandColors.onPrimary
+                  : BrandColors.textHeadlineAlt,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
