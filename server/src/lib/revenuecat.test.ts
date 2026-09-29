@@ -4,6 +4,7 @@ import {
   extractUserId,
   isAuthorizedWebhook,
   planSourceFromStore,
+  readPlanEntitlement,
   readProEntitlement,
 } from "./revenuecat.js";
 
@@ -66,10 +67,45 @@ test("readProEntitlement is inactive when there is no pro entitlement", () => {
   assert.deepEqual(readProEntitlement(null), { active: false, expiresAt: null });
 });
 
+test("readPlanEntitlement prefers an active extreme entitlement over pro", () => {
+  const result = readPlanEntitlement({
+    subscriber: {
+      entitlements: { pro: { expires_date: future }, extreme: { expires_date: future } },
+    },
+  });
+  assert.equal(result.plan, "extreme");
+});
+
+test("readPlanEntitlement returns pro when only pro is active", () => {
+  const result = readPlanEntitlement({
+    subscriber: { entitlements: { pro: { expires_date: future } } },
+  });
+  assert.equal(result.plan, "pro");
+  assert.equal(result.expiresAt?.toISOString(), future);
+});
+
+test("readPlanEntitlement falls back to pro when extreme has lapsed", () => {
+  const result = readPlanEntitlement({
+    subscriber: {
+      entitlements: { pro: { expires_date: future }, extreme: { expires_date: past } },
+    },
+  });
+  assert.equal(result.plan, "pro");
+});
+
+test("readPlanEntitlement returns free with no active entitlement", () => {
+  assert.deepEqual(readPlanEntitlement({ subscriber: { entitlements: {} } }), {
+    plan: "free",
+    expiresAt: null,
+  });
+  assert.deepEqual(readPlanEntitlement(null), { plan: "free", expiresAt: null });
+});
+
 test("planSourceFromStore maps the stores it knows", () => {
   assert.equal(planSourceFromStore("APP_STORE"), "ios");
   assert.equal(planSourceFromStore("MAC_APP_STORE"), "ios");
   assert.equal(planSourceFromStore("PLAY_STORE"), "android");
+  assert.equal(planSourceFromStore("RC_BILLING"), "web");
   assert.equal(planSourceFromStore("STRIPE"), "other");
   assert.equal(planSourceFromStore("SOMETHING_ELSE"), null);
 });

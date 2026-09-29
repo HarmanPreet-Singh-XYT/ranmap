@@ -5,7 +5,7 @@ export function SignOutButton() {
     <form action={signOut}>
       <button
         type="submit"
-        className="text-sm text-[var(--color-ink-secondary)] transition-colors hover:text-[var(--color-danger)]"
+        className="text-sm font-semibold text-slate-600 transition-colors hover:text-red-700"
       >
         Sign out
       </button>

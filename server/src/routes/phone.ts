@@ -52,6 +52,20 @@ const checkCodePerNumberLimit = rateLimit({
 
 const E164_RE = /^\+[1-9]\d{6,14}$/;
 
+/** Twilio attaches the HTTP status to its errors; a 4xx is a client problem. */
+function twilioStatus(err: unknown): number | undefined {
+  if (typeof err === "object" && err !== null && "status" in err) {
+    const status = (err as { status?: unknown }).status;
+    if (typeof status === "number") return status;
+  }
+  return undefined;
+}
+
+function isTwilioClientError(err: unknown): boolean {
+  const status = twilioStatus(err);
+  return status !== undefined && status >= 400 && status < 500;
+}
+
 // POST /phone/send-code  { phoneNumber: string (E.164, e.g. +15551234567) }
 phoneRouter.post(
   "/send-code",
@@ -76,6 +90,12 @@ phoneRouter.post(
         .verifications.create({ to: phoneNumber, channel: "sms" });
       res.json({ ok: true });
     } catch (err) {
+      // A 4xx from Twilio means this number can't receive a code (not a server
+      // outage), so report it as a client error, not a 502.
+      if (isTwilioClientError(err)) {
+        res.status(400).json({ error: "That number can't receive an SMS. Check it and try again." });
+        return;
+      }
       fail(res, err, 502, "Could not send the verification code. Please try again.", "phone: send-code");
     }
   }),
@@ -110,6 +130,12 @@ phoneRouter.post(
         .verificationChecks.create({ to: phoneNumber, code });
       approved = check.status === "approved";
     } catch (err) {
+      // Twilio returns 404/400 for an invalid or expired code; that's the
+      // user's input, not a server failure.
+      if (isTwilioClientError(err)) {
+        res.status(400).json({ error: "Incorrect or expired code" });
+        return;
+      }
       fail(res, err, 502, "Could not check the code. Please try again.", "phone: check-code twilio");
       return;
     }

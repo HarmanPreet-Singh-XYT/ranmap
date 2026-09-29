@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { asyncHandler } from "../lib/async-handler.js";
 import { mapsSearchAllowance } from "../lib/allowances.js";
 import { env } from "../lib/env.js";
@@ -13,10 +13,10 @@ import {
 } from "../lib/mapbox.js";
 import type { NormalizedDetour, NormalizedPlace } from "../lib/mapbox.js";
 import { createMapboxTokenVendor } from "../lib/mapbox-token.js";
-import { isPro } from "../lib/plan-store.js";
+import { planTier } from "../lib/plan-store.js";
 import { rateLimit } from "../lib/rate-limit.js";
 import { consumeUsage } from "../lib/usage.js";
-import { requireProOrTrial } from "../middleware/require-plan.js";
+import { chargeMeteredAllowance } from "../middleware/require-plan.js";
 import { requireAuth } from "../middleware/require-auth.js";
 
 // Proxies the two mapping vendors for the client:
@@ -51,17 +51,31 @@ const mapboxTokenVendor = createMapboxTokenVendor({
 });
 
 // Route planning + POI search spend paid provider quota, so free accounts get a
-// daily allowance and Pro is uncapped. Applied to the paid GET endpoints below.
-const freeSearchTier = requireProOrTrial(
-  mapsSearchAllowance.feature,
-  {
-    max: mapsSearchAllowance.max,
-    windowMs: mapsSearchAllowance.windowMs,
-    message: mapsSearchAllowance.message,
-  },
-  isPro,
-  consumeUsage,
-);
+// small daily allowance and Pro a much larger one — both bounded, so a single
+// account can't run up an unbounded Mapbox/Google bill. Charged from inside
+// each handler (after validation and the "not configured" check) so a 400/503
+// never consumes quota.
+const searchAllowanceOpts = {
+  max: mapsSearchAllowance.max,
+  proMax: mapsSearchAllowance.proMax,
+  extremeMax: mapsSearchAllowance.extremeMax,
+  windowMs: mapsSearchAllowance.windowMs,
+  message: mapsSearchAllowance.message,
+  proMessage: mapsSearchAllowance.proMessage,
+  extremeMessage: mapsSearchAllowance.extremeMessage,
+};
+
+/** Charges one search unit, or answers the request and returns false. */
+function chargeSearch(req: Request, res: Response): Promise<boolean> {
+  return chargeMeteredAllowance(
+    mapsSearchAllowance.feature,
+    searchAllowanceOpts,
+    planTier,
+    consumeUsage,
+    req,
+    res,
+  );
+}
 
 // The Mapbox Directions base; the travel profile (driving/cycling) is appended
 // per request from the caller's mode (see mapboxProfileForMode).
@@ -218,7 +232,6 @@ mapsRouter.get(
 // callers are unchanged.
 mapsRouter.get(
   "/directions",
-  freeSearchTier,
   asyncHandler(async (req, res) => {
     const { mapboxAccessToken } = env;
     if (!mapboxAccessToken) {
@@ -245,6 +258,9 @@ mapsRouter.get(
       }
       profile = mapped;
     }
+
+    // Validated: now the request may draw on the daily search allowance.
+    if (!(await chargeSearch(req, res))) return;
 
     // Mapbox takes lng,lat order.
     const coordinates = `${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}`;
@@ -287,7 +303,6 @@ mapsRouter.get(
 // (the `origin`, or the search `location`) exists to measure from.
 mapsRouter.get(
   "/places/nearby",
-  freeSearchTier,
   asyncHandler(async (req, res) => {
     const { mapboxAccessToken } = env;
     if (!mapboxAccessToken) {
@@ -315,6 +330,9 @@ mapsRouter.get(
     // unless the client sends `origin` its results simply come back without a
     // detour.
     const origin = parseLatLng(String(req.query.origin ?? "").trim()) ?? center;
+
+    // Validated: now the request may draw on the daily search allowance.
+    if (!(await chargeSearch(req, res))) return;
 
     const params = new URLSearchParams({
       language: "en",
@@ -366,7 +384,6 @@ mapsRouter.get(
 // -> { name, address, rating, userRatingCount, openNow, weekdayHours, priceLevel }
 mapsRouter.get(
   "/places/details",
-  freeSearchTier,
   asyncHandler(async (req, res) => {
     const { googleMapsApiKey } = env;
     if (!googleMapsApiKey) {
@@ -375,16 +392,30 @@ mapsRouter.get(
     }
 
     const name = String(req.query.name ?? "").trim();
-    const lat = Number(req.query.lat);
-    const lng = Number(req.query.lng);
-    if (!name || name.length > 200) {
+    if (!name) {
       res.status(400).json({ error: "name is required" });
       return;
     }
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    if (name.length > 200) {
+      res.status(400).json({ error: "name must be at most 200 characters" });
+      return;
+    }
+    // Reject a missing/empty coordinate rather than coercing it to 0, which
+    // would silently resolve the place near (0, 0).
+    const latRaw = req.query.lat;
+    const lngRaw = req.query.lng;
+    const lat = Number(latRaw);
+    const lng = Number(lngRaw);
+    const missing = latRaw === undefined || lngRaw === undefined
+      || String(latRaw).trim() === "" || String(lngRaw).trim() === "";
+    if (missing || !Number.isFinite(lat) || !Number.isFinite(lng)
+        || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
       res.status(400).json({ error: "lat and lng must be valid coordinates" });
       return;
     }
+
+    // Validated: now the request may draw on the daily search allowance.
+    if (!(await chargeSearch(req, res))) return;
 
     try {
       const response = await fetchJson(GOOGLE_TEXT_SEARCH_URL, {

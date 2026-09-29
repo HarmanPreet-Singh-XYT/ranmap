@@ -38,6 +38,13 @@ app.disable("x-powered-by");
 // a fresh rate-limit bucket per request. Defaults to one hop; set TRUST_PROXY=0
 // when the process is exposed directly.
 app.set("trust proxy", env.trustProxy);
+if (!process.env.TRUST_PROXY) {
+  console.warn(
+    "TRUST_PROXY is unset — defaulting to 1 proxy hop. If this process is " +
+      "exposed directly (no reverse proxy), set TRUST_PROXY=0 so a client " +
+      "can't spoof X-Forwarded-For to evade the per-IP rate limit.",
+  );
+}
 
 // The mobile client authenticates with a Bearer token, not cookies, so it
 // isn't subject to CORS. Only enable cross-origin access when explicitly
@@ -105,6 +112,7 @@ app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
 // only the routes that need a missing one fail (with a 503). Warn once, loudly,
 // so a half-configured deployment is obvious rather than a mystery 500.
 const unconfigured = [
+  !env.geminiApiKey ? "GEMINI_API_KEY (AI assistant)" : null,
   !env.googleMapsApiKey ? "GOOGLE_MAPS_API_KEY (place details)" : null,
   !env.mapboxAccessToken || !env.mapboxUsername
     ? "MAPBOX_ACCESS_TOKEN / MAPBOX_USERNAME (map + routing)"

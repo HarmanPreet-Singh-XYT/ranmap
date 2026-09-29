@@ -379,11 +379,24 @@ notificationsRouter.post(
 
     const { data: alert } = await supabaseAdmin
       .from("group_alerts")
-      .select("id, group_id, created_by, kind, message")
+      .select("id, group_id, created_by, kind, message, created_at")
       .eq("id", alertId)
       .maybeSingle();
     if (!alert) {
       res.status(404).json({ error: "Alert not found" });
+      return;
+    }
+
+    // Only the member who raised the alert may push it, and only while it's
+    // fresh — otherwise any member could re-broadcast an old alert attributed
+    // to someone else (the copy below is built from the alert's creator).
+    if (alert.created_by !== req.userId) {
+      res.status(403).json({ error: "Only the member who raised this alert can notify the group." });
+      return;
+    }
+    const createdAt = Date.parse(String(alert.created_at));
+    if (!Number.isFinite(createdAt) || Date.now() - createdAt > 15 * 60 * 1000) {
+      res.status(410).json({ error: "That alert is no longer active." });
       return;
     }
 

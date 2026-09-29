@@ -20,6 +20,13 @@ const _socials = [
   ('tiktok', 'TikTok', 'tiktok.com/@…'),
 ];
 
+/// A social handle: letters, digits, dot, underscore or hyphen (the intersection
+/// of the three platforms' rules). Rejects URLs, spaces, and stray text.
+final _socialHandleRe = RegExp(r'^[A-Za-z0-9._-]+$');
+
+String _socialLabel(String id) =>
+    _socials.firstWhere((s) => s.$1 == id, orElse: () => (id, id, '')).$2;
+
 class LinkedSocialsScreen extends ConsumerStatefulWidget {
   const LinkedSocialsScreen({super.key});
 
@@ -132,6 +139,15 @@ class _LinkedSocialsScreenState extends ConsumerState<LinkedSocialsScreen> {
         final value = entry.value.text.trim();
         if (value.isEmpty) {
           socials.remove(entry.key);
+        } else if (!_socialHandleRe.hasMatch(value)) {
+          // Length is already capped by the field; reject non-handle text
+          // (URLs/spaces) so the profile chip can't render garbage.
+          setState(
+            () => _error =
+                'Enter a valid ${_socialLabel(entry.key)} handle — letters, '
+                'numbers, dots, underscores and hyphens only.',
+          );
+          return;
         } else {
           socials[entry.key] = value;
         }

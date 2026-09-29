@@ -1,0 +1,49 @@
+# Ranmap backend stack for a single VPS: nginx (already on the host, TLS) -> api -> redis.
+#
+#   docker compose up -d --build
+#
+# Secrets live in server/.env (injected via env_file, never baked into the image).
+#
+# nginx (on the host) proxies https://api.ranmap.app -> http://127.0.0.1:8787,
+# so the api container publishes its port on loopback only — never on 0.0.0.0.
+#
+# IMPORTANT — run exactly ONE api replica. The server runs an in-process
+# scheduler + pruner on a 60s loop; a second replica would double-run them.
+# Do not add `deploy.replicas` / `--scale api=N`.
+
+services:
+  api:
+    build:
+      context: ./server
+    image: ranmap-server:latest
+    restart: unless-stopped
+    env_file:
+      - ./server/.env
+    environment:
+      # Redis is on the internal network only; this overrides whatever
+      # REDIS_URL sits in server/.env so the container always finds it here.
+      REDIS_URL: redis://redis:6379
+      # Hop count between the real client and this process (nginx is one hop):
+      #   nginx only            -> 1
+      #   Cloudflare in front    -> 2 (Cloudflare, then nginx)
+      # Never "true" (a client could spoof X-Forwarded-For and dodge limits).
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+    ports:
+      # Loopback only: nginx on the host reaches it, the internet does not.
+      - "127.0.0.1:8787:8787"
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Postgres stays the source of truth for allowances; Redis is a cache and
+    # the shared rate-limit store, so append-only + noeviction is a safe default.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+    expose:
+      - "6379"
+
+volumes:
+  redis_data:

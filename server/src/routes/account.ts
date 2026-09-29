@@ -18,20 +18,54 @@ const deleteLimit = rateLimit({
   message: "Too many account deletion attempts — try again later.",
 });
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Every object path under [prefix], recursively. Supabase's `list` returns only
+ * one level and paginates at 100 by default, so a non-recursive, unpaginated
+ * listing would orphan nested files and anything past the first page.
+ * A folder entry is reported with a null `id`.
+ */
+async function listAllFiles(bucket: string, prefix: string): Promise<string[]> {
+  const pageSize = 100;
+  const paths: string[] = [];
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await supabaseAdmin.storage
+      .from(bucket)
+      .list(prefix, { limit: pageSize, offset });
+    if (error) throw new Error(error.message);
+    if (!data?.length) break;
+    for (const entry of data) {
+      const full = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.id === null || entry.id === undefined) {
+        paths.push(...(await listAllFiles(bucket, full)));
+      } else {
+        paths.push(full);
+      }
+    }
+    if (data.length < pageSize) break;
+    offset += pageSize;
+  }
+  return paths;
+}
+
 /**
  * Best-effort removal of the user's uploaded files. Row deletion doesn't touch
  * Storage, so without this the photos would linger in the private buckets after
  * the owning account is gone.
  */
 async function removeUserMedia(userId: string): Promise<void> {
+  // Only remove files under the user's own id — never a blanket wipe of the
+  // bucket. The UUID check also guards against a malformed id reaching here.
+  if (!UUID_RE.test(userId)) return;
   for (const bucket of ["map-media", "avatars"] as const) {
     try {
-      const { data: files, error } = await supabaseAdmin.storage
-        .from(bucket)
-        .list(userId, { limit: 1000 });
-      if (error || !files?.length) continue;
-      const paths = files.map((file) => `${userId}/${file.name}`);
-      await supabaseAdmin.storage.from(bucket).remove(paths);
+      const paths = await listAllFiles(bucket, userId);
+      // Chunk so a very large library doesn't send one oversized remove call.
+      for (let i = 0; i < paths.length; i += 100) {
+        await supabaseAdmin.storage.from(bucket).remove(paths.slice(i, i + 100));
+      }
     } catch (err) {
       // Media cleanup must not block the account deletion itself.
       console.error(`account: media cleanup failed for bucket ${bucket}:`, err);

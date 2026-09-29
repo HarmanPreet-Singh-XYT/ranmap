@@ -11,7 +11,7 @@ import { SiteShell } from "../_components/site-shell";
 export default function AccountLayout({ children }: { children: ReactNode }) {
   return (
     <SiteShell>
-      <div className="mx-auto w-full max-w-4xl flex-1 px-5 py-12">
+      <div className="mx-auto w-full max-w-4xl flex-1 bg-[#FAF8F5] px-5 py-12 sm:px-8">
         {children}
       </div>
     </SiteShell>

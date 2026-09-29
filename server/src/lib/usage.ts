@@ -39,6 +39,23 @@ export interface UsageBackend {
     max: number,
     windowSeconds: number,
   ): Promise<{ allowed: boolean } & AllowanceState>;
+  /** Atomically adds [units] if it stays within [max]; otherwise nothing is
+   *  added and `allowed` is false. Used for token metering, where the cost is
+   *  only known after the call. */
+  reserve(
+    userId: string,
+    feature: PremiumFeature,
+    units: number,
+    max: number,
+    windowSeconds: number,
+  ): Promise<{ allowed: boolean } & AllowanceState>;
+  /** Refunds unused reserved [units] (never below zero). */
+  release(
+    userId: string,
+    feature: PremiumFeature,
+    units: number,
+    windowSeconds: number,
+  ): Promise<AllowanceState>;
   status(
     userId: string,
     feature: PremiumFeature,
@@ -80,6 +97,28 @@ const supabaseUsageBackend: UsageBackend = {
     const { data, error } = await supabaseAdmin.rpc("usage_status", {
       p_user: userId,
       p_feature: feature,
+      p_window_seconds: windowSeconds,
+    });
+    if (error) throw new Error(error.message);
+    return stateFrom(firstRow(data));
+  },
+  async reserve(userId, feature, units, max, windowSeconds) {
+    const { data, error } = await supabaseAdmin.rpc("reserve_usage", {
+      p_user: userId,
+      p_feature: feature,
+      p_units: units,
+      p_max: max,
+      p_window_seconds: windowSeconds,
+    });
+    if (error) throw new Error(error.message);
+    const row = firstRow(data);
+    return { allowed: row?.allowed === true, ...stateFrom(row) };
+  },
+  async release(userId, feature, units, windowSeconds) {
+    const { data, error } = await supabaseAdmin.rpc("release_usage", {
+      p_user: userId,
+      p_feature: feature,
+      p_units: units,
       p_window_seconds: windowSeconds,
     });
     if (error) throw new Error(error.message);
@@ -185,6 +224,47 @@ export async function addUsage(
 ): Promise<void> {
   if (units <= 0) return;
   const state = await backend.add(userId, feature, units, windowSeconds);
+  if (redis) {
+    await cacheState(redis, usageKey(feature, userId), state, windowSeconds);
+  }
+}
+
+/**
+ * Atomically reserves an up-front upper-bound of [units] against the ceiling,
+ * returning whether it was allowed. Used to bound token spend: unlike the
+ * read-then-write `getUsage` check, concurrent requests can't all observe the
+ * same under-limit value and proceed.
+ */
+export async function reserveUsage(
+  userId: string,
+  feature: PremiumFeature,
+  units: number,
+  max: number,
+  windowSeconds: number,
+  redis: RedisLike | null = getRedis(),
+  backend: UsageBackend = supabaseUsageBackend,
+): Promise<boolean> {
+  const result = await backend.reserve(userId, feature, units, max, windowSeconds);
+  if (redis) {
+    await cacheState(redis, usageKey(feature, userId), result, windowSeconds);
+  }
+  return result.allowed;
+}
+
+/**
+ * Refunds an unused reservation. Best-effort: a refund failure only means the
+ * counter stays slightly high, which is the safe direction.
+ */
+export async function releaseUsage(
+  userId: string,
+  feature: PremiumFeature,
+  units: number,
+  windowSeconds: number,
+  redis: RedisLike | null = getRedis(),
+  backend: UsageBackend = supabaseUsageBackend,
+): Promise<void> {
+  if (units <= 0) return;
+  const state = await backend.release(userId, feature, units, windowSeconds);
   if (redis) {
     await cacheState(redis, usageKey(feature, userId), state, windowSeconds);
   }

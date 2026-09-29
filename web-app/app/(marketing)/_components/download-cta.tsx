@@ -1,6 +1,10 @@
-import Image from "next/image";
 import Link from "next/link";
 import { Download, Smartphone, ArrowRight, ShieldCheck, Sparkles } from "lucide-react";
+
+// Real store listings, from env, so the badges never point somewhere unrelated.
+// When a URL isn't configured the badge is omitted rather than shipped dead.
+const APP_STORE_URL = process.env.NEXT_PUBLIC_APP_STORE_URL;
+const PLAY_STORE_URL = process.env.NEXT_PUBLIC_PLAY_STORE_URL;
 
 export function DownloadCta() {
   return (
@@ -31,31 +35,35 @@ export function DownloadCta() {
             <ArrowRight className="h-4 w-4" />
           </Link>
 
-          <a
-            href="https://apple.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-3 rounded-full border border-[#E6E3DA] bg-[#FAF8F5] px-6 py-3.5 text-xs font-semibold text-slate-900 shadow-xs transition-all hover:bg-white hover:border-slate-400 hover:scale-[1.02]"
-          >
-            <Smartphone className="h-4 w-4 text-slate-700" />
-            <div className="text-left">
-              <span className="block text-[10px] text-slate-500 uppercase tracking-wider">Download on</span>
-              <span className="text-sm font-bold text-slate-900">Apple App Store</span>
-            </div>
-          </a>
+          {APP_STORE_URL && (
+            <a
+              href={APP_STORE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 rounded-full border border-[#E6E3DA] bg-[#FAF8F5] px-6 py-3.5 text-xs font-semibold text-slate-900 shadow-xs transition-all hover:bg-white hover:border-slate-400 hover:scale-[1.02]"
+            >
+              <Smartphone className="h-4 w-4 text-slate-700" />
+              <div className="text-left">
+                <span className="block text-[10px] text-slate-500 uppercase tracking-wider">Download on</span>
+                <span className="text-sm font-bold text-slate-900">Apple App Store</span>
+              </div>
+            </a>
+          )}
 
-          <a
-            href="https://google.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-3 rounded-full border border-[#E6E3DA] bg-[#FAF8F5] px-6 py-3.5 text-xs font-semibold text-slate-900 shadow-xs transition-all hover:bg-white hover:border-slate-400 hover:scale-[1.02]"
-          >
-            <Download className="h-4 w-4 text-emerald-700" />
-            <div className="text-left">
-              <span className="block text-[10px] text-slate-500 uppercase tracking-wider">Get it on</span>
-              <span className="text-sm font-bold text-slate-900">Google Play Store</span>
-            </div>
-          </a>
+          {PLAY_STORE_URL && (
+            <a
+              href={PLAY_STORE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 rounded-full border border-[#E6E3DA] bg-[#FAF8F5] px-6 py-3.5 text-xs font-semibold text-slate-900 shadow-xs transition-all hover:bg-white hover:border-slate-400 hover:scale-[1.02]"
+            >
+              <Download className="h-4 w-4 text-emerald-700" />
+              <div className="text-left">
+                <span className="block text-[10px] text-slate-500 uppercase tracking-wider">Get it on</span>
+                <span className="text-sm font-bold text-slate-900">Google Play Store</span>
+              </div>
+            </a>
+          )}
         </div>
 
         {/* Reassurance strip */}

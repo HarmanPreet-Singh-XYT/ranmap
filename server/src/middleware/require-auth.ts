@@ -12,8 +12,9 @@ declare global {
 
 // Short-lived cache of token -> userId so a burst of requests from one client
 // doesn't hit Supabase Auth every time. Bounded and TTL'd so a revoked token
-// can't stay usable for long.
-const TOKEN_CACHE_TTL_MS = 30_000;
+// can't stay usable for long — kept short so sign-out / account deletion takes
+// effect within seconds.
+const TOKEN_CACHE_TTL_MS = 10_000;
 const TOKEN_CACHE_MAX = 10_000;
 const tokenCache = new Map<string, { userId: string; expiresAt: number }>();
 

@@ -13,6 +13,7 @@ import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/brand/brand_tag.dart';
 import '../../core/widgets/brand/brand_text_field.dart';
+import '../../core/widgets/legal_consent_text.dart';
 import '../../data/services/supabase_service.dart';
 import 'social_auth.dart';
 import 'widgets/auth_social.dart';
@@ -216,10 +217,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
           const SizedBox(height: BrandSpace.lg),
           _LogInPrompt(onTap: _loading ? null : () => context.push('/sign-in')),
           const SizedBox(height: BrandSpace.sm),
-          Text(
-            'By continuing, you agree to RanMap’s Terms of Service & Privacy Policy.',
-            textAlign: TextAlign.center,
-            style: BrandText.labelSm.copyWith(color: BrandColors.textMuted),
+          const LegalConsentText(
+            leadIn: "By continuing, you agree to RanMap's ",
           ),
         ],
       ),

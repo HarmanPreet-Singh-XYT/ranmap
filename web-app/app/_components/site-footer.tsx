@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { Compass, ShieldCheck, Radio, Sparkles } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 
 const columns = [
   {
@@ -27,9 +27,10 @@ const columns = [
     title: "Pricing & Plans",
     links: [
       { href: "/pricing", label: "Explorer (Free)" },
-      { href: "/pricing", label: "Ranmap Pro ($9.99/mo)" },
+      { href: "/pricing", label: "Ranmap Pro ($4.99/mo)" },
+      { href: "/pricing", label: "Ranmap Extreme ($9.99/mo)" },
       { href: "/pricing#faq", label: "Billing FAQs" },
-      { href: "/signup?plan=pro", label: "Start 14-Day Trial" },
+      { href: "/signup", label: "Create Free Account" },
     ],
   },
   {
@@ -39,6 +40,7 @@ const columns = [
       { href: "/support#guides", label: "Convoy Setup Guide" },
       { href: "/privacy", label: "Privacy Policy" },
       { href: "/terms", label: "Terms of Service" },
+      { href: "/refund-policy", label: "Refund Policy" },
     ],
   },
 ];
@@ -70,12 +72,12 @@ export function SiteFooter() {
             
             <div className="mt-6 flex flex-col gap-2.5">
               <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 border border-emerald-200/80 px-3 py-1 text-[11px] font-semibold text-emerald-800 w-fit">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
-                <span>LiveKit Voice: Sub-40ms PTT Operational</span>
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
+                <span>Live convoy tracking on iOS, Android & web</span>
               </div>
               <div className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
                 <ShieldCheck className="h-4 w-4 text-emerald-700" />
-                <span>End-to-end convoy telemetry encryption</span>
+                <span>Private by default — your trips are scoped to your crew</span>
               </div>
             </div>
           </div>
@@ -111,6 +113,9 @@ export function SiteFooter() {
             </Link>
             <Link href="/terms" className="hover:text-slate-900">
               Terms of Service
+            </Link>
+            <Link href="/refund-policy" className="hover:text-slate-900">
+              Refund Policy
             </Link>
             <Link href="/support" className="hover:text-slate-900">
               Support Center

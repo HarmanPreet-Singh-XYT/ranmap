@@ -1,4 +1,5 @@
 import { AUTH_CACHE_TTL_SECONDS, cachedBoolean, invalidateCache } from "./cache.js";
+import type { PlanTier } from "./plans.js";
 import { supabaseAdmin } from "./supabase.js";
 
 /**
@@ -11,6 +12,7 @@ import { supabaseAdmin } from "./supabase.js";
 // paid features), so it gets the standard TTL and an explicit invalidation
 // from the billing webhook.
 export const isProCacheKey = (userId: string) => `v1:is_pro:${userId}`;
+export const isExtremeCacheKey = (userId: string) => `v1:is_extreme:${userId}`;
 // Derived flags aggregate every member, so they can't be invalidated cheaply —
 // they rely on a shorter TTL instead.
 const TRIP_PRO_TTL_SECONDS = 30;
@@ -18,13 +20,33 @@ const GROUP_PRO_TTL_SECONDS = 30;
 export const tripHasProCacheKey = (tripId: string) => `v1:trip_pro:${tripId}`;
 export const groupHasProCacheKey = (groupId: string) => `v1:group_pro:${groupId}`;
 
-/** True when the user's own plan is an active Pro subscription. */
+/** True when the user's own plan is an active paid subscription (pro OR extreme). */
 export async function isPro(userId: string): Promise<boolean> {
   return cachedBoolean(isProCacheKey(userId), AUTH_CACHE_TTL_SECONDS, async () => {
     const { data, error } = await supabaseAdmin.rpc("is_pro", { p_user: userId });
     if (error) throw new Error(error.message);
     return data === true;
   });
+}
+
+/** True when the user's own plan is the active Extreme tier. */
+export async function isExtreme(userId: string): Promise<boolean> {
+  return cachedBoolean(isExtremeCacheKey(userId), AUTH_CACHE_TTL_SECONDS, async () => {
+    const { data, error } = await supabaseAdmin.rpc("is_extreme", { p_user: userId });
+    if (error) throw new Error(error.message);
+    return data === true;
+  });
+}
+
+/**
+ * The caller's tier, for metering. Derived from the two cached booleans rather
+ * than a third lookup — a single account is rarely mid-upgrade, and both keys
+ * are invalidated together by the billing webhook.
+ */
+export async function planTier(userId: string): Promise<PlanTier> {
+  if (await isExtreme(userId)) return "extreme";
+  if (await isPro(userId)) return "pro";
+  return "free";
 }
 
 /** True when any accepted member (or the creator) of the trip is Pro. */
@@ -66,5 +88,5 @@ export async function tripOrGroupHasPro(
  * trip/group flags expire on their own shorter TTL.
  */
 export async function invalidatePlanCache(userId: string): Promise<void> {
-  await invalidateCache([isProCacheKey(userId)]);
+  await invalidateCache([isProCacheKey(userId), isExtremeCacheKey(userId)]);
 }

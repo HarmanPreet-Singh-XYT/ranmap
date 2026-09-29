@@ -1,16 +1,16 @@
 import type { Metadata } from "next";
+import Content from "@/content/legal/privacy.mdx";
+import { LegalArticle } from "../_components/legal-article";
 
-export const metadata: Metadata = { title: "Privacy Policy" };
+export const metadata: Metadata = {
+  title: "Privacy Policy",
+  description: "How Ranmap collects, uses, and protects your data.",
+};
 
 export default function PrivacyPage() {
   return (
-    <article className="prose max-w-none">
-      <h1 className="text-3xl font-semibold tracking-tight text-[var(--color-ink)]">
-        Privacy Policy
-      </h1>
-      <p className="mt-6 text-[var(--color-ink-secondary)]">
-        Placeholder — replace with the actual policy content before launch.
-      </p>
-    </article>
+    <LegalArticle title="Privacy Policy" lastUpdated="September 28, 2026">
+      <Content />
+    </LegalArticle>
   );
 }

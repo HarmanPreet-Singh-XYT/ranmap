@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../../core/constants/avatars.dart';
 import '../../core/constants/env.dart';
 import '../../core/constants/invite_links.dart';
+import '../../core/constants/plan_limits.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../core/router/auth_state_provider.dart';
 import '../../core/theme/brand_palette.dart';
@@ -39,6 +40,8 @@ import '../../data/services/supabase_service.dart';
 import '../map/live_sync_providers.dart';
 import '../map/map_engine/geo.dart';
 import '../map/trip_photos_screen.dart';
+import '../premium/paywall.dart';
+import '../premium/premium_providers.dart';
 import '../social/group_detail_screen.dart';
 import '../social/social_providers.dart';
 import 'add_expense_screen.dart';
@@ -234,6 +237,14 @@ class TripDetailScreen extends ConsumerWidget {
   /// Saves this trip's route to the user's personal template library so a
   /// familiar drive can be reused without re-planning.
   Future<void> _saveRouteTemplate(BuildContext context, WidgetRef ref) async {
+    // Free accounts keep one saved route; Pro unlocks the library.
+    if (!ref.read(isProProvider)) {
+      final count = ref.read(routeTemplatesProvider).valueOrNull?.length ?? 0;
+      if (count >= kFreeRouteTemplateLimit) {
+        await showPaywall(context, feature: PremiumFeature.routeTemplates);
+        return;
+      }
+    }
     final name = await showAppTextDialog(
       context,
       title: 'Save route',
@@ -262,7 +273,12 @@ class TripDetailScreen extends ConsumerWidget {
       ref.invalidate(routeTemplatesProvider);
       if (context.mounted) showAppToast(context, 'Route saved.');
     } catch (e) {
-      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+      if (!context.mounted) return;
+      if (looksPremiumRequired(e)) {
+        await showPaywall(context, feature: PremiumFeature.routeTemplates);
+      } else {
+        showAppToast(context, friendlyError(e), error: true);
+      }
     }
   }
 
@@ -449,6 +465,30 @@ class _StatsTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Full trip stats are marketed as a Pro feature (the paywall comparison and
+    // the pricing page both say so), so a free account gets the upgrade prompt
+    // rather than the live numbers.
+    if (!ref.watch(isProProvider)) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(BrandSpace.lg),
+          child: BrandEmptyState(
+            icon: Icons.workspace_premium_rounded,
+            title: 'Trip stats are a Ranmap Pro feature.',
+            message:
+                'Unlock live distance, speed, duration and fuel analysis for every trip.',
+            tint: BrandColors.accentPeach,
+            action: BrandPrimaryButton(
+              label: 'Upgrade to Pro',
+              trailingIcon: null,
+              expand: false,
+              onPressed: () =>
+                  showPaywall(context, feature: PremiumFeature.history),
+            ),
+          ),
+        ),
+      );
+    }
     final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
     final symbol = ledgerSymbol(currency);
     final statsAsync = ref.watch(tripStatsProvider(tripId));
@@ -2388,11 +2428,53 @@ class _StopWeatherCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final stops =
+        ref.watch(tripStopsProvider(tripId)).valueOrNull ?? const <TripStop>[];
+
+    // Weather en route is a Ranmap Pro feature. Free users get a compact
+    // upgrade teaser when they actually have a timed stop to forecast.
+    if (!ref.watch(isProProvider)) {
+      if (!stops.any((s) => s.plannedArrival != null)) {
+        return const SizedBox.shrink();
+      }
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(
+          BrandSpace.md,
+          BrandSpace.md,
+          BrandSpace.md,
+          0,
+        ),
+        child: BrandCard(
+          padding: const EdgeInsets.all(BrandSpace.md),
+          child: Row(
+            children: [
+              Icon(
+                Icons.cloud_outlined,
+                size: 20,
+                color: BrandColors.textMuted,
+              ),
+              const SizedBox(width: BrandSpace.sm),
+              Expanded(
+                child: Text(
+                  'Weather en route is a Ranmap Pro feature.',
+                  style: BrandText.bodySm.copyWith(color: BrandColors.textBody),
+                ),
+              ),
+              BrandSecondaryButton(
+                label: 'Unlock',
+                expand: false,
+                onPressed: () =>
+                    showPaywall(context, feature: PremiumFeature.weather),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     final weather =
         ref.watch(tripStopWeatherProvider(tripId)).valueOrNull ?? const {};
     if (weather.isEmpty) return const SizedBox.shrink();
-    final stops =
-        ref.watch(tripStopsProvider(tripId)).valueOrNull ?? const <TripStop>[];
 
     final rows = <Widget>[];
     for (final stop in stops) {

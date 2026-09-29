@@ -11,8 +11,8 @@ function optional(name: string, fallback: string): string {
 }
 
 // Optional integrations: unset or empty disables just that feature (its route
-// returns 503) instead of refusing to start the whole server. Supabase and
-// Gemini stay required — the server has nothing to do without them.
+// returns 503) instead of refusing to start the whole server. Only Supabase
+// stays required — the server has nothing to do without a database/auth.
 function optionalValue(name: string): string | undefined {
   const value = process.env[name]?.trim();
   return value === undefined || value === "" ? undefined : value;
@@ -56,8 +56,10 @@ export const env = {
   supabaseUrl: required("SUPABASE_URL"),
   // Supabase secret key (the replacement for the legacy service-role key).
   supabaseSecretKey: required("SUPABASE_SECRET_KEY"),
-  // Gemini API key (Google AI Studio) — powers the AI copilot.
-  geminiApiKey: required("GEMINI_API_KEY"),
+  // Gemini API key (Google AI Studio) — powers the AI copilot. Optional: the
+  // server boots without it and only /ai returns 503, matching every other
+  // optional provider.
+  geminiApiKey: optionalValue("GEMINI_API_KEY"),
   // Overridable so a model rename doesn't require a code change.
   geminiModel: optional("GEMINI_MODEL", "gemini-3.1-flash-lite"),
   // Redis (optional). When set, rate-limit buckets, the metered allowances and

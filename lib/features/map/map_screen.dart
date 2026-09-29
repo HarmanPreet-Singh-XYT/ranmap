@@ -164,9 +164,11 @@ class _MapScreenState extends ConsumerState<MapScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Re-check location permission when returning from Settings, so granting
-    // it there doesn't leave the user stuck on the denied view.
+    // it there (or turning the location service back on) doesn't leave the user
+    // stuck on the denied view.
     if (state == AppLifecycleState.resumed) {
       ref.invalidate(locationPermissionProvider);
+      ref.invalidate(locationServiceEnabledProvider);
     }
   }
 
@@ -175,6 +177,22 @@ class _MapScreenState extends ConsumerState<MapScreen>
   List<String>? _renderedPostIds;
   String? _renderedRoutePolyline;
   String? _renderedPlaceId;
+
+  // Set once after an overlay sync fails, so the user isn't left wondering why
+  // a pin/route never appeared (a repeated failure doesn't spam toasts).
+  bool _overlaySyncErrorShown = false;
+
+  /// Surfaces a persistently-failing overlay sync instead of swallowing it: the
+  /// user gets one notice rather than an overlay that silently never renders.
+  void _reportOverlaySyncFailure(String what, Object error) {
+    if (_overlaySyncErrorShown || !mounted) return;
+    _overlaySyncErrorShown = true;
+    showAppToast(
+      context,
+      "Some map details couldn't be shown. Reopen the map to try again.",
+      error: true,
+    );
+  }
 
   // Decoding the route polyline on every build is wasteful for a long route,
   // so cache the result keyed by the encoded string.
@@ -843,35 +861,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
           ],
         ),
         const SizedBox(height: BrandSpace.md),
-        Text(
-          'POPULAR CONVOY DRIVES',
-          style: BrandText.weight(
-            BrandText.labelSm,
-            700,
-          ).copyWith(color: BrandColors.textMuted),
-        ),
-        const SizedBox(height: BrandSpace.xs),
-        SizedBox(
-          height: 108,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: _kScenicDrives.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 8),
-            itemBuilder: (context, i) {
-              final drive = _kScenicDrives[i];
-              return _ScenicDriveCard(
-                route: drive,
-                onTap: () {
-                  _mapKey.currentState?.flyTo(
-                    Geo.pos(drive.lat, drive.lng),
-                    zoom: 12.0,
-                  );
-                  showAppToast(context, 'Exploring ${drive.title} on 3D map');
-                },
-              );
-            },
-          ),
-        ),
         // The copilot's real saved places, when there are any. With none, the
         // card renders exactly as the plain empty state it's always been.
         if (savedPlaces.isNotEmpty) ...[
@@ -975,8 +964,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
       // Commit the guard only after the work succeeded, so a failure is retried
       // on the next rebuild instead of being permanently suppressed.
       _renderedSavedPlaceIds = ids;
-    } catch (_) {
-      // A failed overlay sync must not take the map down.
+    } catch (error) {
+      // A failed overlay sync must not take the map down — but don't hide it.
+      _reportOverlaySyncFailure('saved-place pins', error);
     }
   }
 
@@ -1018,8 +1008,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
       // Commit the guard only after the work succeeded, so a failure is retried
       // on the next rebuild instead of being permanently suppressed.
       _renderedPostIds = ids;
-    } catch (_) {
-      // A failed overlay sync must not take the map down.
+    } catch (error) {
+      // A failed overlay sync must not take the map down — but don't hide it.
+      _reportOverlaySyncFailure('photo pins', error);
     }
   }
 
@@ -1045,7 +1036,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
         }
       }
       _renderedRoutePolyline = encodedPolyline;
-    } catch (_) {}
+    } catch (error) {
+      _reportOverlaySyncFailure('route line', error);
+    }
   }
 
   Future<void> _syncSelectedPlace(double devicePixelRatio) async {
@@ -1080,7 +1073,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
         );
       }
       _renderedPlaceId = place?.placeId;
-    } catch (_) {}
+    } catch (error) {
+      _reportOverlaySyncFailure('selected place', error);
+    }
   }
 
   Future<void> _showTeammates(List<_Teammate> teammates) async {
@@ -1147,6 +1142,10 @@ class _LocationDeniedView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final c = NavColors.of(context);
+    // `false` here means the device's location *service* is off — a different
+    // fix (device settings) than a denied app permission.
+    final serviceOff =
+        ref.watch(locationServiceEnabledProvider).valueOrNull == false;
     return FScaffold(
       childPad: false,
       child: Center(
@@ -1158,28 +1157,45 @@ class _LocationDeniedView extends ConsumerWidget {
               Icon(Icons.location_off_rounded, size: 56, color: c.activeRoute),
               const SizedBox(height: 20),
               Text(
-                'Ranmap needs your location to show you on the map and keep '
-                'your trip in sync with your group.',
+                serviceOff
+                    ? 'Location services are off. Turn them on so Ranmap can '
+                          'show you on the map and keep your trip in sync with '
+                          'your group.'
+                    : 'Ranmap needs your location to show you on the map and keep '
+                          'your trip in sync with your group.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: c.foreground, fontSize: 16),
               ),
               const SizedBox(height: 28),
               SizedBox(
                 width: double.infinity,
-                // Re-request first: if permission was only denied once, this
-                // prompts again instead of sending the user to Settings.
                 child: FButton(
                   size: .lg,
-                  onPress: () => ref.invalidate(locationPermissionProvider),
-                  child: const Text('Allow location'),
+                  onPress: () {
+                    if (serviceOff) {
+                      // The device's location settings, not the app's — that's
+                      // where the service toggle lives.
+                      unawaited(Geolocator.openLocationSettings());
+                    } else {
+                      // Re-request first: if permission was only denied once,
+                      // this prompts again instead of sending to Settings.
+                      ref.invalidate(locationServiceEnabledProvider);
+                      ref.invalidate(locationPermissionProvider);
+                    }
+                  },
+                  child: Text(
+                    serviceOff ? 'Turn on location' : 'Allow location',
+                  ),
                 ),
               ),
-              const SizedBox(height: 6),
-              FButton(
-                variant: .ghost,
-                onPress: () => Geolocator.openAppSettings(),
-                child: const Text('Open settings'),
-              ),
+              if (!serviceOff) ...[
+                const SizedBox(height: 6),
+                FButton(
+                  variant: .ghost,
+                  onPress: () => Geolocator.openAppSettings(),
+                  child: const Text('Open settings'),
+                ),
+              ],
             ],
           ),
         ),
@@ -1542,150 +1558,3 @@ class _SavedPlaceRow extends StatelessWidget {
   }
 }
 
-class _ScenicRoute {
-  const _ScenicRoute({
-    required this.title,
-    required this.tag,
-    required this.imageAsset,
-    required this.lat,
-    required this.lng,
-    required this.distanceLabel,
-  });
-
-  final String title;
-  final String tag;
-  final String imageAsset;
-  final double lat;
-  final double lng;
-  final String distanceLabel;
-}
-
-const List<_ScenicRoute> _kScenicDrives = [
-  _ScenicRoute(
-    title: 'Big Sur Coast',
-    tag: 'PACIFIC CLIFFS',
-    imageAsset: 'assets/images/scenic/big_sur.jpg',
-    lat: 36.3615,
-    lng: -121.8563,
-    distanceLabel: '142 km scenic',
-  ),
-  _ScenicRoute(
-    title: 'Alpine Pass',
-    tag: 'MOUNTAIN PASS',
-    imageAsset: 'assets/images/scenic/alpine_pass_scenic.jpg',
-    lat: 46.5293,
-    lng: 8.5725,
-    distanceLabel: '88 km curves',
-  ),
-  _ScenicRoute(
-    title: 'Red Rock Canyon',
-    tag: 'DESERT BYWAY',
-    imageAsset: 'assets/images/scenic/red_rocks_scenic.jpg',
-    lat: 36.1354,
-    lng: -115.4272,
-    distanceLabel: '115 km highway',
-  ),
-];
-
-class _ScenicDriveCard extends StatelessWidget {
-  const _ScenicDriveCard({required this.route, required this.onTap});
-
-  final _ScenicRoute route;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: 160,
-        decoration: BoxDecoration(
-          borderRadius: BrandRadii.miniRadius,
-          boxShadow: BrandShadows.subtle,
-        ),
-        child: ClipRRect(
-          borderRadius: BrandRadii.miniRadius,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Image.asset(
-                route.imageAsset,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) =>
-                    ColoredBox(color: BrandColors.surfaceContainerHigh),
-              ),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.15),
-                      Colors.black.withValues(alpha: 0.78),
-                    ],
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: BrandColors.primaryContainer.withValues(
-                          alpha: 0.85,
-                        ),
-                        borderRadius: BrandRadii.pill,
-                      ),
-                      child: Text(
-                        route.tag,
-                        style: BrandText.labelSm.copyWith(
-                          color: BrandColors.onPrimaryContainer,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      route.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: BrandText.weight(
-                        BrandText.labelMd,
-                        700,
-                      ).copyWith(color: Colors.white),
-                    ),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.travel_explore_rounded,
-                          color: Colors.white70,
-                          size: 11,
-                        ),
-                        const SizedBox(width: 3),
-                        Text(
-                          route.distanceLabel,
-                          style: BrandText.labelSm.copyWith(
-                            color: Colors.white70,
-                            fontSize: 10,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}

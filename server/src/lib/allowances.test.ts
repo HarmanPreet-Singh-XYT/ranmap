@@ -19,8 +19,24 @@ test("every metered allowance is well-formed", () => {
       `${allowance.feature} has an unknown unit`,
     );
     assert.ok(allowance.max > 0, `${allowance.feature} max must be positive`);
+    assert.ok(
+      allowance.proMax > allowance.max,
+      `${allowance.feature} proMax must exceed max`,
+    );
+    assert.ok(
+      allowance.extremeMax > allowance.proMax,
+      `${allowance.feature} extremeMax must exceed proMax`,
+    );
     assert.ok(allowance.windowMs > 0, `${allowance.feature} window must be positive`);
     assert.ok(allowance.message.length > 0, `${allowance.feature} message is required`);
+    assert.ok(
+      allowance.proMessage.length > 0,
+      `${allowance.feature} proMessage is required`,
+    );
+    assert.ok(
+      allowance.extremeMessage.length > 0,
+      `${allowance.feature} extremeMessage is required`,
+    );
   }
 });
 
@@ -37,7 +53,12 @@ test("the enforcement routes' allowances are the shared ones", () => {
   // The AI allowance is metered in tokens; search stays per-request.
   assert.equal(aiAssistantAllowance.unit, "tokens");
   assert.equal(aiAssistantAllowance.max, 500_000);
+  assert.equal(aiAssistantAllowance.proMax, 5_000_000);
+  assert.equal(aiAssistantAllowance.extremeMax, 15_000_000);
   assert.equal(aiAssistantAllowance.windowMs, 30 * 24 * 60 * 60 * 1000);
   assert.equal(mapsSearchAllowance.unit, "requests");
+  assert.equal(mapsSearchAllowance.max, 100);
+  assert.equal(mapsSearchAllowance.proMax, 2_000);
+  assert.equal(mapsSearchAllowance.extremeMax, 5_000);
   assert.equal(mapsSearchAllowance.windowMs, 24 * 60 * 60 * 1000);
 });

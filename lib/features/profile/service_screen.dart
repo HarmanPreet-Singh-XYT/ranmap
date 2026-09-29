@@ -13,6 +13,8 @@ import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_data.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/error_retry.dart';
+import '../premium/paywall.dart';
+import '../premium/premium_providers.dart';
 import '../trip/trip_providers.dart';
 import 'profile_extras_providers.dart';
 
@@ -68,6 +70,32 @@ class ServiceScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Service reminders are a Ranmap Pro feature.
+    if (!ref.watch(isProProvider)) {
+      return BrandScaffold(
+        header: BrandHeader(
+          title: 'Service & maintenance',
+          onBack: () => Navigator.of(context).maybePop(),
+        ),
+        child: Center(
+          child: BrandEmptyState(
+            icon: Icons.workspace_premium_rounded,
+            title: 'Service reminders are a Ranmap Pro feature.',
+            message:
+                'Track your maintenance interval from logged trip distance and get a due badge before it is overdue.',
+            tint: BrandColors.accentPeach,
+            action: BrandPrimaryButton(
+              label: 'Upgrade to Pro',
+              expand: false,
+              trailingIcon: null,
+              onPressed: () =>
+                  showPaywall(context, feature: PremiumFeature.service),
+            ),
+          ),
+        ),
+      );
+    }
+
     final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
     final serviceAsync = ref.watch(vehicleServiceProvider);
     final odometerAsync = ref.watch(odometerKmProvider);

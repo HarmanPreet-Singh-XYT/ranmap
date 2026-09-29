@@ -12,7 +12,7 @@ export function ForgotPasswordForm() {
 
   if (state.sent) {
     return (
-      <p className="rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-2.5 text-sm text-[var(--color-ink-secondary)]">
+      <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
         If an account exists for that email, a reset link is on its way.
       </p>
     );
@@ -29,7 +29,7 @@ export function ForgotPasswordForm() {
       />
 
       {state.error && (
-        <p className="rounded-[var(--radius-sm)] bg-[var(--color-danger-surface)] px-3.5 py-2 text-sm text-[var(--color-danger)]">
+        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-medium text-red-800">
           {state.error}
         </p>
       )}
@@ -37,13 +37,13 @@ export function ForgotPasswordForm() {
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-[var(--radius-sm)] bg-[var(--color-ink)] px-5 py-2.5 text-sm font-medium text-[var(--color-background)] transition-opacity hover:opacity-85 disabled:opacity-60"
+        className="w-full rounded-full bg-emerald-700 px-6 py-3 text-xs font-bold uppercase tracking-wider text-white shadow-sm transition-all hover:bg-emerald-800 disabled:opacity-60"
       >
         {pending ? "Sending…" : "Send reset link"}
       </button>
 
-      <p className="text-center text-sm text-[var(--color-ink-secondary)]">
-        <Link href="/login" className="font-medium text-[var(--color-ink)] hover:opacity-80">
+      <p className="text-center text-sm text-slate-600">
+        <Link href="/login" className="font-semibold text-emerald-700 hover:text-emerald-800">
           Back to sign in
         </Link>
       </p>

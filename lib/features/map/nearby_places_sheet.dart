@@ -10,6 +10,8 @@ import '../../core/util/units.dart';
 import '../../core/widgets/brand/brand_sheet_surface.dart';
 import '../../data/models/route_option.dart';
 import '../../data/services/google_maps_api_service.dart';
+import '../premium/paywall.dart';
+import '../premium/premium_providers.dart';
 import 'map_engine/map_engine.dart';
 import 'place_details_sheet.dart';
 
@@ -100,6 +102,12 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
       setState(() => _places = places);
     } catch (e) {
       if (!mounted) return;
+      // An exhausted free search allowance is the one case where a paywall is
+      // exactly right, rather than a raw error with no upgrade path.
+      if (isPremiumRequired(e)) {
+        await showPaywall(context, feature: PremiumFeature.mapsSearch);
+        return;
+      }
       setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);

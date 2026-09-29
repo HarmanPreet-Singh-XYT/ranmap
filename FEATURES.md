@@ -102,7 +102,7 @@ directly from the code (real limits, real copy, real field names).
 ### Profile screen
 - Avatar, display name (or just `@username` if none set), vehicle label (e.g. "Vehicle: Car").
 - Tiles: **Friends** (badge = incoming request count), **Groups**, **Linked socials**, **Trip stats & history**, **Service & maintenance** (badge "Due" when a service is overdue), **Documents**.
-- **Ranmap Pro tile**: "Active — thanks for the support" (green) if subscribed, else "Unlock AI, voice & unlimited search" (amber) — tapping opens the paywall.
+- **Ranmap Pro tile**: "Active — thanks for the support" (green) if subscribed, else "Unlock AI, voice & more search" (amber) — tapping opens the paywall.
 - **Sign out** with confirmation dialog.
 
 ### Service & maintenance
@@ -250,14 +250,19 @@ directly from the code (real limits, real copy, real field names).
 
 ## 9. Premium / Ranmap Pro & Paywall
 
+- **Tiers**: `free` < `pro` < `extreme`. `is_pro` means *paid* (pro OR extreme),
+  so **Extreme inherits every Pro gate**; `is_extreme` marks the top tier (a
+  superset — same features, higher ceilings, no exclusive features).
 - **Free-tier hard caps** (DB-trigger enforced, can't be bypassed by a patched client):
   - **3** max active/planned trips
-  - **6** max group members (raising any one member to Pro lifts the cap for the whole group)
+  - **6** max group members (raising any one member to a paid tier lifts the cap for the whole group)
   - **25** max pinned photos
-- **Metered features** (free allowance first, then gated): AI assistant, route & place search.
+  - **1** max document and **1** max saved route
+- **Paid fair-use ceilings** (`0033_pro_fair_use_limits.sql`, `0034_extreme_tier.sql`): paid tiers are **metered, not unlimited** — provider quota and storage cost real money. Pro raises the caps above to **100** trips, **100** members, **5,000** photos, **100** documents and **100** saved routes; **Extreme** raises them further to **250 / 250 / 20,000 / 500 / 500**. Hitting a paid ceiling raises a plain `Plan limit reached:` error (no paywall); a free account hitting a free cap raises `Ranmap Pro required:` (which opens the paywall).
+- **Metered features**: AI assistant and route & place search. Free gets **500k AI tokens / 30 days** and **100 searches / day**; Pro **5M / 2,000**; Extreme **15M / 5,000**. Every paid tier is metered against its own ceiling too, so a single account can't run up an unbounded provider bill.
 - **"Travel together" voice unlock**: voice channels unlock for an entire trip/group if *any* member is Pro — not per-seat.
-- **Crew plan (already in place)**: because Pro is evaluated per trip/group (`trip_has_pro` / `group_has_pro`), one subscriber already covers their whole convoy — voice, the group-size cap, and the trip cap are lifted for everyone they travel with. This is the "one subscription, whole crew" model; no separate product is needed.
-- **Full-screen paywall**: shown once after sign-in and weekly thereafter for non-Pro users (7-day cooldown, persisted across restarts). Shows annual vs. monthly plans (annual default, "SAVE 40%" ribbon), a benefits list, "Restore Purchases", and a "Manage Subscription" deep link.
+- **Crew plan (already in place)**: because Pro is evaluated per trip/group (`trip_has_pro` / `group_has_pro`), one subscriber already covers their whole convoy — voice and the (much higher) trip/photo/member caps are lifted for everyone they travel with. This is the "one subscription, whole crew" model; no separate product is needed.
+- **Full-screen paywall**: shown once after sign-in and weekly thereafter for non-Pro users (7-day cooldown, persisted across restarts). Shows annual vs. monthly plans (annual default, with a saving ribbon derived from the store's real prices — never a hard-coded number), a benefits list, "Restore Purchases", and a "Manage Subscription" deep link.
 - **Contextual paywall sheet**: shown at the moment a specific limit is hit — "You reached a Pro limit for `<feature>`." with the same purchase/restore actions and a "Not now" dismiss.
 - Billing runs through **RevenueCat**; `profiles.plan` is writable only by the server-side webhook, never the client. Purchase-cancel (dismissing the native store sheet) is swallowed silently, not shown as an error.
 
@@ -359,7 +364,7 @@ directly from the code (real limits, real copy, real field names).
 6. **`propose_stop`** — proposes a stop for the convoy to vote on instead of adding it directly. *"propose a stop at the Grand Canyon"*.
 
 - All tool inputs are validated server-side (lat/lng ranges, future-only schedule times, allowlisted stop kinds) and every free-text field is clamped to prevent unbounded LLM-generated content from being written to the database.
-- Free tier: **500k tokens per 30 days** (input + output, summed across every model call in a turn), then gated behind Pro with the message: "You've used your free AI assistant allowance. Upgrade to Ranmap Pro for unlimited planning help." The Profile tab shows a live **Free plan usage** meter (from `GET /plan/usage`) so the allowance is visible before it runs out.
+- Free tier: **500k tokens per 30 days** (input + output, summed across every model call in a turn), then gated behind Pro with the message: "You've used your free AI assistant allowance. Upgrade to Ranmap Pro for a much larger allowance." Pro is metered against a **5M-token / 30-day** fair-use ceiling too (a Pro user past it gets a plain "limit reached", not a paywall). The Profile tab shows a live **Free plan usage** meter (from `GET /plan/usage`) so the allowance is visible before it runs out.
 - A background scheduler (polling every 60s) auto-starts trips whose scheduled time has arrived.
 
 ---

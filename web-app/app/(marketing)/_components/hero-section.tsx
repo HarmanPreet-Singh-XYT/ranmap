@@ -2,10 +2,10 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   Mic,
-  Navigation,
   Sparkles,
   Users,
   Search,
@@ -17,9 +17,17 @@ import {
 } from "lucide-react";
 
 export function HeroSection() {
+  const router = useRouter();
   const [origin, setOrigin] = useState("San Francisco, CA");
   const [destination, setDestination] = useState("Big Sur · Highway 1");
   const [rigs, setRigs] = useState("4 Rigs");
+
+  // Wire the bar's Search to a real destination — it seeds the routes explorer's
+  // search with what the user typed instead of silently discarding it.
+  function handleSearch() {
+    const query = destination.trim() || origin.trim();
+    router.push(query ? `/routes?q=${encodeURIComponent(query)}` : "/routes");
+  }
 
   return (
     <section className="relative overflow-hidden pt-10 pb-20 lg:pt-16 lg:pb-28">
@@ -33,13 +41,13 @@ export function HeroSection() {
             href="/features"
             className="group inline-flex items-center gap-2.5 rounded-full border border-[#E6E3DA] bg-white px-4 py-1.5 text-xs font-semibold text-slate-800 shadow-xs transition-all hover:border-emerald-600/40 hover:scale-[1.02]"
           >
-            <span className="flex h-2 w-2 rounded-full bg-emerald-600 animate-pulse" />
+            <span className="flex h-2 w-2 rounded-full bg-emerald-600" />
             <span className="text-emerald-800 font-bold uppercase tracking-wider text-[11px]">
               Ranmap Convoy OS
             </span>
             <span className="text-slate-400">·</span>
             <span className="font-normal text-slate-600">
-              Live 3D telemetry & hands-free radio
+              Live 3D convoy map &amp; in-app voice
             </span>
             <ArrowRight className="h-3.5 w-3.5 text-emerald-700 transition-transform group-hover:translate-x-0.5" />
           </Link>
@@ -55,7 +63,7 @@ export function HeroSection() {
             </span>
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-base text-slate-600 sm:text-lg lg:text-xl font-normal leading-relaxed">
-            The gap between cars stretches. Cell service drops. Someone misses an exit. Ranmap keeps your convoy connected with live 3D radar, low-latency walkie-talkie radio, and one-tap pitstop votes.
+            The gap between cars stretches. Cell service drops. Someone misses an exit. Ranmap keeps your convoy connected with a live 3D map, in-app voice, and shared stops everyone plans together.
           </p>
         </div>
 
@@ -76,6 +84,7 @@ export function HeroSection() {
                     onChange={(e) => setOrigin(e.target.value)}
                     className="bg-transparent text-xs font-semibold text-slate-900 focus:outline-none"
                     placeholder="City or trailhead"
+                    aria-label="Start location"
                   />
                 </div>
               </div>
@@ -93,6 +102,7 @@ export function HeroSection() {
                     onChange={(e) => setDestination(e.target.value)}
                     className="bg-transparent text-xs font-semibold text-slate-900 focus:outline-none"
                     placeholder="Pass or scenic route"
+                    aria-label="Destination"
                   />
                 </div>
               </div>
@@ -115,13 +125,14 @@ export function HeroSection() {
               </div>
 
               {/* Action Button */}
-              <Link
-                href="/routes"
+              <button
+                type="button"
+                onClick={handleSearch}
                 className="flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-6 py-3 text-xs font-bold text-white uppercase tracking-wider shadow-sm transition-all hover:bg-emerald-800 hover:scale-[1.02] sm:rounded-full"
               >
                 <Search className="h-4 w-4" />
                 <span>Search</span>
-              </Link>
+              </button>
             </div>
           </div>
         </div>
@@ -151,7 +162,7 @@ export function HeroSection() {
               <div className="rounded-2xl border border-[#E6E3DA] bg-white p-4 shadow-xl transition-all duration-300 hover:translate-y-[-2px]">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100">
-                    <Mic className="h-5 w-5 animate-pulse" />
+                    <Mic className="h-5 w-5" />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
@@ -169,7 +180,7 @@ export function HeroSection() {
                       Alex: &quot;Bixby Bridge turnout coming up&quot;
                     </p>
                     <span className="text-[10px] text-slate-500">
-                      Zero-lag audio · 4 Rigs listening
+                      Live voice · 4 rigs in channel
                     </span>
                   </div>
                 </div>
@@ -181,17 +192,17 @@ export function HeroSection() {
               <div className="w-64 rounded-2xl border border-[#E6E3DA] bg-white p-4 shadow-xl transition-all duration-300 hover:translate-y-[-2px]">
                 <div className="flex items-center justify-between">
                   <span className="flex items-center gap-1.5 text-[11px] font-bold text-amber-700 uppercase tracking-wider">
-                    <Fuel className="h-3.5 w-3.5" /> Pitstop Vote
+                    <Fuel className="h-3.5 w-3.5" /> Trip Stop
                   </span>
                   <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
-                    3/4 Agreed
+                    Planned
                   </span>
                 </div>
                 <p className="mt-2 text-xs font-semibold text-slate-900">
                   Coastal Roastery & Bakery
                 </p>
                 <p className="text-[10px] text-slate-500">
-                  +3 min detour · 8 open parking spots
+                  Planned arrival 12:30 · +3 min detour
                 </p>
                 <div className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
                   <div className="h-full w-3/4 rounded-full bg-emerald-600" />
@@ -210,7 +221,7 @@ export function HeroSection() {
                     <span className="text-[11px] font-bold text-sky-800 uppercase tracking-wider">
                       Convoy Radar
                     </span>
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-ping" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
                   </div>
                   <p className="text-xs font-semibold text-slate-900">
                     3 Rigs in Pack Formation
@@ -230,13 +241,13 @@ export function HeroSection() {
                 </div>
                 <div>
                   <span className="text-[11px] font-bold text-purple-800 uppercase tracking-wider">
-                    AI Co-Pilot Radar
+                    AI Trip Assistant
                   </span>
                   <p className="text-xs font-semibold text-slate-900">
-                    Summit pass fog bank clearing
+                    Weather at your next stop
                   </p>
                   <p className="text-[10px] text-slate-500">
-                    Auto-adjusted route · +18 min scenic window
+                    Forecast for planned arrival
                   </p>
                 </div>
               </div>

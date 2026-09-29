@@ -25,13 +25,13 @@ export default async function AccountAreaLayout({
 
   return (
     <div>
-      <div className="mb-8 flex items-center justify-between border-b border-[var(--color-border)] pb-4">
+      <div className="mb-8 flex items-center justify-between border-b border-[#E6E3DA] pb-4">
         <nav className="flex gap-6">
           {accountNav.map((item) => (
             <Link
               key={item.href}
               href={item.href}
-              className="text-sm text-[var(--color-ink-secondary)] transition-colors hover:text-[var(--color-ink)]"
+              className="text-sm font-semibold text-slate-600 transition-colors hover:text-emerald-700"
             >
               {item.label}
             </Link>

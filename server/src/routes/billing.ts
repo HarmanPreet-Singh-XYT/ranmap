@@ -3,17 +3,29 @@ import { asyncHandler } from "../lib/async-handler.js";
 import { env } from "../lib/env.js";
 import { fail } from "../lib/errors.js";
 import { invalidatePlanCache } from "../lib/plan-store.js";
+import { rateLimit } from "../lib/rate-limit.js";
 import {
   extractUserId,
   isAuthorizedWebhook,
   planSourceFromStore,
-  readProEntitlement,
+  readPlanEntitlement,
 } from "../lib/revenuecat.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 
 export const billingRouter = Router();
 
 const REVENUECAT_SUBSCRIBERS_URL = "https://api.revenuecat.com/v1/subscribers";
+const REVENUECAT_TIMEOUT_MS = 10_000;
+
+// The webhook isn't behind the pre-auth IP limiter (a burst of real events
+// shouldn't be dropped), but it still needs a ceiling so an unauthenticated
+// caller can't hammer the constant-time secret comparison or the upstream fetch.
+const webhookLimit = rateLimit({
+  name: "billing-webhook",
+  windowMs: 60 * 1000,
+  max: 120,
+  message: "Too many requests — please slow down.",
+});
 
 // POST /billing/revenuecat
 // RevenueCat webhook → the only writer of profiles.plan (besides manual SQL).
@@ -23,6 +35,7 @@ const REVENUECAT_SUBSCRIBERS_URL = "https://api.revenuecat.com/v1/subscribers";
 // session; the shared secret is what authenticates it.
 billingRouter.post(
   "/revenuecat",
+  webhookLimit,
   asyncHandler(async (req, res) => {
     if (!env.revenueCatSecretKey || !env.revenueCatWebhookAuth) {
       res.status(503).json({ error: "Billing is not configured." });
@@ -54,6 +67,8 @@ billingRouter.post(
           Authorization: `Bearer ${env.revenueCatSecretKey}`,
           "Content-Type": "application/json",
         },
+        // A hung RevenueCat API must not pin the webhook open.
+        signal: AbortSignal.timeout(REVENUECAT_TIMEOUT_MS),
       });
       if (!response.ok) {
         console.error(`billing: subscriber fetch failed (${response.status})`);
@@ -66,12 +81,13 @@ billingRouter.post(
       return;
     }
 
-    const { active, expiresAt } = readProEntitlement(subscriber);
+    // Extreme wins over Pro; a lapsed entitlement drops back to 'free'.
+    const { plan, expiresAt } = readPlanEntitlement(subscriber);
     const { error } = await supabaseAdmin
       .from("profiles")
       .update({
-        plan: active ? "pro" : "free",
-        plan_expires_at: active ? (expiresAt?.toISOString() ?? null) : null,
+        plan,
+        plan_expires_at: plan === "free" ? null : (expiresAt?.toISOString() ?? null),
         plan_source: planSourceFromStore(event.store),
       })
       .eq("id", userId);
@@ -84,6 +100,6 @@ billingRouter.post(
     // waiting out its TTL (see plan-store.ts).
     await invalidatePlanCache(userId);
 
-    res.json({ ok: true, plan: active ? "pro" : "free" });
+    res.json({ ok: true, plan });
   }),
 );

@@ -6,7 +6,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/constants/plan_limits.dart';
 import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/validation.dart';
 import '../../core/widgets/app_choice_sheet.dart';
@@ -19,6 +21,8 @@ import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/brand/brand_text_field.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/user_document.dart';
+import '../premium/paywall.dart';
+import '../premium/premium_providers.dart';
 import 'profile_extras_providers.dart';
 
 /// The private document wallet: license, insurance, tickets. Files live in a
@@ -54,6 +58,14 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
   };
 
   Future<void> _add() async {
+    // Free accounts keep one document; Pro unlocks the vault.
+    final isPro = ref.read(isProProvider);
+    final count = ref.read(userDocumentsProvider).valueOrNull?.length ?? 0;
+    if (!isPro && count >= kFreeDocumentLimit) {
+      await showPaywall(context, feature: PremiumFeature.documents);
+      return;
+    }
+
     final kind = await showAppChoiceSheet<String>(
       context,
       title: 'Document type',
@@ -66,7 +78,7 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
       label: 'Name',
       hint: _kindLabel(kind),
       confirmLabel: 'Next',
-      maxLength: 80,
+      maxLength: kNameMaxLength,
     );
     if (name == null || !mounted) return;
     final validationError = nameError(name, label: 'Name');
@@ -95,7 +107,12 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
       ref.invalidate(userDocumentsProvider);
       if (mounted) showAppToast(context, 'Document saved.');
     } catch (e) {
-      if (mounted) showAppToast(context, friendlyError(e), error: true);
+      if (!mounted) return;
+      if (looksPremiumRequired(e)) {
+        await showPaywall(context, feature: PremiumFeature.documents);
+      } else {
+        showAppToast(context, friendlyError(e), error: true);
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -134,6 +151,7 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
   @override
   Widget build(BuildContext context) {
     final docsAsync = ref.watch(userDocumentsProvider);
+    final isPro = ref.watch(isProProvider);
 
     return BrandScaffold(
       header: BrandHeader(
@@ -190,6 +208,23 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
                       ],
                     ),
                   ),
+                  if (!isPro)
+                    Padding(
+                      padding: const EdgeInsets.only(
+                        top: BrandSpace.md,
+                        left: 4,
+                        right: 4,
+                      ),
+                      child: Text(
+                        docs.length >= kFreeDocumentLimit
+                            ? 'Free plan: $kFreeDocumentLimit of $kFreeDocumentLimit '
+                                  'document used. Upgrade to Pro for up to $kProDocumentLimit.'
+                            : 'Free plan: $kFreeDocumentLimit document included.',
+                        style: BrandText.bodySm.copyWith(
+                          color: BrandColors.textMuted,
+                        ),
+                      ),
+                    ),
                 ],
               );
             },

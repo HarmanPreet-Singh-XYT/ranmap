@@ -15,6 +15,7 @@ import '../../core/widgets/brand/brand_pod.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/brand/brand_step_indicator.dart';
 import '../../core/widgets/brand/brand_tag.dart';
+import '../../core/widgets/legal_consent_text.dart';
 import '../auth/social_auth.dart';
 
 /// The v2 intro screen, shown after the v1 feature tour hands off. Its options
@@ -559,10 +560,9 @@ class _Footer extends StatelessWidget {
         const SizedBox(height: 10),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Text(
-            'By continuing you agree to our Terms of Service and Privacy Policy.',
-            textAlign: TextAlign.center,
-            style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
+          child: const LegalConsentText(
+            leadIn: 'By continuing you agree to our ',
+            connector: ' and ',
           ),
         ),
       ],

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart' show NumberFormat;
-import 'package:purchases_flutter/purchases_flutter.dart' show Package;
+import 'package:purchases_flutter/purchases_flutter.dart' show Offering, Package;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants/avatars.dart';
@@ -50,7 +50,8 @@ class PaywallScreen extends ConsumerStatefulWidget {
 }
 
 class _PaywallScreenState extends ConsumerState<PaywallScreen> {
-  PaywallPlan _plan = PaywallPlan.annual;
+  PaywallTier _tier = PaywallTier.pro;
+  PaywallTerm _term = PaywallTerm.annual;
   late final PageController _spotlightController;
   int _spotlightIndex = 0;
   bool _busy = false;
@@ -81,7 +82,9 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   Future<void> _purchase() async {
     setState(() => _busy = true);
     try {
-      await ref.read(premiumPurchaserProvider).purchase(plan: _plan);
+      await ref
+          .read(premiumPurchaserProvider)
+          .purchase(plan: PaywallPlan(tier: _tier, term: _term));
       // A successful purchase flips the plan server-side; refetch it.
       ref.invalidate(entitlementsProvider);
       if (mounted) _close();
@@ -141,8 +144,8 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     }
 
     final offering = ref.watch(paywallOfferingProvider).valueOrNull;
-    final annual = offering?.annual;
-    final monthly = offering?.monthly;
+    final annual = _packageForTier(offering, _tier, PaywallTerm.annual);
+    final monthly = _packageForTier(offering, _tier, PaywallTerm.monthly);
 
     // Never fabricate a price or a trial. When billing isn't configured (or a
     // package is missing) show a placeholder rather than the design's copy —
@@ -158,14 +161,15 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     final savePercent = _savePercent(annual, monthly);
     final annualIsBest = _annualIsBest(annual, monthly);
 
-    final isAnnual = _plan == PaywallPlan.annual && annual != null;
+    final tierLabel = _tierLabel(_tier);
+    final isAnnual = _term == PaywallTerm.annual && annual != null;
     final ctaLabel = !hasPricing
         ? 'Purchases unavailable right now'
         : isAnnual
         ? (trial != null
-              ? 'Start $trial & Unlock Pro'
-              : 'Subscribe & Unlock Pro')
-        : 'Unlock Monthly Pass ($monthlyPrice/mo)';
+              ? 'Start $trial & Unlock $tierLabel'
+              : 'Subscribe & Unlock $tierLabel')
+        : 'Unlock $tierLabel Monthly ($monthlyPrice/mo)';
 
     return BrandScaffold(
       header: _PaywallHeader(
@@ -196,7 +200,8 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
           const SizedBox(height: BrandSpace.lg),
           if (hasPricing)
             _PlanSelector(
-              plan: _plan,
+              tier: _tier,
+              term: _term,
               annualTotal: annualTotal,
               annualPerMonth: annualPerMonth,
               monthlyPrice: monthlyPrice,
@@ -205,7 +210,8 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
               showMonthly: monthly != null,
               savePercent: savePercent,
               annualIsBest: annualIsBest,
-              onSelect: (p) => setState(() => _plan = p),
+              onTierSelect: (t) => setState(() => _tier = t),
+              onTermSelect: (t) => setState(() => _term = t),
             )
           else
             const _PricingUnavailable(),
@@ -568,23 +574,23 @@ class _AmbientTripCard extends ConsumerWidget {
 
     final cards = [
       _SpotlightCardData(
-        tag: trip != null ? 'CONVOY SYNC ACTIVE' : 'CONVOY LIVE MESH',
+        tag: trip != null ? 'CONVOY SYNC ACTIVE' : 'LIVE CONVOY',
         title: trip?.title ?? 'Live Location & Voice Channels',
         subtitle: trip != null
-            ? '${members.length} in convoy • Pro unlocks full mesh.'
-            : 'Sub-second GPS telemetry & hands-free walkie-talkie.',
+            ? '${members.length} in convoy • live map, chat & voice.'
+            : 'Follow every vehicle live on the 3D map.',
         imageAsset: 'assets/images/paywall/trip.jpg',
       ),
       const _SpotlightCardData(
-        tag: '3D TERRAIN NAVIGATION',
-        title: 'Topographical Maps & Radar',
-        subtitle: 'Offline mountain elevation profiles & full radar tracking.',
+        tag: 'OFFLINE NAVIGATION',
+        title: 'Offline Map Downloads',
+        subtitle: 'Save your route area and keep navigating with no signal.',
         imageAsset: 'assets/images/paywall/paywall_terrain.jpg',
       ),
       const _SpotlightCardData(
-        tag: 'UNLIMITED EXPEDITIONS',
-        title: '20+ Vehicles & Shared Vault',
-        subtitle: 'One Pro member unlocks large convoys & shared albums.',
+        tag: 'ONE PRO, WHOLE CREW',
+        title: 'Unlocks for Everyone',
+        subtitle: 'Voice, bigger convoys and AI — unlocked for your trip.',
         imageAsset: 'assets/images/paywall/paywall_crew.jpg',
       ),
     ];
@@ -747,40 +753,92 @@ class _AvatarStack extends StatelessWidget {
   }
 }
 
+/// The store package for a (tier, term), matched by identifier first
+/// (`pro_annual`, `extreme_monthly`, …). Pro also falls back to RevenueCat's
+/// standard annual/monthly packages so a single-tier setup keeps working.
+Package? _packageForTier(Offering? offering, PaywallTier tier, PaywallTerm term) {
+  if (offering == null) return null;
+  final wanted = switch ((tier, term)) {
+    (PaywallTier.pro, PaywallTerm.annual) => 'pro_annual',
+    (PaywallTier.pro, PaywallTerm.monthly) => 'pro_monthly',
+    (PaywallTier.extreme, PaywallTerm.annual) => 'extreme_annual',
+    (PaywallTier.extreme, PaywallTerm.monthly) => 'extreme_monthly',
+  };
+  for (final package in offering.availablePackages) {
+    if (package.identifier == wanted) return package;
+  }
+  if (tier == PaywallTier.pro) {
+    return term == PaywallTerm.annual ? offering.annual : offering.monthly;
+  }
+  return null;
+}
+
+/// The display name of a tier.
+String _tierLabel(PaywallTier tier) =>
+    tier == PaywallTier.extreme ? 'Extreme' : 'Pro';
+
+/// Thousands-separated integer for the paywall's limit copy (5000 -> "5,000").
+String _n(int value) => NumberFormat.decimalPattern().format(value);
+
 class _ComparisonRow {
-  const _ComparisonRow(
-    this.label,
-    this.free,
-    this.pro, {
-    this.proIsCheck = false,
-  });
+  const _ComparisonRow(this.label, this.free, this.pro, this.extreme);
 
   final String label;
   final String free;
   final String pro;
-  final bool proIsCheck;
+  final String extreme;
 }
 
 class _ComparisonTable extends StatelessWidget {
   const _ComparisonTable();
 
   static final List<_ComparisonRow> _rows = [
-    const _ComparisonRow(
-      'Active Triplists',
-      '$kFreeTripLimit Trips',
-      'Unlimited',
+    _ComparisonRow(
+      'Active trips',
+      'Up to $kFreeTripLimit',
+      'Up to ${_n(kProTripLimit)}',
+      'Up to ${_n(kExtremeTripLimit)}',
     ),
-    const _ComparisonRow(
-      'Convoy Members',
+    _ComparisonRow(
+      'Convoy members',
       'Up to $kFreeGroupMemberLimit',
-      '20+ Crew',
+      'Up to ${_n(kProGroupMemberLimit)}',
+      'Up to ${_n(kExtremeGroupMemberLimit)}',
     ),
-    const _ComparisonRow(
-      'Photo Map Pins',
-      '$kFreeMapPostLimit pins',
-      'Uncapped',
+    _ComparisonRow(
+      'Photo pins',
+      'Up to $kFreeMapPostLimit',
+      'Up to ${_n(kProMapPostLimit)}',
+      'Up to ${_n(kExtremeMapPostLimit)}',
     ),
-    const _ComparisonRow('Voice Channels & AI', 'Locked', '', proIsCheck: true),
+    _ComparisonRow(
+      'AI assistant',
+      _n(kFreeAiTokens),
+      _n(kProAiTokens),
+      _n(kExtremeAiTokens),
+    ),
+    _ComparisonRow(
+      'Route & place search',
+      '$kFreeSearchPerDay/day',
+      '${_n(kProSearchPerDay)}/day',
+      '${_n(kExtremeSearchPerDay)}/day',
+    ),
+    _ComparisonRow(
+      'Documents vault',
+      'Up to $kFreeDocumentLimit',
+      'Up to ${_n(kProDocumentLimit)}',
+      'Up to ${_n(kExtremeDocumentLimit)}',
+    ),
+    _ComparisonRow(
+      'Saved routes',
+      'Up to $kFreeRouteTemplateLimit',
+      'Up to ${_n(kProRouteTemplateLimit)}',
+      'Up to ${_n(kExtremeRouteTemplateLimit)}',
+    ),
+    _ComparisonRow('Offline maps', '—', 'Yes', 'Yes'),
+    _ComparisonRow('Weather en route', '—', 'Yes', 'Yes'),
+    _ComparisonRow('Voice channels', '—', 'All', 'All'),
+    _ComparisonRow('Trip stats & history', '—', 'Yes', 'Yes'),
   ];
 
   @override
@@ -798,6 +856,7 @@ class _ComparisonTable extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(
+                  flex: 4,
                   child: Text(
                     'Tier Capability',
                     style: BrandText.labelMd.copyWith(
@@ -805,28 +864,9 @@ class _ComparisonTable extends StatelessWidget {
                     ),
                   ),
                 ),
-                Text(
-                  'Free',
-                  style: BrandText.labelSm.copyWith(color: BrandColors.outline),
-                ),
-                const SizedBox(width: 12),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: BrandColors.primaryContainer.withValues(alpha: 0.25),
-                    borderRadius: BrandRadii.pill,
-                  ),
-                  child: Text(
-                    'Pro Member',
-                    style: BrandText.weight(
-                      BrandText.labelSm,
-                      700,
-                    ).copyWith(color: BrandColors.primary),
-                  ),
-                ),
+                _headCell('Free', BrandColors.outline),
+                _headCell('Pro', BrandColors.primary),
+                _headCell('Extreme', BrandColors.primary),
               ],
             ),
           ),
@@ -855,45 +895,55 @@ class _ComparisonTable extends StatelessWidget {
                         ),
                       ),
                     ),
-                    Expanded(
-                      flex: 3,
-                      child: Text(
-                        row.free,
-                        textAlign: TextAlign.right,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: BrandText.labelSm.copyWith(
-                          color: BrandColors.outline,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      flex: 3,
-                      child: Align(
-                        alignment: Alignment.centerRight,
-                        child: row.proIsCheck
-                            ? Icon(
-                                Icons.check_circle_rounded,
-                                size: 18,
-                                color: BrandColors.primary,
-                              )
-                            : Text(
-                                row.pro,
-                                textAlign: TextAlign.right,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: BrandText.weight(
-                                  BrandText.labelSm,
-                                  700,
-                                ).copyWith(color: BrandColors.primary),
-                              ),
-                      ),
-                    ),
+                    _valueCell(row.free, muted: true),
+                    _valueCell(row.pro, bold: true),
+                    _valueCell(row.extreme, bold: true),
                   ],
                 ),
               ),
             ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'AI assistant is metered in tokens per 30 days.',
+                style: BrandText.labelSm.copyWith(color: BrandColors.textMuted),
+              ),
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  static Widget _headCell(String text, Color color) => Expanded(
+        flex: 3,
+        child: Text(
+          text,
+          textAlign: TextAlign.right,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: BrandText.weight(
+            BrandText.labelSm,
+            700,
+          ).copyWith(color: color),
+        ),
+      );
+
+  static Widget _valueCell(String text, {bool bold = false, bool muted = false}) {
+    final base = muted ? BrandText.labelSm : BrandText.labelSm;
+    return Expanded(
+      flex: 3,
+      child: Text(
+        text,
+        textAlign: TextAlign.right,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: (bold ? BrandText.weight(base, 700) : base).copyWith(
+          color: bold ? BrandColors.primary : BrandColors.outline,
+        ),
       ),
     );
   }
@@ -921,38 +971,52 @@ class _Benefits extends StatelessWidget {
   static final List<_Benefit> _items = [
     _Benefit(
       icon: Icons.smart_toy_rounded,
-      title: 'Autonomous AI Trip Copilot',
-      body: 'Unlimited route brainstorming, instant hidden-gem lookup, and automated stop rescheduling on the fly.',
+      title: 'A generous AI planning allowance',
+      body: 'Plan routes, save places, invite friends and schedule trips by chatting — grounded in live web results.',
       tint: BrandColors.primaryContainer.withValues(alpha: 0.2),
       iconColor: BrandColors.primary,
     ),
     _Benefit(
       icon: Icons.mic_rounded,
-      title: 'Unlimited LiveKit Voice',
-      body: 'Walkie-talkie style low-latency voice channels for all vehicles in your party. No external apps required.',
+      title: 'Live voice for your whole convoy',
+      body: 'Low-latency push-to-talk voice channels for your whole convoy. No external radio apps required.',
       tint: BrandColors.secondaryFixed,
       iconColor: BrandColors.onSecondaryFixedVariant,
       chip: 'Convoy-wide',
     ),
     _Benefit(
-      icon: Icons.landscape_rounded,
-      title: 'Full 3D Terrain & Unlimited Search',
-      body: 'Topographical pitch elevation, scenic ridge views, and unmetered discovery pins along your path.',
+      icon: Icons.map_outlined,
+      title: 'Offline maps',
+      body: 'Download your planned route area and keep rendering it with no signal on remote passes.',
       tint: BrandColors.accentPeach,
       iconColor: BrandColors.onTertiaryFixedVariant,
     ),
     _Benefit(
+      icon: Icons.shield_moon_outlined,
+      title: 'Documents & service vault',
+      body: 'Up to ${_n(kProDocumentLimit)} licence, insurance and ticket documents, plus vehicle service reminders from your logged distance.',
+      tint: BrandColors.surfaceContainerHigh,
+      iconColor: BrandColors.onSurface,
+    ),
+    _Benefit(
+      icon: Icons.explore_rounded,
+      title: 'More search & saved routes',
+      body: 'A far larger daily search allowance, and a personal library of saved routes to reuse.',
+      tint: BrandColors.accentMint.withValues(alpha: 0.35),
+      iconColor: BrandColors.primary,
+    ),
+    _Benefit(
       icon: Icons.analytics_rounded,
-      title: 'Lifetime Telemetry & Fuel Rollup',
-      body: 'Complete convoy expense splitting, gas efficiency tracking, and driving duration analytics per trip.',
+      title: 'Full telemetry, history & recaps',
+      body: 'Lifetime trip stats and history, weather at your stops, and shareable trip recaps.',
       tint: BrandColors.surfaceContainerHigh,
       iconColor: BrandColors.onSurface,
     ),
     _Benefit(
       icon: Icons.add_a_photo_rounded,
-      title: 'Unlimited Photo Map Pins',
+      title: 'More trips, crew & photo pins',
       body:
-          'Break past the $kFreeMapPostLimit photo free cap. Pin hundreds of geotagged memories directly onto your expedition route.',
+          'Raise the free caps: up to ${_n(kProTripLimit)} trips on Pro, ${_n(kExtremeTripLimit)} on Extreme — and one member unlocks it for the whole trip.',
       tint: BrandColors.surfaceContainerHigh,
       iconColor: BrandColors.onSurface,
     ),
@@ -1087,24 +1151,27 @@ class _PricingUnavailable extends StatelessWidget {
 
 class _PlanSelector extends StatelessWidget {
   const _PlanSelector({
-    required this.plan,
+    required this.tier,
+    required this.term,
     required this.annualTotal,
     required this.annualPerMonth,
     required this.monthlyPrice,
     required this.trial,
     required this.showAnnual,
     required this.showMonthly,
-    required this.onSelect,
+    required this.onTierSelect,
+    required this.onTermSelect,
     this.savePercent,
     this.annualIsBest = false,
   });
-  final PaywallPlan plan;
+  final PaywallTier tier;
+  final PaywallTerm term;
   final String annualTotal;
   final String annualPerMonth;
   final String monthlyPrice;
   final String? trial;
 
-  /// Which plans the store actually sells.
+  /// Which terms the store actually sells for the selected tier.
   final bool showAnnual;
   final bool showMonthly;
 
@@ -1112,12 +1179,16 @@ class _PlanSelector extends StatelessWidget {
   /// derived — then no saving claim is shown.
   final int? savePercent;
   final bool annualIsBest;
-  final ValueChanged<PaywallPlan> onSelect;
+  final ValueChanged<PaywallTier> onTierSelect;
+  final ValueChanged<PaywallTerm> onTermSelect;
 
   @override
   Widget build(BuildContext context) {
+    final label = _tierLabel(tier);
     return Column(
       children: [
+        _TierToggle(tier: tier, onSelect: onTierSelect),
+        const SizedBox(height: BrandSpace.md),
         Padding(
           padding: const EdgeInsets.only(left: 4, right: 4, bottom: 12),
           child: Row(
@@ -1136,8 +1207,8 @@ class _PlanSelector extends StatelessWidget {
         ),
         if (showAnnual)
           _PlanCard(
-            selected: plan == PaywallPlan.annual,
-            title: 'Annual Pro Pass',
+            selected: term == PaywallTerm.annual,
+            title: 'Annual $label Pass',
             // Only claim "best value"/savings when the store's own prices bear
             // it out.
             badge: annualIsBest ? 'BEST VALUE' : null,
@@ -1147,18 +1218,71 @@ class _PlanSelector extends StatelessWidget {
                 : '$annualTotal/year',
             figure: annualPerMonth,
             term: '/month',
-            onTap: () => onSelect(PaywallPlan.annual),
+            onTap: () => onTermSelect(PaywallTerm.annual),
           ),
         if (showAnnual && showMonthly) const SizedBox(height: 12),
         if (showMonthly)
           _PlanCard(
-            selected: plan == PaywallPlan.monthly,
-            title: 'Monthly Pass',
+            selected: term == PaywallTerm.monthly,
+            title: 'Monthly $label Pass',
             subtitle: 'Flexible pay-as-you-go',
             figure: monthlyPrice,
             term: '/month',
-            onTap: () => onSelect(PaywallPlan.monthly),
+            onTap: () => onTermSelect(PaywallTerm.monthly),
           ),
+      ],
+    );
+  }
+}
+
+/// A Pro / Extreme segmented control.
+class _TierToggle extends StatelessWidget {
+  const _TierToggle({required this.tier, required this.onSelect});
+
+  final PaywallTier tier;
+  final ValueChanged<PaywallTier> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        for (final option in PaywallTier.values) ...[
+          if (option != PaywallTier.values.first)
+            const SizedBox(width: BrandSpace.gutterSm),
+          Expanded(
+            child: BrandPressable(
+              onTap: () => onSelect(option),
+              borderRadius: BrandRadii.pill,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: option == tier
+                      ? BrandColors.primary
+                      : BrandColors.surface,
+                  borderRadius: BrandRadii.pill,
+                  border: Border.all(
+                    color: option == tier
+                        ? BrandColors.primary
+                        : BrandColors.hairline,
+                  ),
+                ),
+                child: Text(
+                  _tierLabel(option),
+                  style: BrandText.weight(
+                    BrandText.labelMd,
+                    700,
+                  ).copyWith(
+                    color: option == tier
+                        ? BrandColors.onPrimary
+                        : BrandColors.onSurface,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }

@@ -16,6 +16,14 @@ void main() {
       expect(friendlyError(error), contains('already exists'));
     });
 
+    test('surfaces the Pro fair-use ceiling message verbatim', () {
+      final error = PostgrestException(
+        message: 'Plan limit reached: your plan includes up to 5000 pinned photos.',
+        code: 'P0001',
+      );
+      expect(friendlyError(error), startsWith('Plan limit reached:'));
+    });
+
     test('falls back to a generic message for unknown Postgrest codes', () {
       // An unmapped code's raw message (schema/constraint text) must not
       // reach the user — fall back to a generic message instead.

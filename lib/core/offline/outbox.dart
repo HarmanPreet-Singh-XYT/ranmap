@@ -36,6 +36,7 @@ class OutboxEntry {
     required this.type,
     required this.payload,
     required this.createdAt,
+    this.attempts = 0,
   });
 
   /// Client-generated UUID, used as the row's primary key on both the online
@@ -45,11 +46,25 @@ class OutboxEntry {
   final Map<String, dynamic> payload;
   final DateTime createdAt;
 
+  /// How many times a replay has been attempted and reported as retryable. A
+  /// persistently "retryable" error (one the classifier can't place) would
+  /// otherwise block the queue forever, so attempts are bounded.
+  final int attempts;
+
+  OutboxEntry withAttempts(int value) => OutboxEntry(
+        id: id,
+        type: type,
+        payload: payload,
+        createdAt: createdAt,
+        attempts: value,
+      );
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'type': type.wire,
         'payload': payload,
         'created_at': createdAt.toIso8601String(),
+        'attempts': attempts,
       };
 
   static OutboxEntry? fromJson(Map<String, dynamic> json) {
@@ -64,6 +79,7 @@ class OutboxEntry {
       type: type,
       payload: payload.cast<String, dynamic>(),
       createdAt: DateTime.parse(createdAt),
+      attempts: json['attempts'] is int ? json['attempts'] as int : 0,
     );
   }
 }
@@ -81,6 +97,11 @@ class Outbox {
 
   /// Upper bound on retained failure notices.
   static const _maxFailed = 50;
+
+  /// How many *retryable* attempts an entry gets before it's given up on. A
+  /// persistently-misclassified failure would otherwise block every write
+  /// behind it forever.
+  static const maxAttempts = 20;
 
   /// Number of writes still waiting to sync; watch it to surface a badge.
   final ValueNotifier<int> pending = ValueNotifier<int>(0);
@@ -214,6 +235,18 @@ class Outbox {
     await _persist();
   }
 
+  /// Records another failed (retryable) attempt for [id] and returns the new
+  /// count. Returns 0 when the entry is gone.
+  Future<int> bumpAttempt(String id) async {
+    await _ensureLoaded();
+    final index = _entries.indexWhere((e) => e.id == id);
+    if (index == -1) return 0;
+    final updated = _entries[index].withAttempts(_entries[index].attempts + 1);
+    _entries[index] = updated;
+    await _persist();
+    return updated.attempts;
+  }
+
   /// Records that [entry] was permanently rejected and removed from the
   /// queue, so the UI can surface the loss instead of it vanishing silently.
   void recordFailed(OutboxEntry entry) {
@@ -267,6 +300,15 @@ const _transientPgCodes = {
 /// permanent (false). Erring toward retry avoids silently losing data.
 bool isRetryableOutboxError(Object error) {
   if (isNetworkError(error)) return true;
+  // A malformed persisted payload (e.g. a cast that throws) is a bug in the
+  // entry itself, not a transient failure — retrying it forever would block
+  // every write behind it, so treat it as permanent.
+  if (error is TypeError ||
+      error is StateError ||
+      error is FormatException ||
+      error is ArgumentError) {
+    return false;
+  }
   if (error is PostgrestException) {
     final code = error.code;
     // A concrete, non-transient SQLSTATE / PGRST code is a permanent rejection

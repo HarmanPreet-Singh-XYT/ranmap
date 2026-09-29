@@ -2,7 +2,7 @@ import { Router } from "express";
 import { asyncHandler } from "../lib/async-handler.js";
 import { meteredAllowances } from "../lib/allowances.js";
 import { fail } from "../lib/errors.js";
-import { isPro } from "../lib/plan-store.js";
+import { planTier } from "../lib/plan-store.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { requireAuth } from "../middleware/require-auth.js";
 
@@ -23,7 +23,8 @@ planRouter.get(
   "/usage",
   asyncHandler(async (req, res) => {
     const userId = req.userId;
-    const pro = await isPro(userId);
+    const tier = await planTier(userId);
+    const pro = tier !== "free";
 
     const usage = [];
     for (const allowance of meteredAllowances) {
@@ -52,12 +53,17 @@ planRouter.get(
         label: allowance.label,
         unit: allowance.unit,
         used,
-        limit: allowance.max,
+        limit:
+          tier === "extreme"
+            ? allowance.extremeMax
+            : tier === "pro"
+              ? allowance.proMax
+              : allowance.max,
         windowSeconds,
         resetsAt,
       });
     }
 
-    res.json({ pro, usage });
+    res.json({ pro, tier, usage });
   }),
 );

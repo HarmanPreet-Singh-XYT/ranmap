@@ -5,6 +5,7 @@ import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/validation.dart';
+import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
@@ -69,6 +70,16 @@ class _TripChecklistTabState extends ConsumerState<TripChecklistTab> {
   }
 
   Future<void> _delete(ChecklistItem item) async {
+    // Match every other destructive action in the app: confirm before removing
+    // from the shared checklist, so a mis-tap doesn't silently drop an item.
+    final confirmed = await showAppConfirmDialog(
+      context,
+      title: 'Remove "${item.label}"?',
+      message: "This removes it from the crew's shared checklist.",
+      confirmLabel: 'Remove',
+      destructive: true,
+    );
+    if (!confirmed || !mounted) return;
     try {
       await ref.read(tripRepositoryProvider).deleteChecklistItem(item.id);
       ref.invalidate(tripChecklistProvider(widget.tripId));

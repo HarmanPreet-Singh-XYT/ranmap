@@ -113,7 +113,7 @@ class _PhotoQuotaHeader extends ConsumerWidget {
           BrandSectionHeader(
             icon: Icons.photo_library_outlined,
             title: 'Photo Vault',
-            subtitle: isPro ? 'Unlimited storage' : 'Free plan storage',
+            subtitle: isPro ? 'Pro plan storage' : 'Free plan storage',
             trailing: BrandPill(
               label: isPro ? 'Pro' : 'Free',
               icon: isPro ? Icons.workspace_premium_rounded : null,
@@ -129,7 +129,7 @@ class _PhotoQuotaHeader extends ConsumerWidget {
           const SizedBox(height: BrandSpace.md),
           Text(
             isPro
-                ? '$count photos · Unlimited'
+                ? '$count / $kProMapPostLimit photos'
                 : '$count / $kFreeMapPostLimit photos',
             style: BrandText.headlineMd.copyWith(
               color: BrandColors.textHeadline,
@@ -141,7 +141,7 @@ class _PhotoQuotaHeader extends ConsumerWidget {
             if (atLimit) ...[
               const SizedBox(height: BrandSpace.sm),
               Text(
-                'Free plan is full — RanMap Pro removes the cap.',
+                'Free plan is full — RanMap Pro raises the cap to $kProMapPostLimit.',
                 style: BrandText.bodySm.copyWith(color: BrandColors.textBody),
               ),
               const SizedBox(height: BrandSpace.md),

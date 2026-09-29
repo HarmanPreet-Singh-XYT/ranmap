@@ -13,14 +13,16 @@ export default async function LoginPage() {
   if (user) redirect("/account");
 
   return (
-    <main className="mx-auto w-full max-w-sm flex-1 py-12">
-      <h1 className="text-2xl font-semibold tracking-tight text-[var(--color-ink)]">
-        Sign in
-      </h1>
-      <p className="mt-2 mb-8 text-sm text-[var(--color-ink-secondary)]">
-        Welcome back — pick up right where you left off.
-      </p>
-      <SignInForm />
+    <main className="mx-auto w-full max-w-sm flex-1 py-16">
+      <div className="rounded-3xl border border-[#E6E3DA] bg-white p-8 shadow-sm">
+        <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
+          Sign in
+        </h1>
+        <p className="mt-2 mb-8 text-sm text-slate-600">
+          Welcome back — pick up right where you left off.
+        </p>
+        <SignInForm />
+      </div>
     </main>
   );
 }

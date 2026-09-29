@@ -15,13 +15,23 @@ final entitlementsProvider = FutureProvider<Entitlements>(
   (ref) => ref.watch(premiumRepositoryProvider).fetchMyPlan(),
 );
 
-/// Whether the current user is Pro: the server-side plan OR a live local
-/// RevenueCat entitlement. The local state leads the DB right after a purchase
-/// (the webhook can lag), so either is enough to unlock the UI.
+/// Whether the current user is on a paid plan (Pro **or** Extreme): the
+/// server-side plan OR a live local RevenueCat entitlement. The local state
+/// leads the DB right after a purchase (the webhook can lag), so either is
+/// enough to unlock the UI. Every Pro gate keys off this, so Extreme inherits
+/// them all.
 final isProProvider = Provider<bool>((ref) {
   final dbPro = ref.watch(entitlementsProvider).valueOrNull?.isPro ?? false;
   final rcPro = ref.watch(revenueCatProProvider).valueOrNull ?? false;
   return dbPro || rcPro;
+});
+
+/// Whether the current user is on the top (Extreme) tier — used only for
+/// labelling, since [isProProvider] already unlocks the features.
+final isExtremeProvider = Provider<bool>((ref) {
+  final dbExtreme = ref.watch(entitlementsProvider).valueOrNull?.isExtreme ?? false;
+  final rcExtreme = ref.watch(revenueCatExtremeProvider).valueOrNull ?? false;
+  return dbExtreme || rcExtreme;
 });
 
 /// Whether a trip is Pro-enabled by any member — the "travel together" unlock.

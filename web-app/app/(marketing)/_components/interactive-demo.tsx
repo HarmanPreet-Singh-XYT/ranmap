@@ -1,25 +1,13 @@
 "use client";
 
-import Image from "next/image";
 import { useState } from "react";
-import {
-  Navigation,
-  Mic,
-  Sparkles,
-  Receipt,
-  Radio,
-  Volume2,
-  CheckCircle2,
-  Play,
-  RotateCcw,
-} from "lucide-react";
+import { Navigation, Mic, Sparkles, Radio } from "lucide-react";
 
 export function InteractiveDemo() {
   const [activeTab, setActiveTab] = useState<"radar" | "voice" | "copilot" | "expenses">("radar");
   const [micActive, setMicActive] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState("Find best artisan coffee with 4+ star reviews and 4-rig parking within 5 miles");
   const [aiResult, setAiResult] = useState<string | null>(
-    "Found 'Coastal Roastery' 2.4 mi ahead (+3 min detour). 12 open parking spots, 4.9 rating. Added to convoy itinerary!"
+    "Added a stop to the trip: 'Coastal Roastery' — 2.4 mi ahead, +3 min detour."
   );
 
   return (
@@ -34,7 +22,7 @@ export function InteractiveDemo() {
             Experience Ranmap in Action
           </h2>
           <p className="mt-4 text-base text-slate-600 leading-relaxed font-normal">
-            See how the convoy system operates in real time. Switch between driving telemetry, push-to-talk voice, AI assistant actions, and expense settlements.
+            See how the convoy comes together. Switch between the live map, push-to-talk voice, AI assistant actions, and shared trip expenses.
           </p>
 
           {/* Interactive Mode Pills */}
@@ -47,7 +35,7 @@ export function InteractiveDemo() {
                   : "text-slate-700 hover:text-slate-900 hover:bg-[#FAF8F5]"
               }`}
             >
-              1. 3D Convoy Radar
+              1. 3D Convoy Map
             </button>
             <button
               onClick={() => setActiveTab("voice")}
@@ -95,8 +83,8 @@ export function InteractiveDemo() {
               </span>
             </div>
             <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-800">
-              <span className="h-2 w-2 rounded-full bg-emerald-600 animate-pulse" />
-              60Hz Realtime Stream
+              <span className="h-2 w-2 rounded-full bg-emerald-600" />
+              Live Realtime Stream
             </span>
           </div>
 
@@ -109,10 +97,10 @@ export function InteractiveDemo() {
                     Live Pack Coordination
                   </span>
                   <h3 className="mt-2 text-2xl font-bold text-slate-900">
-                    Dynamic Spacing & Proximity Radar
+                    The Living Crew Map
                   </h3>
                   <p className="mt-3 text-sm text-slate-600 leading-relaxed">
-                    Ranmap monitors the safe following distance between rigs relative to highway speed. If the convoy spreads past 500m or encounters sudden braking, audio alerts notify the lead vehicle immediately.
+                    Ranmap shows every member on a live 3D map with distance and direction. If someone falls behind, the crew roster flags them as Behind so the lead can ease off — and tapping a teammate hands turn-by-turn navigation to Google Maps.
                   </p>
                   <div className="mt-6 space-y-3">
                     <div className="flex items-center justify-between rounded-xl bg-[#FAF8F5] p-3 text-xs border border-[#E6E3DA]">
@@ -152,22 +140,38 @@ export function InteractiveDemo() {
           {activeTab === "voice" && (
             <div className="p-8 sm:p-10 text-center">
               <span className="text-xs font-extrabold uppercase tracking-wider text-sky-800">
-                Low-Latency LiveKit Engine
+                Live Voice Channel
               </span>
               <h3 className="mt-2 text-2xl font-bold text-slate-900">
                 Push-to-Talk Convoy Channel
               </h3>
               <p className="mt-2 text-sm text-slate-600 max-w-lg mx-auto">
-                Press and hold to talk. Audio stream connects in under 40 milliseconds with AI wind-noise suppression.
+                Press and hold to talk. Voice runs over LiveKit, right inside the app.
               </p>
 
               <div className="mt-10 flex flex-col items-center justify-center">
                 <button
+                  type="button"
+                  aria-pressed={micActive}
+                  aria-label="Hold to broadcast to the convoy voice channel"
                   onMouseDown={() => setMicActive(true)}
                   onMouseUp={() => setMicActive(false)}
+                  onMouseLeave={() => setMicActive(false)}
                   onTouchStart={() => setMicActive(true)}
                   onTouchEnd={() => setMicActive(false)}
-                  className={`cursor-pointer relative flex h-32 w-32 items-center justify-center rounded-full transition-all duration-200 select-none ${
+                  onKeyDown={(event) => {
+                    if (event.key === " " || event.key === "Enter") {
+                      event.preventDefault();
+                      setMicActive(true);
+                    }
+                  }}
+                  onKeyUp={(event) => {
+                    if (event.key === " " || event.key === "Enter") {
+                      setMicActive(false);
+                    }
+                  }}
+                  onBlur={() => setMicActive(false)}
+                  className={`cursor-pointer relative flex h-32 w-32 items-center justify-center rounded-full transition-all duration-200 select-none focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-500/40 ${
                     micActive
                       ? "bg-sky-600 text-white scale-105 shadow-[0_0_50px_rgba(2,132,199,0.5)]"
                       : "bg-sky-50 text-sky-700 border-2 border-sky-300 hover:bg-sky-100"
@@ -175,7 +179,7 @@ export function InteractiveDemo() {
                 >
                   <Mic className="h-12 w-12" />
                   {micActive && (
-                    <span className="absolute -inset-2 rounded-full border-2 border-sky-500 animate-ping" />
+                    <span className="absolute -inset-2 rounded-full border-2 border-sky-500" />
                   )}
                 </button>
 
@@ -183,7 +187,7 @@ export function InteractiveDemo() {
                   {micActive ? "Transmitting to convoy audio stream..." : "Hold to Broadcast (Interactive Simulator)"}
                 </p>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Hands-free mode also triggers via Apple CarPlay / Android Auto buttons
+                  Keep your phone mounted and within reach while you drive
                 </p>
               </div>
             </div>
@@ -193,29 +197,28 @@ export function InteractiveDemo() {
           {activeTab === "copilot" && (
             <div className="p-8 sm:p-10">
               <span className="text-xs font-extrabold uppercase tracking-wider text-purple-800">
-                Autonomous Route Actions
+                Assistant Actions
               </span>
               <h3 className="mt-2 text-2xl font-bold text-slate-900">
-                AI Co-Pilot with Real Action Power
+                An Assistant That Acts on Your Trip
               </h3>
               <p className="mt-2 text-sm text-slate-600">
-                Select a prompt to watch the AI update the convoy route directly.
+                Pick a sample request to see what the assistant can do.
               </p>
 
               {/* Sample prompt chips */}
               <div className="mt-5 flex flex-wrap gap-2">
                 {[
-                  "Find artisan coffee near Big Sur",
-                  "Check EV charger wait times ahead",
-                  "Best sunset turnout for 4 rigs",
-                  "Predict weather at summit pass",
+                  "Add a coffee stop near Big Sur",
+                  "What's the weather at my next stop?",
+                  "Create a trip called Alpine Loop",
+                  "Invite alice_j to this trip",
                 ].map((prompt, idx) => (
                   <button
                     key={idx}
                     onClick={() => {
-                      setAiPrompt(prompt);
                       setAiResult(
-                        `Analyzed 14 options along current heading. Recommending top match with guaranteed 4-rig parking and 0 min detour.`
+                        `Done — I've updated your trip. Open it to see the change.`
                       );
                     }}
                     className="cursor-pointer rounded-full border border-purple-200 bg-purple-50 px-3.5 py-1.5 text-xs font-bold text-purple-900 hover:bg-purple-100 transition-colors"
@@ -229,7 +232,7 @@ export function InteractiveDemo() {
               <div className="mt-6 rounded-2xl border border-purple-200 bg-purple-50/60 p-5">
                 <div className="flex items-center gap-2 text-xs font-bold text-purple-900">
                   <Sparkles className="h-4 w-4 text-purple-700" />
-                  <span>AI Co-Pilot Action:</span>
+                  <span>AI assistant:</span>
                 </div>
                 <p className="mt-2 text-sm text-slate-900 font-medium">
                   {aiResult}
@@ -242,39 +245,52 @@ export function InteractiveDemo() {
           {activeTab === "expenses" && (
             <div className="p-8 sm:p-10">
               <span className="text-xs font-extrabold uppercase tracking-wider text-amber-800">
-                Minimum Cash Settlement Graph
+                Trip Expenses
               </span>
               <h3 className="mt-2 text-2xl font-bold text-slate-900">
-                Convoy Shared Expense Ledger
+                Shared Trip Expense Ledger
               </h3>
               <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="rounded-2xl border border-[#E6E3DA] bg-[#FAF8F5] p-4 text-xs">
-                  <span className="font-bold text-slate-900">Expenses Logged (This Drive):</span>
+                  <span className="font-bold text-slate-900">Expenses Logged (This Trip):</span>
                   <div className="mt-3 space-y-2 text-slate-700">
                     <div className="flex justify-between">
-                      <span>Shell Fuel (Rig 1 & 2)</span>
+                      <span>Fuel</span>
                       <span className="font-bold text-slate-900">$142.00</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Big Sur Campsite</span>
+                      <span>Lodging</span>
                       <span className="font-bold text-slate-900">$90.00</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Bakery & Coffee Pitstop</span>
+                      <span>Food &amp; coffee</span>
                       <span className="font-bold text-slate-900">$48.50</span>
                     </div>
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-xs">
-                  <span className="font-bold text-amber-900">Optimized Settle-Up:</span>
-                  <p className="mt-1 text-slate-600">
-                    Calculated with minimum transactions (no round-robin Venmo chaos).
-                  </p>
-                  <div className="mt-4 p-3 rounded-xl bg-white border border-amber-200 space-y-1">
-                    <p className="font-bold text-slate-900">Sofia pays Marcus: <span className="text-emerald-700 font-extrabold">$64.25</span></p>
-                    <p className="font-bold text-slate-900">You pay Marcus: <span className="text-emerald-700 font-extrabold">$29.80</span></p>
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 text-xs">
+                  <span className="font-bold text-emerald-900">Spend by Category:</span>
+                  <div className="mt-3 space-y-2.5">
+                    {[
+                      { label: "Fuel", value: "$142.00", pct: "80%" },
+                      { label: "Lodging", value: "$90.00", pct: "52%" },
+                      { label: "Food & coffee", value: "$48.50", pct: "28%" },
+                    ].map((row) => (
+                      <div key={row.label}>
+                        <div className="flex justify-between text-slate-700">
+                          <span>{row.label}</span>
+                          <span className="font-bold text-slate-900">{row.value}</span>
+                        </div>
+                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white border border-emerald-100">
+                          <div className="h-full rounded-full bg-emerald-600" style={{ width: row.pct }} />
+                        </div>
+                      </div>
+                    ))}
                   </div>
+                  <p className="mt-4 text-slate-600">
+                    Fuel logs also drive a per-distance cost estimate across your whole planned route.
+                  </p>
                 </div>
               </div>
             </div>

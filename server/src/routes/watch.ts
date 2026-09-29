@@ -44,26 +44,40 @@ interface WatchData {
 }
 
 async function loadWatch(token: string): Promise<WatchData | null> {
-  const { data: share } = await supabaseAdmin
+  const { data: share, error: shareError } = await supabaseAdmin
     .from("trip_shares")
     .select("trip_id, revoked_at")
     .eq("token", token)
     .maybeSingle();
+  if (shareError) {
+    // An infrastructure failure must not be reported as "link not found" — it
+    // would hide a real outage as a revoked/unknown share.
+    console.error("watch: load share failed:", shareError.message);
+    throw new Error("watch: share lookup failed");
+  }
   if (!share || share.revoked_at) return null;
 
-  const { data: trip } = await supabaseAdmin
+  const { data: trip, error: tripError } = await supabaseAdmin
     .from("trips")
     .select("title, status, origin_name, destination_name, route_polyline")
     .eq("id", share.trip_id)
     .maybeSingle();
+  if (tripError) {
+    console.error("watch: load trip failed:", tripError.message);
+    throw new Error("watch: trip lookup failed");
+  }
   if (!trip) return null;
 
-  const { data: pings } = await supabaseAdmin
+  const { data: pings, error: pingsError } = await supabaseAdmin
     .from("location_pings")
     .select("user_id, point, recorded_at")
     .eq("trip_id", share.trip_id)
     .order("recorded_at", { ascending: false })
     .limit(MAX_PINGS);
+  if (pingsError) {
+    console.error("watch: load pings failed:", pingsError.message);
+    throw new Error("watch: ping lookup failed");
+  }
 
   // Latest ping per member (rows are newest-first, so first wins).
   const latest = new Map<string, { lat: number; lng: number; recordedAt: string }>();
@@ -80,9 +94,13 @@ async function loadWatch(token: string): Promise<WatchData | null> {
   }
 
   const userIds = [...latest.keys()];
-  const { data: profiles } = userIds.length
+  const { data: profiles, error: profilesError } = userIds.length
     ? await supabaseAdmin.from("profiles").select("id, username").in("id", userIds)
-    : { data: [] as { id: string; username: string }[] };
+    : { data: [] as { id: string; username: string }[], error: null };
+  if (profilesError) {
+    console.error("watch: load profiles failed:", profilesError.message);
+    throw new Error("watch: profile lookup failed");
+  }
   const nameById = new Map((profiles ?? []).map((p) => [p.id as string, p.username as string]));
 
   const members: WatchMember[] = [...latest.entries()].map(([userId, loc]) => ({

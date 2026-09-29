@@ -18,6 +18,8 @@ import '../../data/models/trip_expense.dart';
 import '../../data/models/trip_stats.dart';
 import '../map/map_post_providers.dart';
 import '../map/trip_photos_screen.dart';
+import '../premium/paywall.dart';
+import '../premium/premium_providers.dart';
 import 'trip_ledger.dart';
 import 'trip_providers.dart';
 
@@ -82,6 +84,7 @@ class TripRecapScreen extends ConsumerWidget {
     final members =
         ref.watch(tripMembersProvider(trip.id)).valueOrNull ?? const [];
 
+    final isPro = ref.watch(isProProvider);
     final route = _routeLabel(trip);
     final date = trip.startedAt ?? trip.scheduledStart ?? trip.endedAt;
     final currency = trip.currency;
@@ -221,7 +224,13 @@ class TripRecapScreen extends ConsumerWidget {
           BrandPrimaryButton(
             label: 'Share recap',
             leadingIcon: Icons.ios_share_rounded,
-            onPressed: () => _share(context, stats, posts.length, unit),
+            onPressed: () {
+              if (!isPro) {
+                showPaywall(context, feature: PremiumFeature.recap);
+                return;
+              }
+              _share(context, stats, posts.length, unit);
+            },
           ),
         ],
       ),

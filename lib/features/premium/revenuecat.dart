@@ -12,6 +12,9 @@ import 'premium_purchaser.dart';
 /// entitlement configured in the RevenueCat dashboard.
 const revenueCatEntitlementId = 'pro';
 
+/// The RevenueCat entitlement that maps to the (higher) Ranmap Extreme tier.
+const revenueCatExtremeEntitlementId = 'extreme';
+
 /// Whether billing is configured for this build (a public SDK key is present).
 bool get isRevenueCatConfigured => Env.revenueCatApiKey != null;
 
@@ -47,18 +50,23 @@ Future<void> identifyRevenueCatUser(String? appUserId) async {
   }
 }
 
+bool _isExtremeCustomerInfo(CustomerInfo info) =>
+    info.entitlements.active.containsKey(revenueCatExtremeEntitlementId);
+
+/// "Paid" — true for either Pro or Extreme, so Extreme unlocks every Pro gate.
 bool _isProCustomerInfo(CustomerInfo info) =>
+    _isExtremeCustomerInfo(info) ||
     info.entitlements.active.containsKey(revenueCatEntitlementId);
 
-/// Live local Pro status from RevenueCat, updated on purchase/restore/renewal.
-/// This can lead the server-side plan (the webhook lags), so the UI treats
-/// either as Pro. Emits nothing when billing isn't configured.
-final revenueCatProProvider = StreamProvider<bool>((ref) {
+/// A live local entitlement stream, updated on purchase/restore/renewal. It can
+/// lead the server-side plan (the webhook lags), so the UI treats either as
+/// active. Emits nothing when billing isn't configured.
+Stream<bool> _customerInfoStream(Ref ref, bool Function(CustomerInfo) isActive) {
   if (!isRevenueCatConfigured) return const Stream<bool>.empty();
 
   final controller = StreamController<bool>();
   void listener(CustomerInfo info) {
-    if (!controller.isClosed) controller.add(_isProCustomerInfo(info));
+    if (!controller.isClosed) controller.add(isActive(info));
   }
 
   Purchases.addCustomerInfoUpdateListener(listener);
@@ -69,7 +77,7 @@ final revenueCatProProvider = StreamProvider<bool>((ref) {
         listener(await Purchases.getCustomerInfo());
       }
     } catch (_) {
-      // Leave the stream unseeded — treated as not-Pro.
+      // Leave the stream unseeded — treated as inactive.
     }
   }());
 
@@ -79,13 +87,23 @@ final revenueCatProProvider = StreamProvider<bool>((ref) {
   });
 
   return controller.stream;
-});
+}
+
+/// Live local "paid" (Pro OR Extreme) status.
+final revenueCatProProvider = StreamProvider<bool>(
+  (ref) => _customerInfoStream(ref, _isProCustomerInfo),
+);
+
+/// Live local Extreme status.
+final revenueCatExtremeProvider = StreamProvider<bool>(
+  (ref) => _customerInfoStream(ref, _isExtremeCustomerInfo),
+);
 
 class RevenueCatPremiumPurchaser implements PremiumPurchaser {
   const RevenueCatPremiumPurchaser();
 
   @override
-  Future<void> purchase({PaywallPlan plan = PaywallPlan.annual}) async {
+  Future<void> purchase({PaywallPlan plan = PaywallPlan.proAnnual}) async {
     final package = await _packageFor(plan);
     if (package == null) throw const PremiumPurchaseUnavailable();
     await _guarded(() => Purchases.purchase(PurchaseParams.package(package)));
@@ -105,16 +123,30 @@ class RevenueCatPremiumPurchaser implements PremiumPurchaser {
     }
   }
 
-  /// The package matching [plan], falling back to whichever term exists so a
-  /// purchase can still complete if the offering only has one.
+  /// The package for a (tier, term), matched by identifier first
+  /// (`pro_annual`, `extreme_monthly`, …); Pro also falls back to RevenueCat's
+  /// standard `$rc_annual`/`$rc_monthly` packages, then to whatever exists so a
+  /// purchase can still complete.
   Future<Package?> _packageFor(PaywallPlan plan) async {
     final offering = await _currentOffering();
     if (offering == null) return null;
-    final preferred = plan == PaywallPlan.annual
-        ? offering.annual
-        : offering.monthly;
-    return preferred ??
-        offering.annual ??
+
+    final wanted = switch ((plan.tier, plan.term)) {
+      (PaywallTier.pro, PaywallTerm.annual) => 'pro_annual',
+      (PaywallTier.pro, PaywallTerm.monthly) => 'pro_monthly',
+      (PaywallTier.extreme, PaywallTerm.annual) => 'extreme_annual',
+      (PaywallTier.extreme, PaywallTerm.monthly) => 'extreme_monthly',
+    };
+    for (final package in offering.availablePackages) {
+      if (package.identifier == wanted) return package;
+    }
+
+    if (plan.tier == PaywallTier.pro) {
+      final standard = plan.isAnnual ? offering.annual : offering.monthly;
+      if (standard != null) return standard;
+    }
+
+    return offering.annual ??
         offering.monthly ??
         (offering.availablePackages.isNotEmpty
             ? offering.availablePackages.first

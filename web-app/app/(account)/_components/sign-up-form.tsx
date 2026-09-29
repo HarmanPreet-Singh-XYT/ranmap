@@ -7,11 +7,29 @@ import { AuthField } from "./auth-field";
 
 const initialState: AuthActionState = { error: null };
 
-export function SignUpForm() {
+export function SignUpForm({ plan }: { plan?: string }) {
   const [state, action, pending] = useActionState(signUp, initialState);
+  const planLabel =
+    plan === "pro" ? "Ranmap Pro" : plan === "extreme" ? "Ranmap Extreme" : null;
+
+  // When email confirmation is required, there is no session yet — tell the
+  // user to confirm instead of silently redirecting to a sign-in screen.
+  if (state.sent) {
+    return (
+      <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+        If that address is new, check your inbox to confirm it, then sign in.
+      </p>
+    );
+  }
 
   return (
     <form action={action} className="space-y-4">
+      {planLabel && (
+        <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-medium text-emerald-900">
+          You picked {planLabel}. Create your account, then subscribe from
+          Account → Billing (or the Ranmap app) to activate it.
+        </p>
+      )}
       <AuthField
         label="Email"
         name="email"
@@ -29,7 +47,7 @@ export function SignUpForm() {
       />
 
       {state.error && (
-        <p className="rounded-[var(--radius-sm)] bg-[var(--color-danger-surface)] px-3.5 py-2 text-sm text-[var(--color-danger)]">
+        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-medium text-red-800">
           {state.error}
         </p>
       )}
@@ -37,29 +55,26 @@ export function SignUpForm() {
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-[var(--radius-sm)] bg-[var(--color-ink)] px-5 py-2.5 text-sm font-medium text-[var(--color-background)] transition-opacity hover:opacity-85 disabled:opacity-60"
+        className="w-full rounded-full bg-emerald-700 px-6 py-3 text-xs font-bold uppercase tracking-wider text-white shadow-sm transition-all hover:bg-emerald-800 disabled:opacity-60"
       >
         {pending ? "Creating account…" : "Create account"}
       </button>
 
-      <p className="text-center text-xs text-[var(--color-ink-muted)]">
+      <p className="text-center text-xs text-slate-500">
         By continuing you agree to Ranmap&apos;s{" "}
-        <Link href="/terms" className="underline">
+        <Link href="/terms" className="underline hover:text-emerald-700">
           Terms of Service
         </Link>{" "}
         &amp;{" "}
-        <Link href="/privacy" className="underline">
+        <Link href="/privacy" className="underline hover:text-emerald-700">
           Privacy Policy
         </Link>
         .
       </p>
 
-      <p className="text-center text-sm text-[var(--color-ink-secondary)]">
+      <p className="text-center text-sm text-slate-600">
         Already have an account?{" "}
-        <Link
-          href="/login"
-          className="font-medium text-[var(--color-ink)] hover:opacity-80"
-        >
+        <Link href="/login" className="font-semibold text-emerald-700 hover:text-emerald-800">
           Sign in
         </Link>
       </p>

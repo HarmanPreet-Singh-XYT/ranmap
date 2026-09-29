@@ -164,19 +164,15 @@ class TripRepository {
         .toList();
   }
 
-  /// Trip invites sent to the current user that are still pending, with the
-  /// trip and its creator's profile joined.
+  /// Trip invites sent to the current user that are still pending.
+  ///
+  /// Goes through the `my_trip_invites` RPC (see 0035_audit_hardening.sql): a
+  /// pending invitee must not be able to read the whole trip row (route,
+  /// coordinates), so the RPC returns only the redacted fields the invite card
+  /// needs, under the same shape the card already reads (`trips` + `creator`).
   Future<List<Map<String, dynamic>>> incomingTripInvites() async {
-    final uid = SupabaseService.currentUserId;
-    final rows = await _client
-        .from('trip_members')
-        .select(
-          'trip_id, invite_status, '
-          'trips(*, creator:profiles!trips_created_by_fkey($kProfilePublicColumns))',
-        )
-        .eq('user_id', uid)
-        .eq('invite_status', 'invited');
-    return (rows as List).cast<Map<String, dynamic>>();
+    final data = await _client.rpc('my_trip_invites');
+    return (data as List).cast<Map<String, dynamic>>();
   }
 
   Future<List<Map<String, dynamic>>> membersFor(String tripId) async {

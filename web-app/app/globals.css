@@ -1,8 +1,17 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
 
 /*
  * Ranmap Pure Light-Mode Design System — Editorial Luxury Travel & Overland
  * Inspired by Airbnb, Travelwise, and Monocle
+ *
+ * The second half of :root maps shadcn/ui's semantic tokens (--primary,
+ * --card, --border, …) onto the same brand palette the hand-rolled utilities
+ * use, so shadcn components automatically inherit the Ranmap look instead of
+ * shadcn's default neutral gray.
  */
 :root {
   --color-primary: #15803d;
@@ -26,8 +35,28 @@
   --color-ink-secondary: #334155;
   --color-ink-muted: #64748b;
 
-  --background: var(--color-background);
-  --foreground: var(--color-ink);
+  /* shadcn/ui semantic tokens, mapped to the Ranmap palette. */
+  --background: #faf8f5;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+  --primary: #15803d;
+  --primary-foreground: #ffffff;
+  --secondary: #f3f0e8;
+  --secondary-foreground: #0f172a;
+  --muted: #f3f0e8;
+  --muted-foreground: #64748b;
+  --accent: #ecfdf5;
+  --accent-foreground: #166534;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --border: #e6e3da;
+  --input: #e6e3da;
+  --ring: #15803d;
+
+  --radius: 0.625rem;
 }
 
 @theme inline {
@@ -52,6 +81,31 @@
 
   --font-sans: var(--font-jakarta), var(--font-inter), system-ui, sans-serif;
   --font-display: var(--font-jakarta), system-ui, sans-serif;
+  --font-heading: var(--font-sans);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 /* Tactile Surface Treatments */
@@ -84,4 +138,42 @@
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+  /* Give every interactive element a visible keyboard focus ring, including
+     the many bespoke links/buttons in the marketing surface. */
+  a:focus-visible,
+  button:focus-visible,
+  [role="button"]:focus-visible,
+  [role="tab"]:focus-visible,
+  select:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  summary:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+}
+
+/* Honour the OS "reduce motion" preference: neutralise decorative animation
+   and transition timing rather than removing the elements. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

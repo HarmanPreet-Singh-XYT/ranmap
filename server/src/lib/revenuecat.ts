@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import type { PlanTier } from "./plans.js";
 
 /**
  * Pure helpers for the RevenueCat webhook. Kept free of I/O so the mapping and
@@ -12,6 +13,8 @@ import { timingSafeEqual } from "node:crypto";
 
 /** The RevenueCat entitlement that maps to Ranmap Pro. Must match the dashboard. */
 export const REVENUECAT_ENTITLEMENT_ID = "pro";
+/** The RevenueCat entitlement that maps to the (higher) Ranmap Extreme tier. */
+export const REVENUECAT_EXTREME_ENTITLEMENT_ID = "extreme";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -52,22 +55,58 @@ export interface ProEntitlement {
 }
 
 /**
- * Reads the Pro entitlement from a RevenueCat subscriber payload
- * (`GET /v1/subscribers/{id}`). Absent entitlement → inactive.
+ * Reads one entitlement object from a subscriber's `entitlements` map. Absent →
+ * inactive. A null/absent `expires_date` means the entitlement never lapses
+ * (lifetime/non-expiring).
  */
-export function readProEntitlement(body: unknown, now: number = Date.now()): ProEntitlement {
-  const subscriber = asRecord(asRecord(body)?.subscriber);
-  const entitlement = asRecord(asRecord(subscriber?.entitlements)?.[REVENUECAT_ENTITLEMENT_ID]);
+function readEntitlement(
+  entitlements: Record<string, unknown> | null,
+  id: string,
+  now: number,
+): ProEntitlement {
+  const entitlement = asRecord(entitlements?.[id]);
   if (!entitlement) return { active: false, expiresAt: null };
 
   const expiresRaw = entitlement.expires_date;
-  // A null/absent expiry means the entitlement never lapses (lifetime/non-expiring).
   if (expiresRaw === null || expiresRaw === undefined) return { active: true, expiresAt: null };
   if (typeof expiresRaw !== "string") return { active: false, expiresAt: null };
 
   const expiresAt = new Date(expiresRaw);
   if (Number.isNaN(expiresAt.getTime())) return { active: false, expiresAt: null };
   return { active: expiresAt.getTime() > now, expiresAt };
+}
+
+/**
+ * Reads the Pro entitlement from a RevenueCat subscriber payload
+ * (`GET /v1/subscribers/{id}`). Absent entitlement → inactive.
+ */
+export function readProEntitlement(body: unknown, now: number = Date.now()): ProEntitlement {
+  const subscriber = asRecord(asRecord(body)?.subscriber);
+  return readEntitlement(asRecord(subscriber?.entitlements), REVENUECAT_ENTITLEMENT_ID, now);
+}
+
+export interface PlanEntitlement {
+  plan: PlanTier;
+  /** Null means "no expiry" — lifetime access. */
+  expiresAt: Date | null;
+}
+
+/**
+ * The subscriber's plan, checking **Extreme first** so an active extreme
+ * product wins over a lingering pro entitlement. Used by the webhook to write
+ * `profiles.plan`.
+ */
+export function readPlanEntitlement(body: unknown, now: number = Date.now()): PlanEntitlement {
+  const subscriber = asRecord(asRecord(body)?.subscriber);
+  const entitlements = asRecord(subscriber?.entitlements);
+
+  const extreme = readEntitlement(entitlements, REVENUECAT_EXTREME_ENTITLEMENT_ID, now);
+  if (extreme.active) return { plan: "extreme", expiresAt: extreme.expiresAt };
+
+  const pro = readEntitlement(entitlements, REVENUECAT_ENTITLEMENT_ID, now);
+  if (pro.active) return { plan: "pro", expiresAt: pro.expiresAt };
+
+  return { plan: "free", expiresAt: null };
 }
 
 /** Maps RevenueCat's `store` value to the plan_source column. */
@@ -78,7 +117,11 @@ export function planSourceFromStore(store: unknown): string | null {
       return "ios";
     case "PLAY_STORE":
       return "android";
+    case "RC_BILLING":
+      // RevenueCat Web Billing (the web checkout path).
+      return "web";
     case "AMAZON":
+    case "PADDLE":
     case "STRIPE":
     case "PROMOTIONAL":
       return "other";

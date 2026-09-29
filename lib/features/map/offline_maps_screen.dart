@@ -12,6 +12,8 @@ import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/brand/brand_text_field.dart';
 import '../../data/models/trip.dart';
+import '../premium/paywall.dart';
+import '../premium/premium_providers.dart';
 import '../trip/trip_providers.dart';
 import 'map_engine/map_engine.dart';
 import 'offline_regions.dart';
@@ -140,6 +142,32 @@ class _OfflineMapsScreenState extends ConsumerState<OfflineMapsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Offline downloads are a Ranmap Pro feature.
+    if (!ref.watch(isProProvider)) {
+      return BrandScaffold(
+        header: BrandHeader(
+          title: 'Offline maps',
+          onBack: () => Navigator.of(context).maybePop(),
+        ),
+        child: Center(
+          child: BrandEmptyState(
+            icon: Icons.workspace_premium_rounded,
+            title: 'Offline maps are a Ranmap Pro feature.',
+            message:
+                'Download your route area and keep navigating with no signal on remote passes.',
+            tint: BrandColors.accentPeach,
+            action: BrandPrimaryButton(
+              label: 'Upgrade to Pro',
+              expand: false,
+              trailingIcon: null,
+              onPressed: () =>
+                  showPaywall(context, feature: PremiumFeature.offlineMaps),
+            ),
+          ),
+        ),
+      );
+    }
+
     // The SDK needs the vendored token installed before any tiles are fetched.
     final tokenAsync = ref.watch(mapboxTokenProvider);
     final tripsAsync = ref.watch(myTripsProvider);

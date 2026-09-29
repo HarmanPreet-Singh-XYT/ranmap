@@ -31,6 +31,13 @@ final outboxDrainProvider = Provider<void>((ref) {
   unawaited(_drain(ref, outbox));
 });
 
+/// A trigger for an immediate outbox drain, for the offline-queue screen's
+/// "Retry now" action. Bound to a provider `Ref` (not the widget's), so the
+/// drain can invalidate the same providers the background sweep does.
+final outboxDrainNowProvider = Provider<Future<void> Function()>((ref) {
+  return () => _drain(ref, ref.read(outboxProvider));
+});
+
 Future<void> _drain(Ref ref, Outbox outbox) async {
   if (outbox.draining) return;
   outbox.draining = true;
@@ -59,8 +66,18 @@ Future<void> _drain(Ref ref, Outbox outbox) async {
         await outbox.remove(entry.id);
       } catch (error) {
         if (isRetryableOutboxError(error)) {
-          // Still offline / transient — leave this and everything after it
-          // queued; the periodic sweep retries.
+          // Still offline / transient. Bound the retries so an error the
+          // classifier can't place can't block every write behind it forever.
+          final attempts = await outbox.bumpAttempt(entry.id);
+          if (attempts >= Outbox.maxAttempts) {
+            debugPrint(
+              'outbox: giving up on ${entry.type.wire} ${entry.id} after $attempts attempts: $error',
+            );
+            outbox.recordFailed(entry);
+            await outbox.remove(entry.id);
+            continue;
+          }
+          // Leave this and everything after it queued; the sweep retries.
           break;
         }
         // A permanent error (RLS, validation) would wedge the queue, so drop

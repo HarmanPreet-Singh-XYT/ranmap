@@ -26,6 +26,7 @@ import '../../core/widgets/error_retry.dart';
 import '../../data/models/profile.dart';
 import '../../data/services/supabase_service.dart';
 import '../premium/premium_providers.dart';
+import '../settings/offline_queue_screen.dart';
 import '../settings/settings_screen.dart';
 import '../social/friends_screen.dart';
 import '../social/groups_screen.dart';
@@ -113,7 +114,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             children: [
               _ProfileHeaderCard(profile: profile),
               const SizedBox(height: BrandSpace.md),
-              _ProCard(isPro: ref.watch(isProProvider)),
+              _ProCard(
+                isPro: ref.watch(isProProvider),
+                isExtreme: ref.watch(isExtremeProvider),
+              ),
               const SizedBox(height: BrandSpace.md),
               const _PlanUsageCard(),
               const SizedBox(height: BrandSpace.lg),
@@ -516,9 +520,10 @@ class _Chip extends StatelessWidget {
 }
 
 class _ProCard extends ConsumerWidget {
-  const _ProCard({required this.isPro});
+  const _ProCard({required this.isPro, required this.isExtreme});
 
   final bool isPro;
+  final bool isExtreme;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -527,7 +532,7 @@ class _ProCard extends ConsumerWidget {
         ? (expires != null
               ? 'Renews ${DateFormat('MMM yyyy').format(expires)}'
               : 'Active subscription')
-        : 'Unlock AI, voice & unlimited search';
+        : 'Unlock AI, voice & more search';
 
     return GestureDetector(
       onTap: isPro ? null : () => context.push('/paywall'),
@@ -570,7 +575,7 @@ class _ProCard extends ConsumerWidget {
                       Row(
                         children: [
                           Text(
-                            'RanMap Pro',
+                            isExtreme ? 'RanMap Extreme' : 'RanMap Pro',
                             style: BrandText.weight(
                               BrandText.titleSm,
                               700,
@@ -640,7 +645,7 @@ class _ProCard extends ConsumerWidget {
                         children: [
                           TextSpan(
                             text: isPro
-                                ? 'UNLIMITED ACCESS: '
+                                ? 'PRO ACCESS: '
                                 : 'UPGRADE FOR: ',
                             style: BrandText.weight(
                               BrandText.labelSm,
@@ -705,8 +710,8 @@ class _PlanUsageCard extends ConsumerWidget {
                   const SizedBox(height: BrandSpace.sm),
                   Text(
                     exhausted.isEmpty
-                        ? 'Resets automatically. Pro removes these limits.'
-                        : "You've used your free ${exhausted.map((q) => q.label.toLowerCase()).join(' and ')}. Upgrade for unlimited.",
+                        ? 'Resets automatically. Pro raises these limits.'
+                        : "You've used your free ${exhausted.map((q) => q.label.toLowerCase()).join(' and ')}. Upgrade for a much larger allowance.",
                     style: BrandText.bodySm.copyWith(
                       color: exhausted.isEmpty
                           ? BrandColors.textMuted
@@ -954,7 +959,7 @@ class _LockedRollup extends StatelessWidget {
           const SizedBox(height: BrandSpace.md),
           Text(
             'Lifetime distance, drive time and convoy counters are part of '
-            'RanMap Pro, alongside AI assistance and unlimited trip history.',
+            'RanMap Pro, alongside AI assistance and full trip history.',
             style: BrandText.bodyMd.copyWith(color: BrandColors.textBody),
           ),
           const SizedBox(height: BrandSpace.md),
@@ -1205,16 +1210,8 @@ class _MenuCard extends ConsumerWidget {
               subtitle: pending == 0
                   ? 'Synced'
                   : '$pending pending write${pending == 1 ? '' : 's'}',
-              onTap: () => Navigator.of(
-                context,
-              ).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
-              trailing: Container(
-                height: 10,
-                width: 10,
-                decoration: BoxDecoration(
-                  color: BrandColors.primaryContainer,
-                  shape: BoxShape.circle,
-                ),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const OfflineQueueScreen()),
               ),
             ),
           ),

@@ -69,7 +69,7 @@ test("requireProOrTrial meters a free user then paywalls, with the custom messag
   const mw = requireProOrTrial(
     "ai_assistant",
     { max: 2, windowMs: 60_000, message: "out of free messages" },
-    async () => false,
+    async () => "free",
     consume,
   );
 
@@ -87,23 +87,38 @@ test("requireProOrTrial meters a free user then paywalls, with the custom messag
   });
 });
 
-test("requireProOrTrial never meters a Pro user", async () => {
+test("requireProOrTrial meters a Pro user against proMax, then 429s (not a paywall)", async () => {
   const { req, res, state, next } = harness("pro-user-1");
-  let metered = false;
+  let calls = 0;
   const mw = requireProOrTrial(
     "maps_search",
-    { max: 1, windowMs: 60_000, message: "capped" },
-    async () => true,
-    async () => {
-      metered = true;
-      return true;
+    {
+      max: 1,
+      proMax: 2,
+      windowMs: 60_000,
+      message: "free capped",
+      proMessage: "plan capped",
+    },
+    async () => "pro",
+    async (_u, _f, limit) => {
+      assert.equal(limit, 2, "Pro is metered against proMax, not the free max");
+      calls += 1;
+      return calls <= 2;
     },
   );
 
-  for (let i = 0; i < 5; i++) await mw(req, res, next);
-  assert.equal(state.nextCalls, 5);
-  assert.equal(state.statusCode, 200);
-  assert.equal(metered, false, "the meter is never consulted for a Pro user");
+  await mw(req, res, next);
+  await mw(req, res, next);
+  assert.equal(state.nextCalls, 2, "both Pro requests under the ceiling pass");
+
+  await mw(req, res, next);
+  assert.equal(state.nextCalls, 2, "the third is blocked");
+  assert.equal(state.statusCode, 429, "a Pro user gets 429, not the 402 paywall");
+  assert.deepEqual(state.body, {
+    error: "plan capped",
+    code: "limit_reached",
+    feature: "maps_search",
+  });
 });
 
 test("requireProOrTrial forwards a metering failure to next", async () => {
@@ -111,7 +126,7 @@ test("requireProOrTrial forwards a metering failure to next", async () => {
   const mw = requireProOrTrial(
     "ai_assistant",
     { max: 1, windowMs: 60_000, message: "capped" },
-    async () => false,
+    async () => "free",
     async () => {
       throw new Error("db down");
     },
@@ -132,7 +147,7 @@ test("requireWithinAllowance lets an under-limit user through and reads usage", 
   await requireWithinAllowance(
     "ai_assistant",
     allowanceOpts,
-    async () => false,
+    async () => "free",
     async () => {
       reads += 1;
       return 99;
@@ -148,7 +163,7 @@ test("requireWithinAllowance paywalls at the limit", async () => {
   await requireWithinAllowance(
     "ai_assistant",
     allowanceOpts,
-    async () => false,
+    async () => "free",
     async () => 100,
   )(req, res, next);
 
@@ -156,21 +171,65 @@ test("requireWithinAllowance paywalls at the limit", async () => {
   assert.equal(state.statusCode, 402);
 });
 
-test("requireWithinAllowance lets Pro through without reading usage", async () => {
-  const { req, res, state, next } = harness();
-  let reads = 0;
-  await requireWithinAllowance(
-    "ai_assistant",
-    allowanceOpts,
-    async () => true,
-    async () => {
-      reads += 1;
-      return 999;
-    },
-  )(req, res, next);
+test("requireWithinAllowance applies the proMax ceiling for a Pro user", async () => {
+  const opts = {
+    max: 100,
+    proMax: 1_000,
+    windowMs: 60_000,
+    message: "free out",
+    proMessage: "plan out",
+  };
 
-  assert.equal(state.nextCalls, 1);
-  assert.equal(reads, 0, "a Pro user's usage is never consulted");
+  const under = harness();
+  await requireWithinAllowance("ai_assistant", opts, async () => "pro", async () => 999)(
+    under.req,
+    under.res,
+    under.next,
+  );
+  assert.equal(under.state.nextCalls, 1, "under proMax, a Pro user passes");
+
+  const atCap = harness();
+  await requireWithinAllowance("ai_assistant", opts, async () => "pro", async () => 1_000)(
+    atCap.req,
+    atCap.res,
+    atCap.next,
+  );
+  assert.equal(atCap.state.nextCalls, 0);
+  assert.equal(atCap.state.statusCode, 429, "a Pro user gets 429, not the 402 paywall");
+});
+
+test("requireWithinAllowance uses extremeMax for an Extreme user", async () => {
+  const opts = {
+    max: 100,
+    proMax: 1_000,
+    extremeMax: 5_000,
+    windowMs: 60_000,
+    message: "free out",
+    proMessage: "pro out",
+    extremeMessage: "extreme out",
+  };
+
+  const under = harness();
+  await requireWithinAllowance("ai_assistant", opts, async () => "extreme", async () => 4_999)(
+    under.req,
+    under.res,
+    under.next,
+  );
+  assert.equal(under.state.nextCalls, 1, "under extremeMax, an Extreme user passes");
+
+  const atCap = harness();
+  await requireWithinAllowance("ai_assistant", opts, async () => "extreme", async () => 5_000)(
+    atCap.req,
+    atCap.res,
+    atCap.next,
+  );
+  assert.equal(atCap.state.nextCalls, 0);
+  assert.equal(atCap.state.statusCode, 429);
+  assert.deepEqual(atCap.state.body, {
+    error: "extreme out",
+    code: "limit_reached",
+    feature: "ai_assistant",
+  });
 });
 
 test("requireWithinAllowance forwards a usage-read failure to next", async () => {
@@ -178,7 +237,7 @@ test("requireWithinAllowance forwards a usage-read failure to next", async () =>
   await requireWithinAllowance(
     "ai_assistant",
     allowanceOpts,
-    async () => false,
+    async () => "free",
     async () => {
       throw new Error("db down");
     },

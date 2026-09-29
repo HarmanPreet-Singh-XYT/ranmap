@@ -12,8 +12,10 @@ import 'premium_purchaser.dart';
 import 'revenuecat.dart';
 
 /// A paid capability. The [key] matches the server's `PremiumFeature` values for
-/// the server-gated features; the client-only ones (history/trips/photos/group
-/// size) are enforced by DB triggers and just need a label here.
+/// the server-gated features (ai_assistant/voice/maps_search); the rest are
+/// client-only gates — some backed by DB triggers (trips/photos/group
+/// size/documents/route templates), the others plain UI locks (history,
+/// offline maps, service, weather, recap) — and just need a label here.
 enum PremiumFeature {
   aiAssistant('ai_assistant', 'AI assistant'),
   voice('voice', 'voice channels'),
@@ -21,7 +23,13 @@ enum PremiumFeature {
   history('history', 'trip stats & history'),
   trips('trips', 'planned trips'),
   photos('photos', 'map photos'),
-  groupSize('group_size', 'group size');
+  groupSize('group_size', 'group size'),
+  offlineMaps('offline_maps', 'offline maps'),
+  documents('documents', 'documents'),
+  service('service', 'service reminders'),
+  routeTemplates('route_templates', 'saved routes'),
+  weather('weather', 'weather en route'),
+  recap('recap', 'trip recap export');
 
   const PremiumFeature(this.key, this.label);
 
@@ -33,7 +41,7 @@ enum PremiumFeature {
 const _benefits = <({IconData icon, String title, String detail})>[
   (
     icon: Icons.auto_awesome_rounded,
-    title: 'Unlimited AI trip assistant',
+    title: 'A generous AI planning allowance',
     detail: 'Plan routes, save places, and schedule trips by chatting.',
   ),
   (
@@ -43,8 +51,23 @@ const _benefits = <({IconData icon, String title, String detail})>[
   ),
   (
     icon: Icons.route_rounded,
-    title: 'Unlimited route & place search',
-    detail: 'No daily cap on planning and nearby places.',
+    title: 'A generous search allowance',
+    detail: 'Far more route and nearby-place searches every day.',
+  ),
+  (
+    icon: Icons.map_outlined,
+    title: 'Offline maps',
+    detail: 'Save your route area and keep navigating with no signal.',
+  ),
+  (
+    icon: Icons.folder_copy_outlined,
+    title: 'Documents vault',
+    detail: 'Keep licence, insurance and tickets in a private wallet.',
+  ),
+  (
+    icon: Icons.build_circle_outlined,
+    title: 'Service reminders & full history',
+    detail: 'Track maintenance and your complete trip logbook.',
   ),
   (
     icon: Icons.groups_rounded,

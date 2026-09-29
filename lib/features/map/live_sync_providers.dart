@@ -166,6 +166,17 @@ final locationPermissionProvider = FutureProvider.autoDispose<bool>((
       permission == LocationPermission.whileInUse;
 });
 
+/// Whether the device's location *service* (GPS) is switched on.
+///
+/// Distinct from [locationPermissionProvider], which is false both when the app
+/// lacks permission and when the service is off. A user who has granted the app
+/// permission but turned location off system-wide is stuck on the denied view
+/// unless it offers the device-settings path, so the view checks this to show
+/// the right message and button.
+final locationServiceEnabledProvider = FutureProvider.autoDispose<bool>(
+  (ref) => Geolocator.isLocationServiceEnabled(),
+);
+
 /// Minimum gap between live broadcast messages. The GPS stream fires every
 /// ~5 m (≈6/s at highway speed) and every message fans out to every teammate,
 /// so this throttles the live feed to a rate the map still reads as smooth.
@@ -184,6 +195,13 @@ const _presencePersistInterval = Duration(seconds: 30);
 /// Coarse persisted pings between each `trip_stats` recompute. Recomputing
 /// re-reads the trip's whole ping history, so it must not run per ping.
 const _statsRecomputeEveryNPings = 4;
+
+/// How long a teammate's last-known position stays on the live map before it
+/// ages out. Without this, a member who lost signal or stopped sharing lingers
+/// as "live" forever (the map only updates on new broadcasts/snapshots).
+/// Groups use the same ~15-minute presence window as `group_member_locations`.
+const _tripStaleAfter = Duration(minutes: 5);
+const _groupStaleAfter = Duration(minutes: 15);
 
 /// The Realtime channel name for a trip's live positions. It must be identical
 /// on every client (the RLS policy authorizes by the trip id in the topic), so
@@ -224,6 +242,10 @@ class _LiveChannel {
   void attach(void Function() onUpdate) => _listeners.add(onUpdate);
   void detach(void Function() onUpdate) => _listeners.remove(onUpdate);
 
+  /// How many providers currently consume this channel. Used to evict a channel
+  /// (and its server subscription) once nobody is watching it.
+  int get listenerCount => _listeners.length;
+
   void notify() {
     for (final listener in List.of(_listeners)) {
       listener();
@@ -232,6 +254,36 @@ class _LiveChannel {
 }
 
 final Map<String, _LiveChannel> _liveChannels = {};
+
+/// Pending eviction timers, keyed like [_liveChannels]. Held separately so a
+/// channel that regains a listener before its grace period elapses is kept.
+final Map<String, Timer> _channelEvictionTimers = {};
+
+/// Grace period before an unwatched channel is unsubscribed. Long enough that
+/// briefly leaving and returning to the map (or a rebuild) doesn't tear down and
+/// immediately re-create the same subscription — which the Realtime server
+/// rejects as a duplicate join.
+const _channelEvictionGrace = Duration(seconds: 30);
+
+/// Keeps a channel alive (cancels any pending eviction).
+void _retainChannel(String key) {
+  _channelEvictionTimers.remove(key)?.cancel();
+}
+
+/// Schedules the eviction of an unwatched channel. A no-op if it still has
+/// listeners or was already evicted.
+void _scheduleChannelEviction(String key) {
+  final holder = _liveChannels[key];
+  if (holder == null || holder.listenerCount > 0) return;
+  _channelEvictionTimers[key]?.cancel();
+  _channelEvictionTimers[key] = Timer(_channelEvictionGrace, () {
+    _channelEvictionTimers.remove(key);
+    final current = _liveChannels[key];
+    if (current == null || current.listenerCount > 0) return;
+    _liveChannels.remove(key);
+    unawaited(SupabaseService.client.removeChannel(current.channel));
+  });
+}
 
 /// The cached channel for [key], created on first use. Recreated only if the
 /// signed-in user changes, so a sign-out can't leave another user's channel
@@ -243,9 +295,13 @@ _LiveChannel _liveChannelFor({
 }) {
   final userId = SupabaseService.currentUser?.id;
   final existing = _liveChannels[key];
-  if (existing != null && existing.userId == userId) return existing;
+  if (existing != null && existing.userId == userId) {
+    _retainChannel(key);
+    return existing;
+  }
   if (existing != null) {
     _liveChannels.remove(key);
+    _channelEvictionTimers.remove(key)?.cancel();
     unawaited(SupabaseService.client.removeChannel(existing.channel));
   }
 
@@ -304,6 +360,7 @@ _LiveChannel _liveChannelFor({
   });
 
   _liveChannels[key] = holder;
+  _retainChannel(key);
   return holder;
 }
 
@@ -445,10 +502,33 @@ Stream<Map<String, MemberLocation>> _liveSync(
     }
   });
 
+  // Age out teammates we stop hearing from, so the live layer (and the "N live"
+  // count) don't keep showing a rider who lost signal or stopped sharing.
+  final staleAfter = isTrip ? _tripStaleAfter : _groupStaleAfter;
+  Timer? pruneTimer;
+  void pruneStale() {
+    if (disposed || holder.latest.isEmpty) return;
+    final cutoff = DateTime.now().subtract(staleAfter);
+    final stale = [
+      for (final entry in holder.latest.entries)
+        if (entry.value.recordedAt.isBefore(cutoff)) entry.key,
+    ];
+    if (stale.isEmpty) return;
+    for (final key in stale) {
+      holder.latest.remove(key);
+    }
+    holder.notify();
+  }
+  pruneTimer = Timer.periodic(const Duration(seconds: 30), (_) => pruneStale());
+
   ref.onDispose(() {
     disposed = true;
+    pruneTimer?.cancel();
     holder.detach(onUpdate);
     controller.close();
+    // Release the channel once nobody is watching it, so opening many trips or
+    // groups in one session doesn't leave their subscriptions open forever.
+    _scheduleChannelEviction(key);
   });
 
   return controller.stream;

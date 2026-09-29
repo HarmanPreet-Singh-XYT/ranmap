@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Suspense } from "react";
 import { createClient } from "../../lib/supabase/server";
+import { MobileNav } from "./mobile-nav";
 
 const marketingLinks = [
   { href: "/routes", label: "Convoy Routes" },
@@ -60,6 +61,7 @@ export function SiteHeader() {
           >
             Get the App
           </Link>
+          <MobileNav links={marketingLinks} />
         </div>
       </div>
     </header>

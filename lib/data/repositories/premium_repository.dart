@@ -2,10 +2,19 @@ import '../services/supabase_service.dart';
 
 /// The caller's plan, read from the `my_plan` RPC (see 0009_plans.sql). The
 /// plan column isn't world-readable and can't be written by the client.
+///
+/// Tiers are ordered free < pro < extreme. [isPro] means "paid" — it is true for
+/// both Pro and Extreme, so every Pro gate keeps working for Extreme.
 class Entitlements {
-  const Entitlements({required this.isPro, required this.plan, this.expiresAt});
+  const Entitlements({
+    required this.isPro,
+    required this.plan,
+    this.isExtreme = false,
+    this.expiresAt,
+  });
 
   final bool isPro;
+  final bool isExtreme;
   final String plan;
   final DateTime? expiresAt;
 
@@ -14,6 +23,7 @@ class Entitlements {
 
   factory Entitlements.fromRow(Map<String, dynamic> row) => Entitlements(
         isPro: row['is_pro'] as bool? ?? false,
+        isExtreme: row['is_extreme'] as bool? ?? false,
         plan: row['plan'] as String? ?? 'free',
         expiresAt: DateTime.tryParse(row['plan_expires_at'] as String? ?? ''),
       );

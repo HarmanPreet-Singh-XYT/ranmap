@@ -42,7 +42,7 @@ export function UpdatePasswordForm() {
       />
 
       {error && (
-        <p className="rounded-[var(--radius-sm)] bg-[var(--color-danger-surface)] px-3.5 py-2 text-sm text-[var(--color-danger)]">
+        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-medium text-red-800">
           {error}
         </p>
       )}
@@ -50,7 +50,7 @@ export function UpdatePasswordForm() {
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-[var(--radius-sm)] bg-[var(--color-ink)] px-5 py-2.5 text-sm font-medium text-[var(--color-background)] transition-opacity hover:opacity-85 disabled:opacity-60"
+        className="w-full rounded-full bg-emerald-700 px-6 py-3 text-xs font-bold uppercase tracking-wider text-white shadow-sm transition-all hover:bg-emerald-800 disabled:opacity-60"
       >
         {pending ? "Updating…" : "Update password"}
       </button>

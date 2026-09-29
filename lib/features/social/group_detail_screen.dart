@@ -958,7 +958,7 @@ class _InviteCard extends ConsumerWidget {
 }
 
 /// The convoy's real capacity: the live member count against the free-tier cap,
-/// or "Unlimited" once any member carries Pro.
+/// or the (higher) Pro cap once any member carries Pro.
 ///
 /// Pro is a server check, so it resolves to `false` (the free view) while
 /// loading rather than blocking the card — the count itself is always real.
@@ -984,9 +984,9 @@ class _CapacityCard extends ConsumerWidget {
             trailing: BrandPill(
               bold: true,
               label: isPro
-                  ? '$count members · Unlimited'
+                  ? '$count members · Pro'
                   : '$count / $kFreeGroupMemberLimit members',
-              icon: isPro ? Icons.all_inclusive_rounded : null,
+              icon: isPro ? Icons.verified_rounded : null,
               background: isPro ? BrandColors.accentMint : null,
               foreground: isPro ? BrandColors.onSecondaryFixedVariant : null,
               iconColor: isPro ? BrandColors.primary : null,

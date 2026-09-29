@@ -76,6 +76,20 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
       return;
     }
 
+    // The optional fuel fields are only shown for fuel, but a patched client
+    // (or a stray paste) could still send a negative/absurd value that then
+    // poisons the fuel-efficiency math — so range-check them like the amount.
+    final fuelLiters = double.tryParse(_fuelLitersCtrl.text.trim());
+    final odometerKm = double.tryParse(_odometerCtrl.text.trim());
+    if (fuelLiters != null && (fuelLiters <= 0 || fuelLiters > 10000)) {
+      setState(() => _error = 'Enter a valid number of litres');
+      return;
+    }
+    if (odometerKm != null && (odometerKm < 0 || odometerKm > 10000000)) {
+      setState(() => _error = 'Enter a valid odometer reading');
+      return;
+    }
+
     setState(() {
       _saving = true;
       _error = null;
@@ -87,8 +101,8 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
       amount: validAmount,
       category: _category,
       currency: widget.currency,
-      fuelLiters: double.tryParse(_fuelLitersCtrl.text.trim()),
-      odometerKm: double.tryParse(_odometerCtrl.text.trim()),
+      fuelLiters: fuelLiters,
+      odometerKm: odometerKm,
       note: note.isEmpty ? null : note,
     );
 

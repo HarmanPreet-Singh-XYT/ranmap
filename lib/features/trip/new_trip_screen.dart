@@ -161,6 +161,13 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
   void _addInvitee() {
     final username = _inviteCtrl.text.trim();
     if (username.isEmpty || _invitees.contains(username)) return;
+    // Validate the handle before it becomes a chip, so the user learns it's
+    // malformed now rather than after the trip is created.
+    final validationError = usernameError(username);
+    if (validationError != null) {
+      showAppToast(context, validationError, error: true);
+      return;
+    }
     setState(() {
       _invitees.add(username);
       _inviteCtrl.clear();

@@ -30,14 +30,14 @@ export function SignInForm() {
       <div className="text-right">
         <Link
           href="/forgot-password"
-          className="text-sm text-[var(--color-ink-secondary)] hover:text-[var(--color-ink)]"
+          className="text-xs font-semibold text-slate-500 hover:text-emerald-700"
         >
           Forgot password?
         </Link>
       </div>
 
       {state.error && (
-        <p className="rounded-[var(--radius-sm)] bg-[var(--color-danger-surface)] px-3.5 py-2 text-sm text-[var(--color-danger)]">
+        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-medium text-red-800">
           {state.error}
         </p>
       )}
@@ -45,17 +45,14 @@ export function SignInForm() {
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-[var(--radius-sm)] bg-[var(--color-ink)] px-5 py-2.5 text-sm font-medium text-[var(--color-background)] transition-opacity hover:opacity-85 disabled:opacity-60"
+        className="w-full rounded-full bg-emerald-700 px-6 py-3 text-xs font-bold uppercase tracking-wider text-white shadow-sm transition-all hover:bg-emerald-800 disabled:opacity-60"
       >
         {pending ? "Signing in…" : "Sign in"}
       </button>
 
-      <p className="text-center text-sm text-[var(--color-ink-secondary)]">
+      <p className="text-center text-sm text-slate-600">
         New to Ranmap?{" "}
-        <Link
-          href="/signup"
-          className="font-medium text-[var(--color-ink)] hover:opacity-80"
-        >
+        <Link href="/signup" className="font-semibold text-emerald-700 hover:text-emerald-800">
           Create an account
         </Link>
       </p>

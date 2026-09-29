@@ -1,0 +1,10 @@
+# Secrets and local state must never reach the image.
+.env
+.env.*
+!.env.example
+node_modules
+dist
+npm-debug.log*
+.DS_Store
+.git
+.gitignore

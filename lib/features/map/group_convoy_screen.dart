@@ -75,6 +75,12 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
   Future<void> _toggleSharing(bool on) async {
     final notifier = ref.read(convoyGroupIdProvider.notifier);
     if (on) {
+      // Joining the convoy is an explicit "share me" action, so if the global
+      // sharing switch is off, turn it on too — otherwise the switch would claim
+      // the crew sees you while nothing is actually broadcast.
+      if (!ref.read(appSettingsProvider).shareLocation) {
+        ref.read(appSettingsProvider.notifier).setShareLocation(true);
+      }
       await notifier.enable(widget.groupId);
     } else {
       await notifier.disable();
@@ -264,6 +270,9 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
         widget.groupName;
     final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
     final sharing = ref.watch(convoyGroupIdProvider) == widget.groupId;
+    final globalShare = ref.watch(
+      appSettingsProvider.select((s) => s.shareLocation),
+    );
     final ownPos = ref.watch(devicePositionProvider).valueOrNull;
     final myUid = SupabaseService.currentUser?.id;
 
@@ -289,7 +298,7 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
           bottom: BrandSpace.xl,
         ),
         children: [
-          _sharingCard(sharing, live.length),
+          _sharingCard(sharing, globalShare, live.length),
           const SizedBox(height: BrandSpace.lg),
           BrandSectionHeader(
             icon: Icons.share_location_rounded,
@@ -533,24 +542,30 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
     _CrewState.idle => const BrandPill(label: 'Idle'),
   };
 
-  Widget _sharingCard(bool sharing, int liveCount) {
+  Widget _sharingCard(bool sharing, bool globalShare, int liveCount) {
+    // The switch is only truly "on" when the convoy is joined *and* the global
+    // sharing switch is on — otherwise nothing is broadcast.
+    final effective = sharing && globalShare;
+    final subtitle = !sharing
+        ? 'Turn on to ride together in real time'
+        : globalShare
+        ? 'Your crew can see you live'
+        : 'Sharing paused in Settings — turn it back on to share';
     return BrandCard(
       padding: const EdgeInsets.symmetric(
         horizontal: BrandSpace.md,
         vertical: BrandSpace.xs,
       ),
       child: BrandListRow(
-        icon: sharing
+        icon: effective
             ? Icons.share_location_rounded
             : Icons.location_disabled_rounded,
         iconColor: BrandColors.primary,
         title: 'Share my location',
-        subtitle: sharing
-            ? 'Your crew can see you live'
-            : 'Turn on to ride together in real time',
+        subtitle: subtitle,
         showChevron: false,
         onTap: null,
-        trailing: FSwitch(value: sharing, onChange: _toggleSharing),
+        trailing: FSwitch(value: effective, onChange: _toggleSharing),
       ),
     );
   }

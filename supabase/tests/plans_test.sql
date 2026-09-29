@@ -140,12 +140,12 @@ select lives_ok(
 -- Shared usage meter
 -- ---------------------------------------------------------------------------
 select is(
-  public.consume_usage('00000000-0000-0000-0000-000000000003', 'maps_search', 1, 3600),
+  (select allowed from public.consume_usage('00000000-0000-0000-0000-000000000003', 'maps_search', 1, 3600)),
   true,
   'consume_usage allows the first use'
 );
 select is(
-  public.consume_usage('00000000-0000-0000-0000-000000000003', 'maps_search', 1, 3600),
+  (select allowed from public.consume_usage('00000000-0000-0000-0000-000000000003', 'maps_search', 1, 3600)),
   false,
   'consume_usage blocks once max is reached'
 );

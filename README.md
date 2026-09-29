@@ -101,9 +101,22 @@ server/           # ranmap-server: Node/TS backend for secret-holding operations
    `0017_profile_search.sql`, `0018_service_role_rpc_user.sql`,
    `0019_trip_currency.sql`, `0020_usage_status.sql`,
    `0021_add_usage.sql`, `0022_realtime_trip_locations.sql`,
-   `0023_broadcast_position.sql`, `0024_rate_limit_store.sql` and
-   `0025_usage_rpc_state.sql` (either paste
-   them into the SQL editor in that order, or `supabase db push`). `0025`
+   `0023_broadcast_position.sql`, `0024_rate_limit_store.sql`,
+   `0025_usage_rpc_state.sql`, `0026_group_roles_and_invites.sql`,
+   `0027_group_convoy.sql`, `0028_trip_planning_and_statuses.sql`,
+   `0029_trip_shares.sql`, `0030_service_and_documents.sql`,
+   `0031_support_requests.sql`, `0032_plan_limits_documents_routes.sql`,
+   `0033_pro_fair_use_limits.sql` and
+   `0034_extreme_tier.sql` (either paste
+   them into the SQL editor in that order, or `supabase db push`). `0034`
+   adds the Extreme tier (`plan` gains `'extreme'`; `is_pro` now means *paid* =
+   pro OR extreme, plus `is_extreme`, `group_has_extreme`, and the `*_extreme`
+   `plan_limit` keys); `0033`
+   adds the Pro fair-use ceilings (`*_pro` keys) so Pro is capped rather than
+   unlimited, and raises a distinct `Plan limit reached:` message for a Pro user
+   (vs `Ranmap Pro required:` for a free one); `0032`
+   extends `plan_limit` with `documents`/`route_templates` and adds the
+   triggers capping a free account at one document and one saved route. `0025`
    makes `consume_usage` / `add_usage` return their resulting counter state, so
    the Redis cache can be refreshed in the same round-trip. `0024`
    moves rate-limit buckets into Postgres so they're shared across server
@@ -280,7 +293,11 @@ but have no UPDATE grant on it.
   cost is only known after the model responds, so `requireWithinAllowance`
   checks the cap up front and the route records the real spend with
   `add_usage` afterwards. `GET /plan/usage` reports both, and the app renders a
-  **free-plan usage meter** on the Profile tab.
+  **free-plan usage meter** on the Profile tab. Paid tiers are **metered too**,
+  against a larger fair-use ceiling (`proMax` for Pro, `extremeMax` for Extreme
+  — 5M / 15M AI tokens per 30 days, 2,000 / 5,000 searches per day), so provider
+  spend stays bounded even for subscribers; a paid user who hits their tier's
+  ceiling gets a plain **HTTP 429 `limit_reached`**, never an upgrade paywall.
 - **Shared state, not per-process**: rate-limit buckets, the metered
   allowances, and the plan/membership lookups are served from **Redis** when
   `REDIS_URL` is set, so several `ranmap-server` instances don't multiply a
@@ -304,14 +321,24 @@ but have no UPDATE grant on it.
 - **Gated, travel together**: voice channels (`/voice/token`) are unlocked when
   **any** member of the trip/group is Pro, not just the caller — one subscriber
   covers the whole crew (`trip_has_pro` / `group_has_pro`).
-- **Gated, hard caps** (`0010_plan_limits.sql`, enforced by DB triggers so a
-  modified client can't bypass them): free accounts may keep **3** active trips,
-  pin **25** photos, and groups are capped at **6** members. Raising a member to
-  Pro lifts that group's cap for everyone.
+- **Tiers** (ordered `free` < `pro` < `extreme`; `profiles.plan`):
+  `is_pro` means **paid** (pro OR extreme), so Extreme inherits every Pro gate;
+  `is_extreme` marks the top tier. One paid member still unlocks the whole
+  trip/group.
+- **Gated, hard caps** (`0010_plan_limits.sql` + `0032`/`0033`/`0034`, enforced
+  by DB triggers so a modified client can't bypass them). Free: **3** active
+  trips, **25** photos, **1** document, **1** saved route, groups capped at **6**.
+  Pro raises these to **100** trips, **5,000** photos, **100** documents, **100**
+  saved routes and **100** members; Extreme to **250**, **20,000**, **500**,
+  **500** and **250** respectively. Generous ceilings, not literally unlimited
+  (`0033_pro_fair_use_limits.sql`, `0034_extreme_tier.sql`). Raising one group
+  member to a paid tier lifts that group's cap for everyone.
 - **Gated, display-only**: full trip stats & history.
 - A gate returns **HTTP 402** with `{ code: "premium_required", feature }`, which
-  the client turns into the Ranmap Pro paywall (`showPaywall`); DB cap triggers
-  raise `Ranmap Pro required: …`, which the client maps to the same paywall.
+  the client turns into the Ranmap Pro paywall (`showPaywall`); a paid tier's
+  ceiling returns **HTTP 429** with `{ code: "limit_reached", feature }` (a plain
+  error, not a paywall); DB cap triggers raise `Ranmap Pro required: …` for a free
+  user (mapped to the paywall) or `Plan limit reached: …` for a Pro/Extreme user.
 
 Billing is wired through **RevenueCat** (which wraps StoreKit 2 / Play Billing):
 
@@ -330,6 +357,16 @@ them to a `pro` entitlement with current + default offerings in RevenueCat, set
 the two public keys in `.env` and the two server keys in `server/.env`, and point
 the RevenueCat webhook at `/billing/revenuecat`. With no keys set the app runs
 normally and the paywall reports billing as unavailable.
+
+Recommended products (the paywall reads real store prices, so these are the
+source of truth for what users see — the marketing copy mirrors them):
+**Pro** `pro_monthly` **$4.99 / month** and `pro_annual` **$39.99 / year**;
+**Extreme** `extreme_monthly` **$9.99 / month** and `extreme_annual`
+**$79.99 / year**. Attach Pro to the `pro` entitlement and Extreme to the
+`extreme` entitlement, with a **7-day free trial** on the annual products. The
+client resolves packages by identifier (`pro_annual`, `extreme_monthly`, …).
+Anything shown for "free" on the paywall is derived from `plan_limit()` and the
+metered allowances in `server/src/lib/allowances.ts`, not hard-coded.
 
 ### 5. Firebase (push notifications — optional)
 

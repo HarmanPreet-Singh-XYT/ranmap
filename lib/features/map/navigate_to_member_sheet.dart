@@ -11,6 +11,7 @@ import '../../core/providers/settings_provider.dart';
 import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/units.dart';
+import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_sheet_surface.dart';
 // `LocationSettings` collides with mapbox's; hide it so geolocator's is used.
@@ -110,7 +111,16 @@ class _NavigateToMemberSheetState
       '${widget.destination.lat},${widget.destination.lng}'
       '&travelmode=$_travelMode',
     );
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    // Tell the user when the hand-off doesn't work (no Google Maps handler),
+    // instead of a button that silently does nothing.
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        showAppToast(context, 'Could not open Google Maps.', error: true);
+      }
+    } catch (e) {
+      if (mounted) showAppToast(context, 'Could not open Google Maps.', error: true);
+    }
   }
 
   String _distanceLabel(DistanceUnit unit) {

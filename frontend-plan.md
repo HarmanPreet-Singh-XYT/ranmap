@@ -107,6 +107,21 @@ What that means concretely for the existing server code:
 - Payment method management — deferred to whichever billing provider's
   hosted portal, not custom-built.
 
+**Build status:** done. `/account/billing` reads the real `my_plan()` RPC and
+shows Free/Pro/Extreme + expiry. Checkout uses the RevenueCat Web SDK
+(`@revenuecat/purchases-js`) — `Purchases.configure({ apiKey, appUserId })`
+with the App User ID set to the Supabase user id, then
+`Purchases.getSharedInstance().purchase({ rcPackage })` against the current
+offering's package (`app/(account)/_components/upgrade-button.tsx`). The key
+and package id come from `NEXT_PUBLIC_REVENUECAT_WEB_BILLING_KEY` /
+`NEXT_PUBLIC_REVENUECAT_PRO_PACKAGE_ID`; if the key is unset the button degrades
+to a "subscribe in the app" message instead of failing. Purchases surface
+through the same webhook, and `planSourceFromStore` now maps the `RC_BILLING`
+store to a `web` plan_source. Remaining work to go fully live: fill in the two
+env vars from the RevenueCat dashboard (Web Billing public key + the Pro
+package identifier) and confirm the `store` value RevenueCat sends once a real
+sandbox purchase is made.
+
 ### Design system for phase 1
 
 Port the Flutter brand tokens to web design tokens rather than inventing a

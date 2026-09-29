@@ -1,16 +1,16 @@
 import type { Metadata } from "next";
+import Content from "@/content/legal/terms.mdx";
+import { LegalArticle } from "../_components/legal-article";
 
-export const metadata: Metadata = { title: "Terms of Service" };
+export const metadata: Metadata = {
+  title: "Terms of Service",
+  description: "The terms that govern your use of Ranmap.",
+};
 
 export default function TermsPage() {
   return (
-    <article className="prose max-w-none">
-      <h1 className="text-3xl font-semibold tracking-tight text-[var(--color-ink)]">
-        Terms of Service
-      </h1>
-      <p className="mt-6 text-[var(--color-ink-secondary)]">
-        Placeholder — replace with the actual terms content before launch.
-      </p>
-    </article>
+    <LegalArticle title="Terms of Service" lastUpdated="September 28, 2026">
+      <Content />
+    </LegalArticle>
   );
 }

@@ -11,6 +11,11 @@ String friendlyError(Object error) {
   }
   if (error is AuthException) return error.message;
   if (error is PostgrestException) {
+    // The DB's Pro fair-use ceiling: surface its own message rather than a
+    // generic error. It is NOT a paywall — looksPremiumRequired only matches the
+    // free-cap 'Ranmap Pro required' marker — so a paying user past their
+    // ceiling should read why, not "something went wrong".
+    if (error.message.startsWith('Plan limit reached')) return error.message;
     switch (error.code) {
       case '23505':
         return 'That already exists — try a different one.';

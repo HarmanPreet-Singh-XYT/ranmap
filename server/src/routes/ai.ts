@@ -3,19 +3,23 @@ import { Router } from "express";
 import { aiAssistantAllowance } from "../lib/allowances.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import { env } from "../lib/env.js";
-import { fail } from "../lib/errors.js";
+import { fail, notConfigured } from "../lib/errors.js";
 import { assistantTools, runTool } from "../lib/ai-tools.js";
-import { isPro } from "../lib/plan-store.js";
+import { limitReached, premiumRequired } from "../lib/plans.js";
+import { planTier } from "../lib/plan-store.js";
 import { rateLimit } from "../lib/rate-limit.js";
 import { supabaseAdmin } from "../lib/supabase.js";
-import { addUsage, getUsage } from "../lib/usage.js";
+import { addUsage, getUsage, releaseUsage, reserveUsage } from "../lib/usage.js";
 import { requireWithinAllowance } from "../middleware/require-plan.js";
 import { requireAuth } from "../middleware/require-auth.js";
 
 // The Gemini Interactions API (GA since June 2026). Calls are stateless
 // (`store: false`) and the conversation history is re-sent each round, so no
 // chat content is retained on Google's side beyond the request itself.
-const ai = new GoogleGenAI({ apiKey: env.geminiApiKey });
+//
+// Optional integration: without a key the route returns 503 (see the handler),
+// matching every other provider instead of refusing to boot the server.
+const ai = env.geminiApiKey ? new GoogleGenAI({ apiKey: env.geminiApiKey }) : null;
 
 const SYSTEM_PROMPT =
   "You are the Ranmap trip assistant, helping a group plan a road trip. " +
@@ -41,6 +45,41 @@ const MAX_TOOL_USES_PER_TURN = 6;
 const MAX_TOOL_ROUNDS = 4;
 const MAX_OUTPUT_TOKENS = 1024;
 
+// Hard cap on a single upstream Gemini call, so a stalled request can't pin the
+// connection (the server's requestTimeout only bounds the request *body* from
+// the client, not the upstream response).
+const GEMINI_TIMEOUT_MS = 30_000;
+
+// Tokens reserved up front against the allowance before the model runs: the
+// output budget for every possible round plus the input window. The route
+// refunds the unused part once the real spend is known, so a normal turn costs
+// its actual tokens — the reservation only bounds concurrency.
+const AI_RESERVE_TOKENS = MAX_OUTPUT_TOKENS * MAX_TOOL_ROUNDS + MAX_CONTENT_CHARS;
+
+/** The allowance ceiling for a tier (mirrors the middleware ladder). */
+function aiLimitForTier(tier: string): number {
+  if (tier === "extreme") return aiAssistantAllowance.extremeMax;
+  if (tier === "pro") return aiAssistantAllowance.proMax;
+  return aiAssistantAllowance.max;
+}
+
+/** Rejects after [ms]; used to bound an upstream call that has no timeout. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`upstream timed out after ${ms}ms`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // The allowance is metered in tokens, so the cap check is a read up front
@@ -62,10 +101,14 @@ aiRouter.post(
     aiAssistantAllowance.feature,
     {
       max: aiAssistantAllowance.max,
+      proMax: aiAssistantAllowance.proMax,
+      extremeMax: aiAssistantAllowance.extremeMax,
       windowMs: aiAssistantAllowance.windowMs,
       message: aiAssistantAllowance.message,
+      proMessage: aiAssistantAllowance.proMessage,
+      extremeMessage: aiAssistantAllowance.extremeMessage,
     },
-    isPro,
+    planTier,
     getUsage,
   ),
   rateLimit({
@@ -76,6 +119,10 @@ aiRouter.post(
   }),
   asyncHandler(async (req, res) => {
     const userId = req.userId;
+    if (!ai) {
+      notConfigured(res, "The AI assistant");
+      return;
+    }
     const content = String(req.body?.content ?? "").trim();
     if (!content) {
       res.status(400).json({ error: "Missing content" });
@@ -148,6 +195,30 @@ aiRouter.post(
       return;
     }
 
+    // Atomically reserve an upper-bound token cost before the model runs. The
+    // read-only `requireWithinAllowance` check above can be beaten by concurrent
+    // requests; the reservation is row-locked, so they can't all slip through.
+    const tier = await planTier(userId);
+    const reserved = await reserveUsage(
+      userId,
+      aiAssistantAllowance.feature,
+      AI_RESERVE_TOKENS,
+      aiLimitForTier(tier),
+      AI_WINDOW_SECONDS,
+    );
+    if (!reserved) {
+      if (tier === "free") {
+        premiumRequired(res, aiAssistantAllowance.feature, aiAssistantAllowance.message);
+      } else {
+        limitReached(
+          res,
+          aiAssistantAllowance.feature,
+          tier === "extreme" ? aiAssistantAllowance.extremeMessage : aiAssistantAllowance.proMessage,
+        );
+      }
+      return;
+    }
+
     try {
       const { text: rawReply, executed, tokens } = await converseWithTools(
         toHistorySteps(history.reverse()),
@@ -155,14 +226,17 @@ aiRouter.post(
       );
       const assistantText = rawReply.trim() || "Sorry, I didn't have a reply for that.";
 
-      // Record the real token spend (input + output across every call in the
-      // turn). Best-effort: a metering failure must not fail the reply.
-      if (tokens > 0) {
-        try {
-          await addUsage(userId, aiAssistantAllowance.feature, tokens, AI_WINDOW_SECONDS);
-        } catch (usageError) {
-          console.error("ai: failed to record token usage:", usageError);
+      // Settle the reservation against the real spend: refund the unused part,
+      // or add the overrun. Best-effort: a metering failure must not fail the
+      // reply.
+      try {
+        if (tokens >= AI_RESERVE_TOKENS) {
+          await addUsage(userId, aiAssistantAllowance.feature, tokens - AI_RESERVE_TOKENS, AI_WINDOW_SECONDS);
+        } else {
+          await releaseUsage(userId, aiAssistantAllowance.feature, AI_RESERVE_TOKENS - tokens, AI_WINDOW_SECONDS);
         }
+      } catch (usageError) {
+        console.error("ai: failed to settle token usage:", usageError);
       }
 
       const { error: insertAssistantMsgError } = await supabaseAdmin.from("ai_messages").insert({
@@ -178,6 +252,13 @@ aiRouter.post(
 
       res.json({ conversationId, reply: assistantText, tools: executed, tokens });
     } catch (err) {
+      // The turn produced nothing, so refund the whole reservation rather than
+      // charging the user for a failed call.
+      try {
+        await releaseUsage(userId, aiAssistantAllowance.feature, AI_RESERVE_TOKENS, AI_WINDOW_SECONDS);
+      } catch (refundError) {
+        console.error("ai: failed to refund reservation:", refundError);
+      }
       // The user's message was already persisted above, so the client can
       // safely re-render the conversation (including that message) rather
       // than treating this as if nothing was saved.
@@ -242,27 +323,43 @@ async function converseWithTools(
   let tokens = 0;
   const executed: ToolExecution[] = [];
 
+  // The caller already guards on `ai`, but narrow it here too so the module's
+  // optional client can't be dereferenced null.
+  const client = ai;
+  if (!client) {
+    throw new Error("Gemini is not configured");
+  }
+
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const interaction = await ai.interactions.create({
-      model: env.geminiModel,
-      input: steps,
-      system_instruction: SYSTEM_PROMPT,
-      // The built-in Google Search tool plus our custom functions. Combining
-      // them is a Gemini 3 feature and requires `validated` tool choice.
-      tools: assistantTools,
-      generation_config: {
-        tool_choice: "validated",
-        max_output_tokens: MAX_OUTPUT_TOKENS,
-      },
-      store: false,
-    });
+    const interaction = await withTimeout(
+      client.interactions.create({
+        model: env.geminiModel,
+        input: steps,
+        system_instruction: SYSTEM_PROMPT,
+        // The built-in Google Search tool plus our custom functions. Combining
+        // them is a Gemini 3 feature and requires `validated` tool choice.
+        tools: assistantTools,
+        generation_config: {
+          tool_choice: "validated",
+          max_output_tokens: MAX_OUTPUT_TOKENS,
+        },
+        store: false,
+      }),
+      GEMINI_TIMEOUT_MS,
+    );
 
     tokens += interaction.usage?.total_tokens ?? 0;
     steps = [...steps, ...interaction.steps];
 
-    const toolUses = interaction.steps
-      .filter((step): step is Interactions.FunctionCallStep => step.type === "function_call")
-      .slice(0, MAX_TOOL_USES_PER_TURN);
+    // Budget is per *turn*, not per round: subtract what earlier rounds already
+    // executed so a multi-round turn can't fan out to MAX_TOOL_USES_PER_TURN ×
+    // MAX_TOOL_ROUNDS writes.
+    const remaining = MAX_TOOL_USES_PER_TURN - executed.length;
+    const toolUses = remaining > 0
+      ? interaction.steps
+          .filter((step): step is Interactions.FunctionCallStep => step.type === "function_call")
+          .slice(0, remaining)
+      : [];
 
     if (toolUses.length === 0) {
       return { text: interaction.output_text ?? "", executed, tokens };
