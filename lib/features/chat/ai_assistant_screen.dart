@@ -1,5 +1,9 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants/defaults.dart';
 import '../../core/theme/brand_palette.dart';
@@ -207,16 +211,28 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
                   return Center(
                     child: SingleChildScrollView(
                       child: BrandEmptyState(
-                        imageAsset: 'assets/images/scenic/ai_copilot_scenic.jpg',
+                        imageAsset:
+                            'assets/images/scenic/ai_copilot_scenic.jpg',
                         icon: Icons.auto_awesome_rounded,
                         title: 'RanMap AI Co-Pilot',
-                        message:
-                            'Your intelligent route scout. Tap a prompt below or ask anything about stops, EV range, and convoy routing.',
+                        message: 'Your intelligent route scout. Tap a prompt below or ask anything about stops, EV range, and convoy routing.',
                         quickChips: [
-                          _promptChip('☕ Coffee stops ahead', Icons.local_cafe_rounded),
-                          _promptChip('⚡ EV chargers on route', Icons.ev_station_rounded),
-                          _promptChip('🌄 Find scenic overlooks', Icons.landscape_rounded),
-                          _promptChip('📍 Save a waypoint', Icons.bookmark_add_rounded),
+                          _promptChip(
+                            '☕ Coffee stops ahead',
+                            Icons.local_cafe_rounded,
+                          ),
+                          _promptChip(
+                            '⚡ EV chargers on route',
+                            Icons.ev_station_rounded,
+                          ),
+                          _promptChip(
+                            '🌄 Find scenic overlooks',
+                            Icons.landscape_rounded,
+                          ),
+                          _promptChip(
+                            '📍 Save a waypoint',
+                            Icons.bookmark_add_rounded,
+                          ),
                         ],
                       ),
                     ),
@@ -226,22 +242,14 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
                 return ListView.builder(
                   controller: _scrollController,
                   padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
-                  itemCount: all.length,
-                  itemBuilder: (context, index) =>
-                      _MessageBubble(message: all[index]),
+                  itemCount: all.length + (_sending ? 1 : 0),
+                  itemBuilder: (context, index) => index == all.length
+                      ? const _TypingBubble()
+                      : _MessageBubble(message: all[index]),
                 );
               },
             ),
           ),
-          if (_sending)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: BrandSpace.sm),
-              child: SizedBox(
-                height: 18,
-                width: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            ),
           // One-tap tools: each drops a real instruction into the composer, so
           // the assistant runs the matching tool (add_stop / save_place /
           // schedule_trip) and returns a receipt for what it actually did.
@@ -405,15 +413,138 @@ class _MessageBubble extends StatelessWidget {
               color: bg,
               borderRadius: BrandRadii.cardRadius,
             ),
-            child: Text(
-              message.content,
-              style: BrandText.bodyMd.copyWith(color: fg),
-            ),
+            child: isUser
+                ? Text(
+                    message.content,
+                    style: BrandText.bodyMd.copyWith(color: fg),
+                  )
+                : _MarkdownBody(data: message.content, color: fg),
           ),
           // What the assistant actually did this turn (real tool executions).
           for (final receipt in message.tools)
             _ToolReceiptCard(receipt: receipt),
         ],
+      ),
+    );
+  }
+}
+
+/// The assistant's pending reply: an assistant-style bubble with three
+/// pulsing dots, shown in the message list while a response is in flight.
+class _TypingBubble extends StatefulWidget {
+  const _TypingBubble();
+
+  @override
+  State<_TypingBubble> createState() => _TypingBubbleState();
+}
+
+class _TypingBubbleState extends State<_TypingBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1200),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: BrandSpace.xs),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: BrandColors.surfaceContainerLow,
+          borderRadius: BrandRadii.cardRadius,
+        ),
+        child: AnimatedBuilder(
+          animation: _controller,
+          builder: (context, _) => Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var i = 0; i < 3; i++) ...[
+                if (i > 0) const SizedBox(width: 5),
+                Opacity(
+                  opacity:
+                      0.3 +
+                      0.7 *
+                          math.max(
+                            0,
+                            math.sin(
+                              (_controller.value - i * 0.15) * 2 * math.pi,
+                            ),
+                          ),
+                  child: Container(
+                    height: 8,
+                    width: 8,
+                    decoration: BoxDecoration(
+                      color: BrandColors.textMuted,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Renders the assistant's markdown (bold, lists, headings, code, links) in the
+/// bubble's text colour.
+class _MarkdownBody extends StatelessWidget {
+  final String data;
+  final Color color;
+
+  const _MarkdownBody({required this.data, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final body = BrandText.bodyMd.copyWith(color: color);
+    final heading = BrandText.weight(
+      BrandText.titleSm,
+      700,
+    ).copyWith(color: color);
+    return MarkdownBody(
+      data: data,
+      selectable: true,
+      onTapLink: (_, href, _) {
+        final uri = href == null ? null : Uri.tryParse(href);
+        if (uri != null) launchUrl(uri, mode: LaunchMode.externalApplication);
+      },
+      styleSheet: MarkdownStyleSheet(
+        p: body,
+        strong: body.copyWith(fontWeight: FontWeight.w700),
+        em: body.copyWith(fontStyle: FontStyle.italic),
+        h1: heading,
+        h2: heading,
+        h3: heading,
+        listBullet: body,
+        a: body.copyWith(
+          decoration: TextDecoration.underline,
+          color: BrandColors.primary,
+        ),
+        code: body.copyWith(
+          fontFamily: 'monospace',
+          backgroundColor: color.withValues(alpha: 0.1),
+        ),
+        codeblockDecoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        blockquoteDecoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(color: color.withValues(alpha: 0.4), width: 3),
+          ),
+        ),
+        pPadding: EdgeInsets.zero,
       ),
     );
   }

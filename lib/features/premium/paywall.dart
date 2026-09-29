@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../core/theme/brand_palette.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 
@@ -85,7 +88,7 @@ Future<void> showPaywall(
   return showFSheet(
     context: context,
     side: FLayout.btt,
-    mainAxisMaxRatio: null,
+    mainAxisMaxRatio: 0.9,
     builder: (_) => _PaywallSheet(feature: feature),
   );
 }
@@ -141,45 +144,29 @@ class _PaywallSheetState extends ConsumerState<_PaywallSheet> {
   Widget build(BuildContext context) {
     final c = NavColors.of(context);
     return BrandSheetSurface(
-      handle: false,
       padding: EdgeInsets.zero,
       child: SingleChildScrollView(
         padding: EdgeInsets.fromLTRB(
           24,
-          16,
+          8,
           24,
-          24 + MediaQuery.viewInsetsOf(context).bottom,
+          16 + MediaQuery.viewInsetsOf(context).bottom,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: c.border,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(20),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [c.activeRoute, const Color(0xFF7C3AED)],
-                ),
+                color: BrandColors.primaryContainer,
               ),
               child: Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.workspace_premium_rounded,
-                    color: Colors.white,
+                    color: BrandColors.onPrimary,
                     size: 30,
                   ),
                   const SizedBox(width: 12),
@@ -187,10 +174,10 @@ class _PaywallSheetState extends ConsumerState<_PaywallSheet> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           'Ranmap Pro',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: BrandColors.onPrimary,
                             fontSize: 22,
                             fontWeight: FontWeight.w800,
                           ),
@@ -199,7 +186,7 @@ class _PaywallSheetState extends ConsumerState<_PaywallSheet> {
                         Text(
                           'You reached a Pro limit for ${widget.feature.label}.',
                           style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.9),
+                            color: BrandColors.onPrimary.withValues(alpha: 0.9),
                           ),
                         ),
                       ],
@@ -215,7 +202,15 @@ class _PaywallSheetState extends ConsumerState<_PaywallSheet> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(benefit.icon, color: c.activeRoute),
+                    Container(
+                      height: 36,
+                      width: 36,
+                      decoration: BoxDecoration(
+                        color: c.activeRoute.withValues(alpha: 0.12),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(benefit.icon, color: c.activeRoute, size: 20),
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(

@@ -252,8 +252,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
     if (post != null) showMapPostViewerSheet(context, post);
   }
 
-  Future<void> _cycleStyle() async {
-    setState(() => _style = _style.next);
+  Future<void> _setStyle(RanmapMapStyle style) async {
+    if (style == _style) return;
+    setState(() => _style = style);
     ref.read(appSettingsProvider.notifier).setMapStyleId(_style.name);
     await _mapKey.currentState?.setStyle(_style);
   }
@@ -268,6 +269,147 @@ class _MapScreenState extends ConsumerState<MapScreen>
     setState(() => _terrain = !_terrain);
     ref.read(appSettingsProvider.notifier).setMapTerrain(_terrain);
     await _mapKey.currentState?.setTerrain(_terrain);
+  }
+
+  /// The single "layers" entry point: basemap type, 3D/terrain detail, and the
+  /// occasional map actions, kept off the landing screen until asked for.
+  Future<void> _showMapOptions(double deviceLat, double deviceLng) {
+    return showFSheet<void>(
+      context: context,
+      side: FLayout.btt,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheet) {
+          final c = NavColors.of(sheetContext);
+
+          Widget sectionTitle(String text) => Padding(
+            padding: const EdgeInsets.only(bottom: BrandSpace.sm),
+            child: Text(
+              text,
+              style: BrandText.weight(
+                BrandText.titleSm,
+                700,
+              ).copyWith(color: BrandColors.textHeadline),
+            ),
+          );
+
+          Widget styleTile(RanmapMapStyle style) {
+            final selected = style == _style;
+            return Expanded(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () {
+                  _setStyle(style);
+                  setSheet(() {});
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: selected ? c.activeRoute : c.mutedForeground,
+                      width: selected ? 2 : 1,
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        style.icon,
+                        color: selected ? c.activeRoute : c.foreground,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(style.label, style: BrandText.labelSm),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }
+
+          Widget toggleTile(
+            IconData icon,
+            String label,
+            bool value,
+            Future<void> Function() onToggle,
+          ) {
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(icon, color: value ? c.activeRoute : c.foreground),
+              title: Text(label),
+              trailing: Switch(
+                value: value,
+                onChanged: (_) {
+                  onToggle();
+                  setSheet(() {});
+                },
+              ),
+            );
+          }
+
+          Widget actionTile(IconData icon, String label, VoidCallback onTap) {
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(icon, color: c.foreground),
+              title: Text(label),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                onTap();
+              },
+            );
+          }
+
+          return BrandSheetSurface(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  sectionTitle('Map type'),
+                  Row(
+                    children: [
+                      for (final style in RanmapMapStyle.values) ...[
+                        styleTile(style),
+                        if (style != RanmapMapStyle.values.last)
+                          const SizedBox(width: BrandSpace.sm),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: BrandSpace.lg),
+                  sectionTitle('Map details'),
+                  toggleTile(
+                    Icons.apartment_rounded,
+                    '3D buildings',
+                    _threeD,
+                    _toggleThreeD,
+                  ),
+                  toggleTile(
+                    Icons.landscape_rounded,
+                    'Terrain',
+                    _terrain,
+                    _toggleTerrain,
+                  ),
+                  const SizedBox(height: BrandSpace.sm),
+                  actionTile(
+                    Icons.bookmark_add_outlined,
+                    'Save this place',
+                    () => _savePlace(deviceLat, deviceLng),
+                  ),
+                  actionTile(
+                    Icons.download_for_offline_outlined,
+                    'Offline maps',
+                    () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const OfflineMapsScreen(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _searchNearby(Position center) async {
@@ -526,46 +668,14 @@ class _MapScreenState extends ConsumerState<MapScreen>
                         _mapKey.currentState?.flyTo(here, zoom: kFollowZoom),
                   ),
                   _MapControl(
-                    icon: _style.icon,
-                    tooltip: _style.label,
-                    onTap: _cycleStyle,
-                  ),
-                  _MapControl(
-                    icon: _threeD
-                        ? Icons.apartment_rounded
-                        : Icons.location_city_outlined,
-                    tooltip: _threeD
-                        ? 'Hide 3D buildings'
-                        : 'Show 3D buildings',
-                    onTap: _toggleThreeD,
-                    active: _threeD,
-                  ),
-                  _MapControl(
-                    icon: _terrain
-                        ? Icons.landscape_rounded
-                        : Icons.landscape_outlined,
-                    tooltip: _terrain ? 'Hide terrain' : 'Show terrain',
-                    onTap: _toggleTerrain,
-                    active: _terrain,
+                    icon: Icons.layers_rounded,
+                    tooltip: 'Map options',
+                    onTap: () => _showMapOptions(deviceLat, deviceLng),
                   ),
                   _MapControl(
                     icon: Icons.search_rounded,
                     tooltip: 'Search nearby places',
                     onTap: () => _searchNearby(here),
-                  ),
-                  _MapControl(
-                    icon: Icons.bookmark_add_outlined,
-                    tooltip: 'Save this place',
-                    onTap: () => _savePlace(deviceLat, deviceLng),
-                  ),
-                  _MapControl(
-                    icon: Icons.download_for_offline_outlined,
-                    tooltip: 'Offline maps',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const OfflineMapsScreen(),
-                      ),
-                    ),
                   ),
                   if (activeTrip != null)
                     _MapControl(

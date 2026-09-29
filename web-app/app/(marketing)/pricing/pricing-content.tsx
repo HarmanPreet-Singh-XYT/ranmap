@@ -203,6 +203,18 @@ export function PricingContent() {
                 ? `/ mo, billed $${plan.annualPrice}/yr`
                 : "/ month";
 
+            // Only basic plans have a monthly list price to strike through, and
+            // only when annual is genuinely cheaper than paying monthly.
+            const showStrike =
+              isAnnual &&
+              plan.monthlyPrice > 0 &&
+              plan.annualPrice / 12 < plan.monthlyPrice;
+            const savePercent = showStrike
+              ? Math.round(
+                  (1 - plan.annualPrice / (plan.monthlyPrice * 12)) * 100,
+                )
+              : 0;
+
             return (
               <div
                 key={plan.id}
@@ -222,13 +234,23 @@ export function PricingContent() {
                   <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-800">
                     {plan.name}
                   </span>
-                  <div className="mt-3 flex items-baseline gap-2">
+                  <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    {showStrike && (
+                      <span className="text-lg font-semibold text-slate-400 line-through decoration-slate-400/80">
+                        ${plan.monthlyPrice}
+                      </span>
+                    )}
                     <span className="font-display text-4xl font-extrabold text-slate-900">
                       {price}
                     </span>
                     <span className="text-xs font-medium text-slate-500">
                       {billingPeriod}
                     </span>
+                    {showStrike && (
+                      <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-emerald-800">
+                        Save {savePercent}%
+                      </span>
+                    )}
                   </div>
                   <p className="mt-3 text-xs text-slate-600 leading-relaxed min-h-[48px]">
                     {plan.description}

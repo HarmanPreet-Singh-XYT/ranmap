@@ -380,6 +380,7 @@ class TripDetailScreen extends ConsumerWidget {
           Expanded(
             child: FTabs(
               expands: true,
+              scrollable: true,
               children: [
                 FTabEntry(
                   label: const Text('Stats'),
@@ -475,8 +476,7 @@ class _StatsTab extends ConsumerWidget {
           child: BrandEmptyState(
             icon: Icons.workspace_premium_rounded,
             title: 'Trip stats are a Ranmap Pro feature.',
-            message:
-                'Unlock live distance, speed, duration and fuel analysis for every trip.',
+            message: 'Unlock live distance, speed, duration and fuel analysis for every trip.',
             tint: BrandColors.accentPeach,
             action: BrandPrimaryButton(
               label: 'Upgrade to Pro',

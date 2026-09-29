@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowRight, Menu, X } from "lucide-react";
+import { ActiveLink } from "./active-link";
 
 interface NavLink {
   href: string;
@@ -46,14 +47,14 @@ export function MobileNav({ links }: { links: NavLink[] }) {
         >
           <nav className="mx-auto flex max-w-7xl flex-col px-5 py-3 sm:px-8">
             {links.map((link) => (
-              <Link
+              <ActiveLink
                 key={link.href}
                 href={link.href}
-                onClick={() => setOpen(false)}
+                label={link.label}
+                onNavigate={() => setOpen(false)}
                 className="border-b border-[#E6E3DA]/70 py-3 text-sm font-semibold text-slate-700 transition-colors last:border-b-0 hover:text-emerald-700"
-              >
-                {link.label}
-              </Link>
+                activeClassName="text-emerald-700"
+              />
             ))}
             <Link
               href="/#download"

@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Suspense } from "react";
 import { createClient } from "../../lib/supabase/server";
+import { ActiveLink } from "./active-link";
 import { MobileNav } from "./mobile-nav";
 
 const marketingLinks = [
@@ -41,13 +42,13 @@ export function SiteHeader() {
 
         <nav className="hidden items-center gap-8 md:flex">
           {marketingLinks.map((link) => (
-            <Link
+            <ActiveLink
               key={link.href}
               href={link.href}
-              className="text-sm font-semibold text-slate-600 transition-colors hover:text-emerald-700"
-            >
-              {link.label}
-            </Link>
+              label={link.label}
+              className="relative text-sm font-semibold text-slate-600 transition-colors hover:text-emerald-700"
+              activeClassName="text-emerald-700 after:absolute after:-bottom-1.5 after:left-0 after:h-0.5 after:w-full after:rounded-full after:bg-emerald-600 after:content-['']"
+            />
           ))}
         </nav>
 
