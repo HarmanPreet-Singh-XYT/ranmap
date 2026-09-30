@@ -14,7 +14,7 @@ import 'app_toast.dart';
 class LegalConsentText extends StatefulWidget {
   const LegalConsentText({
     super.key,
-    this.leadIn = "By continuing you agree to RanMap's ",
+    this.leadIn = "By continuing you agree to Ranmap's ",
     this.connector = ' & ',
     this.textAlign = TextAlign.center,
   });
@@ -61,39 +61,21 @@ class _LegalConsentTextState extends State<LegalConsentText> {
       fontWeight: FontWeight.w600,
     );
 
-    final terms = Env.termsUrl;
-    final privacy = Env.privacyUrl;
-
-    // No configured URLs → keep the plain (still honest) sentence.
-    if (terms == null && privacy == null) {
-      return Text(
-        '${widget.leadIn}Terms of Service${widget.connector}Privacy Policy.',
-        textAlign: widget.textAlign,
-        style: base,
-      );
-    }
-
     return Text.rich(
       TextSpan(
         children: [
           TextSpan(text: widget.leadIn, style: base),
-          if (terms != null)
-            TextSpan(
-              text: 'Terms of Service',
-              style: link,
-              recognizer: _tap(terms),
-            )
-          else
-            TextSpan(text: 'Terms of Service', style: base),
+          TextSpan(
+            text: 'Terms of Service',
+            style: link,
+            recognizer: _tap(Env.termsUrl),
+          ),
           TextSpan(text: widget.connector, style: base),
-          if (privacy != null)
-            TextSpan(
-              text: 'Privacy Policy',
-              style: link,
-              recognizer: _tap(privacy),
-            )
-          else
-            TextSpan(text: 'Privacy Policy', style: base),
+          TextSpan(
+            text: 'Privacy Policy',
+            style: link,
+            recognizer: _tap(Env.privacyUrl),
+          ),
           TextSpan(text: '.', style: base),
         ],
       ),

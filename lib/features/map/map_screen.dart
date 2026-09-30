@@ -22,6 +22,7 @@ import '../../core/util/error_text.dart';
 import '../../core/util/geo_distance.dart';
 import '../../core/util/units.dart';
 import '../../core/util/validation.dart';
+import '../../core/providers/app_prefs_provider.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/avatar_view.dart';
@@ -55,6 +56,7 @@ import 'map_post_viewer_sheet.dart';
 import 'nearby_places_sheet.dart';
 import 'navigate_to_member_sheet.dart';
 import 'offline_maps_screen.dart';
+import 'place_details_sheet.dart';
 import 'saved_place_providers.dart';
 import 'saved_places_screen.dart';
 
@@ -512,13 +514,18 @@ class _MapScreenState extends ConsumerState<MapScreen>
   Future<void> _searchNearby(Position center) async {
     // Offer "search along the route" when the active trip has a planned route.
     final polyline = ref.read(activeTripProvider).valueOrNull?.routePolyline;
-    final place = await showNearbyPlacesSheet(
+    final selection = await showNearbyPlacesSheet(
       context,
       center: center,
       routePolyline: (polyline == null || polyline.isEmpty) ? null : polyline,
     );
-    if (place == null || !mounted) return;
-    await _selectPlace(place);
+    if (selection == null || !mounted) return;
+    await _selectPlace(selection.place);
+    // The user asked for directions from the details sheet — start the in-app
+    // route now (the card also offers a Directions button).
+    if (selection.startDirections && mounted) {
+      await _previewDirections(center.lat.toDouble(), center.lng.toDouble());
+    }
   }
 
   /// Selects [place] (from the nearby list, a tapped POI, or a long-press) and
@@ -737,6 +744,25 @@ class _MapScreenState extends ConsumerState<MapScreen>
       if (mounted && token == _previewToken) {
         setState(() => _previewLoading = false);
       }
+    }
+  }
+
+  /// Whether a selected place has something Google can resolve — a dropped pin
+  /// or an unnamed POI would only spend a search on a garbage text query.
+  bool _canShowDetails(NearbyPlace place) =>
+      !place.placeId.startsWith('pin:') &&
+      place.name.isNotEmpty &&
+      place.name != 'Place' &&
+      place.name != 'Dropped pin';
+
+  /// Opens the rich details sheet for a place already selected on the map
+  /// (a tapped POI or dropped pin), routing to it if the user asks.
+  Future<void> _openPlaceDetails(NearbyPlace place, double lat, double lng) async {
+    if (!_canShowDetails(place)) return;
+    final action = await showPlaceDetailsSheet(context, place);
+    if (!mounted || action == null) return;
+    if (action == PlaceDetailsAction.directions) {
+      await _previewDirections(lat, lng);
     }
   }
 
@@ -1666,42 +1692,57 @@ class _MapScreenState extends ConsumerState<MapScreen>
       children: [
         Row(
           children: [
-            Container(
-              height: 38,
-              width: 38,
-              decoration: BoxDecoration(
-                color: BrandColors.secondaryFixed.withValues(alpha: 0.5),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.place_rounded,
-                color: BrandColors.primary,
-                size: 20,
-              ),
-            ),
-            const SizedBox(width: 12),
+            // Tapping the name opens the same rich details sheet the nearby
+            // search shows, so a tapped POI can surface photos/contact info —
+            // only when there's a real name for Google to resolve.
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    place.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: BrandText.weight(
-                      BrandText.titleSm,
-                      700,
-                    ).copyWith(color: BrandColors.textHeadline),
-                  ),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: BrandText.bodySm.copyWith(
-                      color: BrandColors.textMuted,
+              child: InkWell(
+                borderRadius: BrandRadii.cardRadius,
+                onTap: _canShowDetails(place)
+                    ? () => _openPlaceDetails(place, lat, lng)
+                    : null,
+                child: Row(
+                  children: [
+                    Container(
+                      height: 38,
+                      width: 38,
+                      decoration: BoxDecoration(
+                        color: BrandColors.secondaryFixed.withValues(alpha: 0.5),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.place_rounded,
+                        color: BrandColors.primary,
+                        size: 20,
+                      ),
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            place.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: BrandText.weight(
+                              BrandText.titleSm,
+                              700,
+                            ).copyWith(color: BrandColors.textHeadline),
+                          ),
+                          Text(
+                            subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: BrandText.bodySm.copyWith(
+                              color: BrandColors.textMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             IconButton(
@@ -2289,6 +2330,33 @@ class _MapScreenState extends ConsumerState<MapScreen>
   }
 }
 
+/// Shows the Google Play prominent disclosure (once) and then raises the OS
+/// location prompt. Kept apart from the provider so the prompt is only ever
+/// triggered by an explicit user tap, never on first watch.
+Future<void> _requestLocationPermission(
+  BuildContext context,
+  WidgetRef ref,
+) async {
+  final prefs = ref.read(appPrefsProvider);
+  if (!prefs.locationDisclosureSeen) {
+    final agreed = await showAppConfirmDialog(
+      context,
+      title: 'Share your location?',
+      message:
+          'Ranmap shares your live location with the members of your active '
+          'trip or group so they can see you on the map and get safe-distance '
+          'alerts. While a trip or convoy is active it keeps sharing in the '
+          'background. Sharing stops when you leave, and you can pause it any '
+          'time in Settings.',
+      confirmLabel: 'Continue',
+    );
+    if (!agreed || !context.mounted) return;
+    await prefs.markLocationDisclosureSeen();
+  }
+  await Geolocator.requestPermission();
+  ref.invalidate(locationPermissionProvider);
+}
+
 class _LocationDeniedView extends ConsumerWidget {
   const _LocationDeniedView({required this.access});
 
@@ -2344,9 +2412,9 @@ class _LocationDeniedView extends ConsumerWidget {
                       // back; re-requesting here would silently no-op.
                       unawaited(Geolocator.openAppSettings());
                     } else {
-                      // Re-request: a plain denial can prompt again rather than
-                      // sending the user to Settings.
-                      ref.invalidate(locationPermissionProvider);
+                      // User-initiated: show the Play-required background-
+                      // location disclosure, then raise the OS prompt.
+                      unawaited(_requestLocationPermission(context, ref));
                     }
                   },
                   child: Text(

@@ -31,6 +31,7 @@ import '../premium/manage_subscription.dart';
 import '../premium/premium_providers.dart';
 import '../profile/edit_profile_screen.dart';
 import 'change_credential_screen.dart';
+import 'blocked_accounts_screen.dart';
 import 'settings_providers.dart';
 
 /// App settings: preferences, notifications, account, privacy, data and about —
@@ -362,6 +363,17 @@ class SettingsScreen extends ConsumerWidget {
                     onTap: () => _editEmergencyContact(context, ref),
                   );
                 },
+              ),
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: Icons.block_rounded,
+                title: 'Blocked accounts',
+                subtitle: 'People who can\'t message or add you',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const BlockedAccountsScreen(),
+                  ),
+                ),
               ),
             ],
           ),

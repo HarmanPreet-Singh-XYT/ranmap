@@ -22,7 +22,7 @@ export default async function AccountPage() {
   const { data: profile } = user
     ? await supabase
         .from("profiles")
-        .select("username, display_name, avatar_id")
+        .select("username, display_name, avatar_id, vehicle_type")
         .eq("id", user.id)
         .single()
     : { data: null };
@@ -41,6 +41,7 @@ export default async function AccountPage() {
               username={profile.username}
               displayName={profile.display_name}
               avatarId={profile.avatar_id ?? "default"}
+              vehicleType={profile.vehicle_type ?? "car"}
             />
           ) : (
             <p className="text-sm text-muted-foreground">

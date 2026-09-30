@@ -11,6 +11,7 @@ import '../../core/widgets/app_spinner.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_sheet_surface.dart';
+import '../../core/widgets/legal_consent_text.dart';
 import 'premium_providers.dart';
 import 'premium_purchaser.dart';
 import 'revenuecat.dart';
@@ -34,6 +35,7 @@ enum PremiumFeature {
   aiAssistant('ai_assistant', 'AI assistant'),
   voice('voice', 'voice channels'),
   mapsSearch('maps_search', 'route & place search'),
+  placePhotos('place_photos', 'place photos'),
   history('history', 'trip stats & history'),
   trips('trips', 'planned trips'),
   photos('photos', 'map photos'),
@@ -67,6 +69,11 @@ const _benefits = <({IconData icon, String title, String detail})>[
     icon: Icons.route_rounded,
     title: 'A generous search allowance',
     detail: 'Far more route and nearby-place searches every day.',
+  ),
+  (
+    icon: Icons.photo_library_outlined,
+    title: 'Photos of every place',
+    detail: 'See what a stop, restaurant, or stay looks like before you go.',
   ),
   (
     icon: Icons.map_outlined,
@@ -277,6 +284,13 @@ class _PaywallSheetState extends ConsumerState<_PaywallSheet> {
                       child: AppSpinner(color: Colors.white),
                     )
                   : const Text('Start Ranmap Pro'),
+            ),
+            const SizedBox(height: 4),
+            // App Store 3.1.2: the subscription screen must link the Terms and
+            // Privacy Policy, which LegalConsentText renders as tappable links.
+            const LegalConsentText(
+              leadIn: 'Auto-renewing subscription. See ',
+              connector: ' and ',
             ),
             FButton(
               variant: .ghost,

@@ -11,6 +11,7 @@ const USERNAME_MIN = 3;
 const USERNAME_MAX = 24;
 const USERNAME_PATTERN = /^[a-zA-Z0-9_]+$/;
 const DISPLAY_NAME_MAX = 60;
+const VEHICLE_TYPES = ["car", "bike", "scooter", "suv", "other"] as const;
 
 function usernameError(value: string): string | null {
   if (value.length < USERNAME_MIN) return `Username must be at least ${USERNAME_MIN} characters`;
@@ -27,6 +28,10 @@ export async function updateProfile(
 ): Promise<ProfileActionState> {
   const username = String(formData.get("username") ?? "").trim();
   const displayName = String(formData.get("display_name") ?? "").trim();
+  const vehicleRaw = String(formData.get("vehicle_type") ?? "").trim();
+  const vehicleType = (VEHICLE_TYPES as readonly string[]).includes(vehicleRaw)
+    ? vehicleRaw
+    : "car";
 
   const usernameErr = usernameError(username);
   if (usernameErr) return { error: usernameErr, saved: false };
@@ -42,7 +47,7 @@ export async function updateProfile(
 
   const { error } = await supabase
     .from("profiles")
-    .update({ username, display_name: displayName || null })
+    .update({ username, display_name: displayName || null, vehicle_type: vehicleType })
     .eq("id", user.id);
 
   if (error) {

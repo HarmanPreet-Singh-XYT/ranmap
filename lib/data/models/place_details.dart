@@ -1,3 +1,20 @@
+/// One Google photo of a place. [name] is the resource name the backend's
+/// `/maps/places/photo` proxy turns into image bytes; [author] is the
+/// attribution Google requires us to show when present.
+class PlacePhoto {
+  final String name;
+  final String? author;
+
+  const PlacePhoto({required this.name, this.author});
+
+  static PlacePhoto? fromJson(Object? json) {
+    if (json is! Map<String, dynamic>) return null;
+    final name = json['name'];
+    if (name is! String || name.isEmpty) return null;
+    return PlacePhoto(name: name, author: json['author'] as String?);
+  }
+}
+
 /// Richer per-place metadata, fetched on demand from Google when a user opens
 /// a single search result (Mapbox supplies the search results themselves).
 class PlaceDetails {
@@ -8,6 +25,9 @@ class PlaceDetails {
   final bool? openNow;
   final List<String> weekdayHours;
   final String? priceLevel;
+  final String? phone;
+  final String? website;
+  final List<PlacePhoto> photos;
 
   const PlaceDetails({
     required this.name,
@@ -17,6 +37,9 @@ class PlaceDetails {
     this.openNow,
     this.weekdayHours = const [],
     this.priceLevel,
+    this.phone,
+    this.website,
+    this.photos = const [],
   });
 
   factory PlaceDetails.fromJson(Map<String, dynamic> json) => PlaceDetails(
@@ -28,6 +51,12 @@ class PlaceDetails {
         weekdayHours:
             (json['weekdayHours'] as List?)?.cast<String>() ?? const <String>[],
         priceLevel: json['priceLevel'] as String?,
+        phone: json['phone'] as String?,
+        website: json['website'] as String?,
+        photos: (json['photos'] as List? ?? const [])
+            .map(PlacePhoto.fromJson)
+            .whereType<PlacePhoto>()
+            .toList(),
       );
 
   /// Google returns price levels as `PRICE_LEVEL_MODERATE` etc.; render them as

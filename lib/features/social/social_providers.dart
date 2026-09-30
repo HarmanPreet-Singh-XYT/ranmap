@@ -5,6 +5,7 @@ import '../../data/models/profile.dart';
 import '../../data/providers/repository_providers.dart';
 import '../../data/repositories/friend_repository.dart';
 import '../../data/repositories/group_repository.dart';
+import '../../data/repositories/moderation_repository.dart';
 
 final friendRepositoryProvider = Provider<FriendRepository>(
   (ref) => FriendRepository(),
@@ -12,6 +13,15 @@ final friendRepositoryProvider = Provider<FriendRepository>(
 final groupRepositoryProvider = Provider<GroupRepository>(
   (ref) => GroupRepository(),
 );
+final moderationRepositoryProvider = Provider<ModerationRepository>(
+  (ref) => ModerationRepository(),
+);
+
+/// Accounts the current user has blocked, newest first.
+final blockedUsersProvider =
+    FutureProvider.autoDispose<List<Map<String, dynamic>>>(
+      (ref) => ref.watch(moderationRepositoryProvider).blockedUsers(),
+    );
 
 final friendsProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>(
   (ref) => ref.watch(friendRepositoryProvider).friends(),

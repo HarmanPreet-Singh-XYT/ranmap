@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
@@ -8,6 +10,7 @@ import '../../core/theme/nav_palette.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/units.dart';
 import '../../core/widgets/brand/brand_sheet_surface.dart';
+import '../../core/widgets/brand/brand_text_field.dart';
 import '../../data/models/route_option.dart';
 import '../../data/services/google_maps_api_service.dart';
 import '../premium/paywall.dart';
@@ -22,6 +25,15 @@ const _kPlaceTypes = [
   ('tourist_attraction', 'Sights', Icons.landscape_rounded),
 ];
 
+/// What the nearby sheet returns: the tapped [place], and whether the user
+/// asked for directions to it (from the details sheet) rather than just pinning.
+class NearbySelection {
+  const NearbySelection(this.place, {this.startDirections = false});
+
+  final NearbyPlace place;
+  final bool startDirections;
+}
+
 /// The "how much a stop adds" line, e.g. `~12 min · 8.0 mi`, in the user's
 /// distance unit.
 String _detourLabel(PlaceDetour detour, DistanceUnit unit) {
@@ -29,16 +41,16 @@ String _detourLabel(PlaceDetour detour, DistanceUnit unit) {
   return '~$minutes min · ${formatDistance(detour.distanceMeters / 1000, unit)}';
 }
 
-/// Search for nearby shops/POIs around [center]. When [routePolyline] is
-/// supplied, the user can also search along that route. Tapping a result opens
-/// its details, where it can be pinned on the map — returns the selected
-/// [NearbyPlace], or null if dismissed without pinning.
-Future<NearbyPlace?> showNearbyPlacesSheet(
+/// Search for nearby shops/POIs around [center] — by free-text query or a fixed
+/// category chip. When [routePolyline] is supplied, the user can also search
+/// along that route. Tapping a result opens its details, where it can be pinned
+/// or routed to — returns the selection, or null if dismissed without choosing.
+Future<NearbySelection?> showNearbyPlacesSheet(
   BuildContext context, {
   required Position center,
   String? routePolyline,
 }) {
-  return showFSheet<NearbyPlace>(
+  return showFSheet<NearbySelection>(
     context: context,
     side: FLayout.btt,
     mainAxisMaxRatio: null,
@@ -64,11 +76,19 @@ class _NearbyPlacesSheet extends ConsumerStatefulWidget {
 }
 
 class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
+  final _searchCtrl = TextEditingController();
+  Timer? _debounce;
+
   String _type = _kPlaceTypes.first.$1;
   bool _alongRoute = false;
   List<NearbyPlace> _places = const [];
   bool _loading = true;
   String? _error;
+
+  /// Discards results from a query the user has since edited.
+  int _searchToken = 0;
+
+  bool get _isFreeText => _searchCtrl.text.trim().length >= 2;
 
   bool get _canSearchAlongRoute =>
       widget.routePolyline != null && widget.routePolyline!.isNotEmpty;
@@ -79,14 +99,44 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
     _search();
   }
 
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onQueryChanged(String value) {
+    _debounce?.cancel();
+    final wasFreeText = _isFreeText;
+    if (value.trim().length < 2) {
+      // Dropping back under the minimum returns to the category results — but
+      // only when we were actually in free-text mode, so typing one character
+      // from empty doesn't fire a needless category request.
+      if (wasFreeText) {
+        _search();
+      } else {
+        setState(() {});
+      }
+      return;
+    }
+    // Reflect the chip/free-text state immediately, then search once settled.
+    setState(() {});
+    _debounce = Timer(const Duration(milliseconds: 400), _search);
+  }
+
   Future<void> _search() async {
+    final query = _searchCtrl.text.trim();
+    final token = ++_searchToken;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       final polyline = widget.routePolyline;
-      final places = _alongRoute && polyline != null && polyline.isNotEmpty
+      final places = query.length >= 2
+          ? await GoogleMapsApiService.searchPlaces(query, near: widget.center)
+          : _alongRoute && polyline != null && polyline.isNotEmpty
           ? await GoogleMapsApiService.placesAlongRoute(
               routePolyline: polyline,
               // Anchor the detour figures: the server measures from here.
@@ -98,10 +148,10 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
               radiusMeters: 5000,
               category: _type,
             );
-      if (!mounted) return;
+      if (!mounted || token != _searchToken) return;
       setState(() => _places = places);
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || token != _searchToken) return;
       // An exhausted free search allowance is the one case where a paywall is
       // exactly right, rather than a raw error with no upgrade path.
       if (isPremiumRequired(e)) {
@@ -110,20 +160,43 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
       }
       setState(() => _error = friendlyError(e));
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && token == _searchToken) setState(() => _loading = false);
     }
   }
 
+  void _selectCategory(String id) {
+    // A pending free-text debounce must not fire after the chip tap and
+    // double-fire a search.
+    _debounce?.cancel();
+    _searchCtrl.clear();
+    FocusScope.of(context).unfocus();
+    setState(() => _type = id);
+    _search();
+  }
+
+  void _clearQuery() {
+    _debounce?.cancel();
+    _searchCtrl.clear();
+    setState(() {});
+    _search();
+  }
+
   Future<void> _openDetails(NearbyPlace place) async {
-    final pin = await showPlaceDetailsSheet(context, place);
-    if (!mounted || pin != true) return;
-    Navigator.of(context).pop(place);
+    final action = await showPlaceDetailsSheet(context, place);
+    if (!mounted || action == null) return;
+    Navigator.of(context).pop(
+      NearbySelection(
+        place,
+        startDirections: action == PlaceDetailsAction.directions,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final c = NavColors.of(context);
     final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
+    final freeText = _isFreeText;
 
     return DraggableScrollableSheet(
       initialChildSize: 0.6,
@@ -145,27 +218,47 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: BrandTextField(
+                controller: _searchCtrl,
+                hint: 'Search for anything',
+                leadingIcon: Icons.search_rounded,
+                textInputAction: TextInputAction.search,
+                trailing: _searchCtrl.text.isEmpty
+                    ? null
+                    : BrandFieldAction(
+                        icon: Icons.close_rounded,
+                        semanticLabel: 'Clear search',
+                        onTap: _clearQuery,
+                      ),
+                onChanged: _onQueryChanged,
+                onSubmitted: (value) {
+                  _debounce?.cancel();
+                  if (value.trim().length >= 2) _search();
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: _kPlaceTypes.map((t) {
                   final (id, label, icon) = t;
-                  final selected = _type == id;
+                  final selected = !freeText && _type == id;
                   return FButton(
                     variant: selected ? .primary : .outline,
                     size: .sm,
                     selected: selected,
-                    onPress: () {
-                      setState(() => _type = id);
-                      _search();
-                    },
+                    onPress: () => _selectCategory(id),
                     prefix: Icon(icon),
                     child: Text(label),
                   );
                 }).toList(),
               ),
             ),
-            if (_canSearchAlongRoute)
+            // Along-route only makes sense for the category search; free-text
+            // search is proximity-based.
+            if (_canSearchAlongRoute && !freeText)
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
@@ -181,8 +274,12 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
                 ),
               ),
             const FDivider(),
+            // A thin progress bar while refreshing, so an in-flight query
+            // doesn't blank the results already on screen.
+            if (_loading && _places.isNotEmpty)
+              const LinearProgressIndicator(minHeight: 2),
             Expanded(
-              child: _loading
+              child: _loading && _places.isEmpty
                   ? const Center(child: FCircularProgress())
                   : _error != null
                   ? Center(
@@ -207,8 +304,11 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
                   : _places.isEmpty
                   ? Center(
                       child: Text(
-                        'No places found nearby.',
+                        freeText
+                            ? 'No places found for "${_searchCtrl.text.trim()}".'
+                            : 'No places found nearby.',
                         style: TextStyle(color: c.mutedForeground),
+                        textAlign: TextAlign.center,
                       ),
                     )
                   : ListView.builder(

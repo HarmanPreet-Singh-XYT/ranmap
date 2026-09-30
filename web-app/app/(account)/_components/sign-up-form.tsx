@@ -7,7 +7,7 @@ import { AuthField } from "./auth-field";
 
 const initialState: AuthActionState = { error: null };
 
-export function SignUpForm({ plan }: { plan?: string }) {
+export function SignUpForm({ plan, next }: { plan?: string; next?: string }) {
   const [state, action, pending] = useActionState(signUp, initialState);
   const planLabel =
     plan === "pro" ? "Ranmap Pro" : plan === "extreme" ? "Ranmap Extreme" : null;
@@ -24,6 +24,7 @@ export function SignUpForm({ plan }: { plan?: string }) {
 
   return (
     <form action={action} className="space-y-4">
+      {next && <input type="hidden" name="next" value={next} />}
       {planLabel && (
         <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-medium text-emerald-900">
           You picked {planLabel}. Create your account, then subscribe from
@@ -74,7 +75,10 @@ export function SignUpForm({ plan }: { plan?: string }) {
 
       <p className="text-center text-sm text-slate-600">
         Already have an account?{" "}
-        <Link href="/login" className="font-semibold text-emerald-700 hover:text-emerald-800">
+        <Link
+          href={next ? `/login?next=${encodeURIComponent(next)}` : "/login"}
+          className="font-semibold text-emerald-700 hover:text-emerald-800"
+        >
           Sign in
         </Link>
       </p>

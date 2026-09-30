@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { createClient } from "../../../lib/supabase/server";
+import { safeNextPath } from "@/app/(account)/next-path";
 
 /**
  * Handles the emailed auth links (password recovery, email confirmation,
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get("code");
   const tokenHash = searchParams.get("token_hash");
   const type = searchParams.get("type") as EmailOtpType | null;
-  const next = searchParams.get("next") ?? "/account";
+  const next = safeNextPath(searchParams.get("next")) ?? "/app";
 
   const redirectTo = (path: string) => NextResponse.redirect(`${origin}${path}`);
   const supabase = await createClient();

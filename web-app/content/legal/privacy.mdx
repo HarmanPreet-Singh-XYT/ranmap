@@ -4,20 +4,20 @@
 - Trip and convoy data: routes, stops, pitstop votes, expense entries, and photos you or your crew add to a trip.
 - Location data: while a trip is active, Ranmap shares your live position with the other members of that specific convoy so the map and safe-distance alerts can work. Location sharing stops when you leave the trip.
 - Voice data: push-to-talk audio is streamed to other members of your active convoy channel in real time; it is not recorded or stored after the channel ends.
-- Device and usage information: basic diagnostic data (app version, crash reports) used to keep the service reliable.
+- Device and usage information: basic technical data such as your app version and device platform, used to keep the service reliable.
 
 ## How we use it
 
 - To run the core features you use: live convoy tracking, chat, voice channels, pitstop voting, and expense settlement.
 - To power the AI trip co-pilot, which processes your trip context and requests to suggest stops, routes, and answers.
 - To send you account-related emails, such as password resets and important service notices.
-- To improve reliability and fix bugs, using aggregated, non-identifying diagnostic data wherever possible.
+- To improve reliability and fix bugs, using aggregated, non-identifying technical data wherever possible.
 
 ## Who can see your data
 
 - Your live location and voice are only shared with members of the specific trip or convoy you're actively part of — never with the public or with other Ranmap users outside that group.
 - We do not sell your personal data to third parties.
-- Service providers that process data on our behalf (hosting, push notifications, billing) are bound by their own data-protection obligations and only receive what's needed to provide their service.
+- Service providers that process data on our behalf — Supabase (account data and photo/chat storage), Google (maps, Firebase push notifications, and the Gemini AI co-pilot), Mapbox (map rendering and routing), LiveKit (voice channels), RevenueCat (subscriptions), and Twilio (phone verification) — are bound by their own data-protection obligations and only receive what's needed to provide their service.
 
 ## Your controls
 

@@ -48,6 +48,22 @@ test("requirePro returns a 402 paywall body for a free user", async () => {
   });
 });
 
+test("requirePro gates place_photos for a free user with its own feature id", async () => {
+  const { req, res, state, next } = harness();
+  await requirePro("place_photos", async () => false, "Place photos are a Ranmap Pro feature.")(
+    req,
+    res,
+    next,
+  );
+  assert.equal(state.nextCalls, 0);
+  assert.equal(state.statusCode, 402);
+  assert.deepEqual(state.body, {
+    error: "Place photos are a Ranmap Pro feature.",
+    code: "premium_required",
+    feature: "place_photos",
+  });
+});
+
 test("requirePro forwards a lookup failure to next rather than paywalling", async () => {
   const { req, res, state, next } = harness();
   const boom = new Error("db down");

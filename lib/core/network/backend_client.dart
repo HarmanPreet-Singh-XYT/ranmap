@@ -60,6 +60,19 @@ class BackendClient {
     return _decode(response, fallbackMessage);
   }
 
+  /// Auth headers for requests that can't go through [getJson] — e.g. an
+  /// `Image`/`CachedNetworkImage` fetching a protected binary from the backend.
+  static Map<String, String> authHeaders() => _headers();
+
+  /// Like [authHeaders], but returns null instead of throwing when there's no
+  /// session. Safe to call from `build`, where an exception would fail the
+  /// whole widget tree (an image then just falls back to its error widget).
+  static Map<String, String>? authHeadersOrNull() {
+    final token = SupabaseService.client.auth.currentSession?.accessToken;
+    if (token == null) return null;
+    return {'Authorization': 'Bearer $token'};
+  }
+
   static Map<String, String> _headers() {
     final token = SupabaseService.client.auth.currentSession?.accessToken;
     if (token == null) throw StateError('Not signed in');

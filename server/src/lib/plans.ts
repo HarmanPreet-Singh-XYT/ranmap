@@ -8,7 +8,11 @@ import type { Response } from "express";
  */
 
 /** A gatable feature. Part of the wire contract with the client's paywall. */
-export type PremiumFeature = "ai_assistant" | "voice" | "maps_search";
+export type PremiumFeature =
+  | "ai_assistant"
+  | "voice"
+  | "maps_search"
+  | "place_photos";
 
 /** The account tier, ordered free < pro < extreme. "pro" and "extreme" are both
  *  paid; `is_pro` in the DB means "paid" so Extreme inherits every Pro gate. */

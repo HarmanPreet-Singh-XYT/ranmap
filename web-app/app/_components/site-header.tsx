@@ -77,10 +77,10 @@ async function AuthLink() {
 
   return (
     <Link
-      href={user ? "/account" : "/login"}
+      href={user ? "/app" : "/login"}
       className="rounded-full border border-slate-300 bg-white px-4 py-1.5 text-xs font-semibold text-slate-800 shadow-xs transition-all hover:border-emerald-600 hover:text-emerald-700 hover:bg-slate-50"
     >
-      {user ? "Dashboard" : "Sign in"}
+      {user ? "Open app" : "Sign in"}
     </Link>
   );
 }

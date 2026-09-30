@@ -31,7 +31,9 @@ export async function updateSession(request: NextRequest) {
   );
 
   // Required: this revalidates the session token, not just reads the cookie.
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  return response;
+  return { response, user };
 }

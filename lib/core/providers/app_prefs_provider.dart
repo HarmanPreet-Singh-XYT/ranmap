@@ -18,6 +18,7 @@ const _kPaywallLastShownKey = 'paywall_last_shown_v1';
 const _kPendingInviteKey = 'pending_invite_v1';
 const _kPendingGroupCodeKey = 'pending_group_code_v1';
 const _kConvoyGroupKey = 'convoy_group_v1';
+const _kLocationDisclosureKey = 'location_disclosure_v1';
 const _kIntroFlagsVersionKey = 'intro_flags_version';
 
 /// Bump when the *meaning* of the intro flags changes, so existing installs
@@ -108,6 +109,15 @@ class AppPrefs {
     if (groupId == null) return _prefs.remove(_kConvoyGroupKey);
     return _prefs.setString(_kConvoyGroupKey, groupId);
   }
+
+  /// Whether the background-location prominent disclosure has been shown and
+  /// accepted. Google Play requires this disclosure *before* the OS location
+  /// prompt, so it's recorded once and not shown again.
+  bool get locationDisclosureSeen =>
+      _prefs.getBool(_kLocationDisclosureKey) ?? false;
+
+  Future<void> markLocationDisclosureSeen() =>
+      _prefs.setBool(_kLocationDisclosureKey, true);
 }
 
 final appPrefsProvider = Provider<AppPrefs>(

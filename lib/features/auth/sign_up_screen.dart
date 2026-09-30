@@ -35,6 +35,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
   bool _obscure = true;
   bool _loading = false;
+  bool _agreed = false;
   String? _error;
   String? _info;
 
@@ -65,6 +66,12 @@ class _SignUpScreenState extends State<SignUpScreen> {
     final email = _emailCtrl.text.trim();
     final password = _passwordCtrl.text;
 
+    // Explicit consent to the Terms/Privacy is required before an account is
+    // created (App Store 1.2 / Play UGC). The DB records acceptance at signup.
+    if (!_agreed) {
+      setState(() => _error = 'Please agree to the Terms and Privacy Policy.');
+      return;
+    }
     final nameValidationError = nameError(name, label: 'Full name');
     if (nameValidationError != null) {
       setState(() => _error = nameValidationError);
@@ -206,6 +213,42 @@ class _SignUpScreenState extends State<SignUpScreen> {
             BrandAlert(message: _info!, variant: BrandAlertVariant.info),
           ],
           const SizedBox(height: BrandSpace.md),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              GestureDetector(
+                onTap: _loading
+                    ? null
+                    : () => setState(() => _agreed = !_agreed),
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: Icon(
+                    _agreed
+                        ? Icons.check_box_rounded
+                        : Icons.check_box_outline_blank_rounded,
+                    size: 22,
+                    color: _agreed
+                        ? BrandColors.primary
+                        : BrandColors.textMuted,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: GestureDetector(
+                  onTap: _loading
+                      ? null
+                      : () => setState(() => _agreed = !_agreed),
+                  child: const LegalConsentText(
+                    leadIn: "I agree to Ranmap's ",
+                    connector: ' and ',
+                    textAlign: TextAlign.start,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: BrandSpace.md),
           BrandPrimaryButton(
             label: 'Create Account',
             loading: _loading,
@@ -217,10 +260,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
           AuthSocialButtons(onProvider: _social, busy: _loading),
           const SizedBox(height: BrandSpace.lg),
           _LogInPrompt(onTap: _loading ? null : () => context.push('/sign-in')),
-          const SizedBox(height: BrandSpace.sm),
-          const LegalConsentText(
-            leadIn: "By continuing, you agree to RanMap's ",
-          ),
         ],
       ),
     );

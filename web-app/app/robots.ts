@@ -7,7 +7,13 @@ export default function robots(): MetadataRoute.Robots {
       userAgent: "*",
       allow: "/",
       // Signed-in and auth surfaces have no SEO value and are per-user.
-      disallow: ["/account", "/auth", "/reset-password", "/forgot-password"],
+      disallow: [
+        "/app",
+        "/account",
+        "/auth",
+        "/reset-password",
+        "/forgot-password",
+      ],
     },
     sitemap: `${siteUrl}/sitemap.xml`,
     host: siteUrl,

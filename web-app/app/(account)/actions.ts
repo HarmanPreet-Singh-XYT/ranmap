@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "../../lib/supabase/server";
+import { safeNextPath } from "./next-path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type AuthActionState = { error: string | null; sent?: boolean };
@@ -55,7 +56,7 @@ export async function signIn(
     .maybeSingle();
   if (!existing) await createFallbackProfile(supabase, data.user.id);
 
-  redirect("/account");
+  redirect(safeNextPath(String(formData.get("next") ?? "")) ?? "/app");
 }
 
 export async function signUp(
@@ -70,7 +71,18 @@ export async function signUp(
   if (password.length < 8) return { error: "Password must be at least 8 characters." };
 
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  const next = safeNextPath(String(formData.get("next") ?? ""));
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    // Carry the intended destination through the confirmation email so a deep
+    // link (e.g. a group invite) survives the verify round-trip.
+    options:
+      siteUrl && next
+        ? { emailRedirectTo: `${siteUrl}/auth/confirm?next=${encodeURIComponent(next)}` }
+        : undefined,
+  });
   if (error) {
     // "User already registered" is only returned when email confirmation is
     // disabled; report it the same way as the confirmation-needed path so the
@@ -87,7 +99,7 @@ export async function signUp(
   // to confirm rather than bouncing them to a sign-in screen with no context.
   if (data.session && data.user) {
     await createFallbackProfile(supabase, data.user.id);
-    redirect("/account");
+    redirect(safeNextPath(String(formData.get("next") ?? "")) ?? "/app");
   }
 
   return { error: null, sent: true };

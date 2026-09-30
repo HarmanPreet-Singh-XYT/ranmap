@@ -22,6 +22,7 @@ import '../../core/widgets/brand/brand_text_field.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/chat_message.dart';
 import '../../data/services/supabase_service.dart';
+import '../social/moderation_actions.dart';
 import 'chat_providers.dart';
 import 'chat_rich_message.dart';
 import 'chat_share.dart';
@@ -401,7 +402,7 @@ class _SendButton extends StatelessWidget {
   }
 }
 
-class _ChatBubble extends StatelessWidget {
+class _ChatBubble extends ConsumerWidget {
   final ChatMessage message;
   final bool isMe;
   final VoidCallback? onDelete;
@@ -409,7 +410,7 @@ class _ChatBubble extends StatelessWidget {
   const _ChatBubble({required this.message, required this.isMe, this.onDelete});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final bg = isMe
         ? BrandColors.primaryContainer
         : BrandColors.surfaceContainerLow;
@@ -436,6 +437,17 @@ class _ChatBubble extends StatelessWidget {
                 icon: Icons.delete_outline_rounded,
                 destructive: true,
                 onSelected: onDelete!,
+              ),
+            if (!isMe)
+              AppSheetAction(
+                label: 'Report message',
+                icon: Icons.flag_outlined,
+                onSelected: () => showReportSheet(
+                  context,
+                  ref,
+                  targetType: 'message',
+                  targetId: message.id,
+                ),
               ),
           ],
         ),

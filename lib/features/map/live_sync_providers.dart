@@ -212,21 +212,17 @@ final liveSpeedMpsProvider = StreamProvider.autoDispose<double?>((ref) {
 /// device's location service being switched off ([serviceDisabled]).
 enum LocationAccess { granted, denied, deniedForever, serviceDisabled }
 
-/// Resolves (and, if needed, requests) location permission. Screens should
-/// gate the map — and the GPS stream — on this so they never watch
-/// [devicePositionProvider] before permission is granted.
+/// Resolves location permission *without* prompting. The OS prompt is raised
+/// explicitly from the map's "Allow location" button, after the prominent
+/// background-location disclosure (Google Play requires the disclosure to come
+/// first). Screens gate the map — and the GPS stream — on this.
 final locationPermissionProvider = FutureProvider.autoDispose<LocationAccess>((
   ref,
 ) async {
   if (!await Geolocator.isLocationServiceEnabled()) {
     return LocationAccess.serviceDisabled;
   }
-  var permission = await Geolocator.checkPermission();
-  // Only a plain `denied` can prompt again; `deniedForever` would silently
-  // no-op, so it's surfaced as its own state for the Settings path.
-  if (permission == LocationPermission.denied) {
-    permission = await Geolocator.requestPermission();
-  }
+  final permission = await Geolocator.checkPermission();
   return switch (permission) {
     LocationPermission.always ||
     LocationPermission.whileInUse => LocationAccess.granted,

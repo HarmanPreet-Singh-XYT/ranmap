@@ -1,5 +1,6 @@
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
+import '../../core/constants/env.dart';
 import '../../core/network/backend_client.dart';
 import '../models/place_details.dart';
 import '../models/route_option.dart';
@@ -131,6 +132,29 @@ class GoogleMapsApiService {
       'type': ?category,
     });
     return _placesFrom(body);
+  }
+
+  /// Free-text POI search around [near] — for anything the fixed category
+  /// chips don't cover. Results carry no detour figures (this runs on every
+  /// debounced keystroke, so the server skips the extra routing calls).
+  static Future<List<NearbyPlace>> searchPlaces(
+    String query, {
+    required Position near,
+  }) async {
+    final body = await _get('/maps/places/search', {
+      'q': query,
+      'proximity': '${near.lat},${near.lng}',
+    });
+    return _placesFrom(body);
+  }
+
+  /// The backend URL that streams one Google place photo (see the
+  /// `/maps/places/photo` proxy). Fetch it with
+  /// [BackendClient.authHeadersOrNull] since the backend requires the session
+  /// token.
+  static String placePhotoUrl(String ref, {int width = 400}) {
+    final encoded = Uri.encodeComponent(ref);
+    return '${Env.backendUrl}/maps/places/photo?ref=$encoded&w=$width';
   }
 
   /// Google's richer metadata for one place, resolved by name + location.

@@ -16,9 +16,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
-import { buildSpots, downloadName, photoMatches, slug } from "../../../../lib/photos/spots";
-import type { Landmark, LibraryPhoto } from "../../../../lib/photos/types";
-import { buildZip, chunk } from "../../../../lib/photos/zip";
+import { buildSpots, downloadName, photoMatches, slug } from "@/lib/photos/spots";
+import type { Landmark, LibraryPhoto } from "@/lib/photos/types";
+import { buildZip, chunk } from "@/lib/photos/zip";
 
 /**
  * A zip holds at most this many photos, so one archive stays a sensible size to

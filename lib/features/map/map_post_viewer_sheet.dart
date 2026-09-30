@@ -19,6 +19,7 @@ import '../../data/models/group.dart';
 import '../../data/models/map_post.dart';
 import '../../data/services/supabase_service.dart';
 import '../chat/chat_share.dart';
+import '../social/moderation_actions.dart';
 import '../social/social_providers.dart';
 import 'map_post_providers.dart';
 
@@ -400,6 +401,22 @@ class _MapPostViewerSheetState extends ConsumerState<_MapPostViewerSheet> {
                     ),
                   ],
                 ),
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: BrandSpace.md),
+            BrandSecondaryButton(
+              label: 'Report photo',
+              leading: Icon(
+                Icons.flag_outlined,
+                size: 18,
+                color: BrandColors.textHeadlineAlt,
+              ),
+              onPressed: () => showReportSheet(
+                context,
+                ref,
+                targetType: 'post',
+                targetId: post.id,
               ),
             ),
           ],

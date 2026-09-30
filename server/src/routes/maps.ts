@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { Readable } from "node:stream";
 import { asyncHandler } from "../lib/async-handler.js";
 import { mapsSearchAllowance } from "../lib/allowances.js";
 import { env } from "../lib/env.js";
@@ -14,10 +15,10 @@ import {
 } from "../lib/mapbox.js";
 import type { NormalizedDetour, NormalizedPlace } from "../lib/mapbox.js";
 import { createMapboxTokenVendor } from "../lib/mapbox-token.js";
-import { planTier } from "../lib/plan-store.js";
+import { planTier, isPro } from "../lib/plan-store.js";
 import { rateLimit } from "../lib/rate-limit.js";
 import { consumeUsage } from "../lib/usage.js";
-import { chargeMeteredAllowance } from "../middleware/require-plan.js";
+import { chargeMeteredAllowance, requirePro } from "../middleware/require-plan.js";
 import { requireAuth } from "../middleware/require-auth.js";
 
 // Proxies the two mapping vendors for the client:
@@ -82,10 +83,19 @@ function chargeSearch(req: Request, res: Response): Promise<boolean> {
 // per request from the caller's mode (see mapboxProfileForMode).
 const MAPBOX_DIRECTIONS_BASE = "https://api.mapbox.com/directions/v5/mapbox";
 const MAPBOX_CATEGORY_URL = "https://api.mapbox.com/search/searchbox/v1/category";
+const MAPBOX_FORWARD_URL = "https://api.mapbox.com/search/searchbox/v1/forward";
 const MAPBOX_GEOCODE_URL = "https://api.mapbox.com/search/geocode/v6/forward";
 const MAX_GEOCODE_QUERY_CHARS = 200;
 const GEOCODE_LIMIT = 6;
 const GOOGLE_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText";
+const GOOGLE_PLACE_PHOTO_BASE = "https://places.googleapis.com/v1";
+// A photo resource name as Google returns it, e.g.
+// `places/ChIJ.../photos/AUac...`. Guards the ref we forward upstream — the
+// character class is deliberately tight so a `ref` can't smuggle query or path
+// metacharacters (`?`, `#`, `%`, `..`) into the upstream URL.
+const PLACE_PHOTO_NAME_RE = /^places\/[A-Za-z0-9_-]+\/photos\/[A-Za-z0-9_-]+$/;
+const DEFAULT_PHOTO_WIDTH = 400;
+const MAX_PHOTO_WIDTH = 4800;
 const TIMEOUT_MS = 10_000;
 const MAX_RADIUS_METERS = 50_000;
 // Search Box caps results at 25 for /category.
@@ -448,6 +458,72 @@ mapsRouter.get(
   }),
 );
 
+// GET /maps/places/search?q=<free text>[&proximity=lat,lng]
+// -> { places: [{ id, name, lat, lng, category }] }
+// Free-text POI search (Mapbox Search Box /forward) — the same FeatureCollection
+// shape as /category, so the client parses both with one path. `proximity` biases
+// results toward the caller. No detour figures: this fires on every debounced
+// keystroke, so measuring up to 5 Directions calls per query would both slow the
+// type-ahead and multiply provider spend; the category search keeps them.
+// Provider-neutral by design: swapping in Google Autocomplete later is a
+// server-only change.
+mapsRouter.get(
+  "/places/search",
+  asyncHandler(async (req, res) => {
+    const { mapboxAccessToken } = env;
+    if (!mapboxAccessToken) {
+      notConfigured(res, "Place search");
+      return;
+    }
+
+    const query = String(req.query.q ?? "").trim();
+    if (query.length < 2) {
+      res.status(400).json({ error: "q must be at least 2 characters" });
+      return;
+    }
+    if (query.length > MAX_GEOCODE_QUERY_CHARS) {
+      res.status(400).json({ error: `q must be at most ${MAX_GEOCODE_QUERY_CHARS} characters` });
+      return;
+    }
+    const proximityRaw = String(req.query.proximity ?? "").trim();
+    const proximity = proximityRaw ? parseLatLng(proximityRaw) : null;
+    if (proximityRaw && !proximity) {
+      res.status(400).json({ error: "proximity must be valid lat,lng" });
+      return;
+    }
+
+    // Validated: now the request may draw on the daily search allowance.
+    if (!(await chargeSearch(req, res))) return;
+
+    const params = new URLSearchParams({
+      q: query,
+      language: "en",
+      limit: String(MAX_RESULTS),
+      access_token: mapboxAccessToken,
+    });
+    if (proximity) params.set("proximity", `${proximity.longitude},${proximity.latitude}`);
+
+    try {
+      const response = await fetchJson(`${MAPBOX_FORWARD_URL}?${params.toString()}`);
+      if (providerFailed("maps: place search", response)) {
+        res.status(502).json({ error: "Could not search places. Please try again." });
+        return;
+      }
+
+      const places = normalizeCategorySearch(response.body);
+      if (places === null) {
+        console.error("maps: place search: unexpected response shape");
+        res.status(502).json({ error: "Could not search places. Please try again." });
+        return;
+      }
+
+      res.json({ places });
+    } catch (err) {
+      fail(res, err, 502, "Could not search places. Please try again.", "maps: place search");
+    }
+  }),
+);
+
 // GET /maps/places/details?name=...&lat=...&lng=...
 // Google's richer metadata for one place, resolved by name + location bias
 // (Mapbox ids aren't Google ids). This is the only Google call.
@@ -516,6 +592,61 @@ mapsRouter.get(
       res.json(details);
     } catch (err) {
       fail(res, err, 502, "Could not load that place. Please try again.", "maps: place details");
+    }
+  }),
+);
+
+// GET /maps/places/photo?ref=<photo resource name>&w=<px>
+// Streams one Google Place Photo, so the API key stays server-side. Google
+// says photo resource names are uncacheable and expire, so we proxy live each
+// time and only let the returned image bytes be cached. Each fetch is a
+// separate Place Photos charge, so this is a Pro-only route: gating it keeps
+// the per-image cost bounded to paying subscribers (free users get a teaser).
+mapsRouter.get(
+  "/places/photo",
+  requirePro("place_photos", isPro, "Place photos are a Ranmap Pro feature."),
+  asyncHandler(async (req, res) => {
+    const { googleMapsApiKey } = env;
+    if (!googleMapsApiKey) {
+      notConfigured(res, "Place photos");
+      return;
+    }
+
+    const ref = String(req.query.ref ?? "").trim();
+    if (!PLACE_PHOTO_NAME_RE.test(ref)) {
+      res.status(400).json({ error: "ref must be a place photo resource name" });
+      return;
+    }
+    const requested = Number(req.query.w);
+    const width = Number.isFinite(requested)
+      ? Math.min(Math.max(Math.round(requested), 1), MAX_PHOTO_WIDTH)
+      : DEFAULT_PHOTO_WIDTH;
+
+    const url = `${GOOGLE_PLACE_PHOTO_BASE}/${ref}/media?maxWidthPx=${width}&key=${encodeURIComponent(googleMapsApiKey)}`;
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      // Clear once headers are in; the body can stream past the timeout.
+      const response = await fetch(url, { signal: controller.signal }).finally(() =>
+        clearTimeout(timer),
+      );
+      if (!response.ok || !response.body) {
+        console.error(`maps: place photo: provider responded ${response.status}`);
+        res.status(502).json({ error: "Could not load that photo." });
+        return;
+      }
+      res.set("Content-Type", response.headers.get("content-type") ?? "image/jpeg");
+      // The endpoint is auth-gated, so keep it out of shared caches.
+      res.set("Cache-Control", "private, max-age=86400");
+      const stream = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
+      stream.on("error", (err) => {
+        console.error("maps: place photo: stream failed", err);
+        res.destroy();
+      });
+      stream.pipe(res);
+    } catch (err) {
+      fail(res, err, 502, "Could not load that photo.", "maps: place photo");
     }
   }),
 );

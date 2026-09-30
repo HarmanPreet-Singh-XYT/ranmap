@@ -7,11 +7,12 @@ import { AuthField } from "./auth-field";
 
 const initialState: AuthActionState = { error: null };
 
-export function SignInForm() {
+export function SignInForm({ next }: { next?: string }) {
   const [state, action, pending] = useActionState(signIn, initialState);
 
   return (
     <form action={action} className="space-y-4">
+      {next && <input type="hidden" name="next" value={next} />}
       <AuthField
         label="Email"
         name="email"
@@ -52,7 +53,10 @@ export function SignInForm() {
 
       <p className="text-center text-sm text-slate-600">
         New to Ranmap?{" "}
-        <Link href="/signup" className="font-semibold text-emerald-700 hover:text-emerald-800">
+        <Link
+          href={next ? `/signup?next=${encodeURIComponent(next)}` : "/signup"}
+          className="font-semibold text-emerald-700 hover:text-emerald-800"
+        >
           Create an account
         </Link>
       </p>

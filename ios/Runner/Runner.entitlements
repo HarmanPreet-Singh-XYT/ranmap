@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Push notifications (FCM). Xcode's automatic signing bumps this to
+	     `production` for App Store/TestFlight builds; `development` is for
+	     debug/adhoc. Requires the Push Notifications capability on the App ID
+	     and an APNs key uploaded to Firebase. -->
+	<key>aps-environment</key>
+	<string>development</string>
+	<!-- Universal-link invites (https://ranmap.app/invite/*). Requires the
+	     domain to serve https://ranmap.app/.well-known/apple-app-site-association
+	     with the app's Team ID + bundle id. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:ranmap.app</string>
+	</array>
+</dict>
+</plist>

@@ -1440,23 +1440,19 @@ class _LegalFooter extends StatelessWidget {
 
   final VoidCallback onManage;
 
-  /// Only the links that are actually configured, then the store action.
+  /// The legal links, then the store action.
   List<Widget> _items(BuildContext context, TextStyle link) {
-    final terms = Env.termsUrl;
-    final privacy = Env.privacyUrl;
     return [
-      if (terms != null)
-        GestureDetector(
-          onTap: () => _openExternal(context, terms),
-          behavior: HitTestBehavior.opaque,
-          child: Text('Terms of Service', style: link),
-        ),
-      if (privacy != null)
-        GestureDetector(
-          onTap: () => _openExternal(context, privacy),
-          behavior: HitTestBehavior.opaque,
-          child: Text('Privacy Policy', style: link),
-        ),
+      GestureDetector(
+        onTap: () => _openExternal(context, Env.termsUrl),
+        behavior: HitTestBehavior.opaque,
+        child: Text('Terms of Service', style: link),
+      ),
+      GestureDetector(
+        onTap: () => _openExternal(context, Env.privacyUrl),
+        behavior: HitTestBehavior.opaque,
+        child: Text('Privacy Policy', style: link),
+      ),
       GestureDetector(
         onTap: onManage,
         behavior: HitTestBehavior.opaque,

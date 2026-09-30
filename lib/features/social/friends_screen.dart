@@ -19,6 +19,7 @@ import '../chat/direct_messages_screen.dart';
 import '../../data/models/profile.dart';
 import '../../data/services/supabase_service.dart';
 import 'invite_share.dart';
+import 'moderation_actions.dart';
 import 'social_providers.dart';
 
 class FriendsScreen extends ConsumerWidget {
@@ -143,6 +144,29 @@ class _FriendsTab extends ConsumerWidget {
                   destructive: true,
                   onSelected: removeFriend,
                 ),
+                if (other?['id'] != null)
+                  AppSheetAction(
+                    label: 'Report',
+                    icon: Icons.flag_outlined,
+                    onSelected: () => showReportSheet(
+                      context,
+                      ref,
+                      targetType: 'user',
+                      targetId: other!['id'] as String,
+                    ),
+                  ),
+                if (other?['id'] != null)
+                  AppSheetAction(
+                    label: 'Block',
+                    icon: Icons.block_rounded,
+                    destructive: true,
+                    onSelected: () => showBlockUserConfirm(
+                      context,
+                      ref,
+                      userId: other!['id'] as String,
+                      username: other['username'] as String? ?? 'this user',
+                    ),
+                  ),
               ],
             ),
           );

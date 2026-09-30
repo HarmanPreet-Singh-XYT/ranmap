@@ -13,11 +13,14 @@ class Env {
 
   static String get backendUrl => dotenv.get('BACKEND_URL');
 
-  /// Public legal pages, or null when unset — surfaces then omit the link
-  /// rather than pointing at a URL that may not exist.
-  static String? get termsUrl => _maybeUrl('TERMS_URL');
+  /// Public legal pages. Fall back to the hosted defaults so the links are
+  /// never silently missing from the sign-up copy or the paywall (App Store
+  /// 3.1.2 requires working Terms/Privacy links); override via env if they move.
+  static String get termsUrl =>
+      _maybeUrl('TERMS_URL') ?? 'https://ranmap.vercel.app/terms';
 
-  static String? get privacyUrl => _maybeUrl('PRIVACY_URL');
+  static String get privacyUrl =>
+      _maybeUrl('PRIVACY_URL') ?? 'https://ranmap.vercel.app/privacy';
 
   static String? _maybeUrl(String key) {
     try {

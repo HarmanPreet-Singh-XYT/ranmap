@@ -1,5 +1,14 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Local development notes
+
+- **Install with dev dependencies.** If your shell has `NODE_ENV=production` set,
+  `npm install` silently skips `devDependencies` (breaking `next build`, which needs
+  `@tailwindcss/postcss`). Run `NODE_ENV=development npm install --include=dev`, or
+  unset `NODE_ENV` before installing.
+- Copy `.env.example` to `.env` and fill in the Supabase keys plus `RANMAP_SERVER_URL`
+  (the Node backend the `/api/ranmap/*` proxy forwards to).
+
 ## Getting Started
 
 First, run the development server:

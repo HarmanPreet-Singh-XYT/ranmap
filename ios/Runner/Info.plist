@@ -30,6 +30,10 @@
 	     need an Associated Domains entitlement once a real domain exists. -->
 	<key>FlutterDeepLinkingEnabled</key>
 	<false/>
+	<!-- The app only uses exempt encryption (HTTPS/TLS via the OS), so declare
+	     it here to skip the export-compliance prompt on every upload. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<!-- OAuth callback scheme; must match kAuthRedirectUrl in

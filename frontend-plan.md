@@ -180,6 +180,34 @@ Pro tier requires browser auth + `threeui-cli`; not needed for phase 1.
 
 ---
 
+## Current structure (implemented)
+
+The site is split into four clearly separated surfaces, so the product features no
+longer live under `/account`:
+
+- **Public** — `/`, `/features`, `/pricing`, `/routes`, `/privacy`, `/terms`,
+  `/refund-policy`, `/support` (unchanged).
+- **Auth + account** — `/login`, `/signup`, `/forgot-password`, `/reset-password`
+  alongside `/account` (profile, stats, billing). Auth pages sit with the account area
+  on purpose: both are the identity surface, and they share `_components/` + `actions.ts`.
+- **App features** — everything under **`/app/*`**, in its own shell (desktop sidebar +
+  mobile bottom tab bar; no marketing chrome). Auth-guarded by `app/app/layout.tsx`.
+  - `/app/trips`, `/app/trips/new`, `/app/trips/[id]` (+ `stops`/`crew`/`expenses`/`checklist`)
+  - `/app/groups`, `/app/groups/[id]`, `/app/groups/join/[code]`
+  - `/app/friends`
+  - `/app/chat` (Direct · Groups · AI), `/app/chat/direct/[id]`,
+    `/app/chat/groups/[id]`, `/app/chat/ai`, `/app/chat/ai/[id]`
+  - `/app/photos` (moved from `/account/photos`)
+- **Backend bridge** — `/api/ranmap/[...path]` proxies to `RANMAP_SERVER_URL` with the
+  caller's Supabase bearer token, so browser code never needs CORS on the Node server.
+
+The AI chat is built on [prompt-kit](https://www.prompt-kit.com) components
+(`components/ui/{prompt-input,message,markdown,chat-container,loader,prompt-suggestion,tool,system-message}.tsx`),
+installed via the shadcn registry and running on the app's existing `@base-ui/react`
+primitives.
+
+---
+
 ## Later phases (direction only, not a spec)
 
 Once phase 1 ships, the natural next additions, in roughly this order:

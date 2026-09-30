@@ -118,6 +118,35 @@ test("normalizeCategorySearch defaults a missing name and category", () => {
   assert.equal(places?.[0]?.category, null);
 });
 
+test("normalizeCategorySearch maps a Search Box /forward FeatureCollection", () => {
+  // /forward returns the same Point FeatureCollection as /category, so the
+  // free-text search route reuses this matcher.
+  const places = normalizeCategorySearch({
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [-122.435, 37.7726] },
+        properties: {
+          name: "Sushi Ran",
+          mapbox_id: "mbx-sushi",
+          poi_category_ids: ["restaurant", "sushi_restaurant"],
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(places, [
+    {
+      id: "mbx-sushi",
+      name: "Sushi Ran",
+      lat: 37.7726,
+      lng: -122.435,
+      category: "restaurant",
+    },
+  ]);
+});
+
 test("attachDetours attaches only the detours that were measured", () => {
   const places: NormalizedPlace[] = [
     { id: "a", name: "A", lat: 1, lng: 1, category: null },
