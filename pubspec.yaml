@@ -48,6 +48,8 @@ dependencies:
   firebase_messaging: ^16.7.0
   flutter_markdown_plus: ^1.0.12
   gal: ^2.3.3
+  flutter_compass: ^0.8.1
+  wakelock_plus: ^1.8.0
 
 dev_dependencies:
   flutter_test:

@@ -40,6 +40,7 @@ class HeadlightBeam {
   // waiting for the next location fix.
   double? _lat, _lng, _heading;
   int _colorArgb = 0;
+  String? _slot;
   double? _zoom;
 
   /// Forgets what's on the map — call when the style is reloaded, which drops
@@ -62,6 +63,7 @@ class HeadlightBeam {
     _lng = lng;
     _heading = headingDegrees;
     _colorArgb = colorArgb;
+    _slot = slot;
     // Not reentrant: overlapping awaits would interleave add/update.
     if (_syncing) {
       _rerun = true;
@@ -121,6 +123,22 @@ class HeadlightBeam {
         slot: slot,
       );
     }
+  }
+
+  /// Turns the beam to a new heading (e.g. from the compass) without waiting for
+  /// the next location fix. No-op until the first [sync] has supplied a position.
+  Future<void> updateHeading(MapboxMap map, double? headingDegrees) async {
+    final lat = _lat;
+    final lng = _lng;
+    if (lat == null || lng == null) return;
+    await sync(
+      map,
+      lat: lat,
+      lng: lng,
+      headingDegrees: headingDegrees,
+      colorArgb: _colorArgb,
+      slot: _slot,
+    );
   }
 
   /// Redraws at the new size when the camera zoom changes. The beam's length is

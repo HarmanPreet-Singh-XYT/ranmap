@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter/material.dart';
 import 'package:forui/forui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -41,6 +42,7 @@ import '../notifications/notifications_providers.dart';
 import '../notifications/notifications_screen.dart';
 import '../social/social_providers.dart';
 import '../trip/new_trip_screen.dart';
+import '../trip/plan_route_screen.dart' show PlannedRoute;
 import '../trip/trip_providers.dart';
 import 'add_map_post_screen.dart';
 import 'group_convoy_screen.dart';
@@ -106,6 +108,14 @@ class _MapScreenState extends ConsumerState<MapScreen>
   final _vehicles = VehicleModelLayerManager();
   final _beam = HeadlightBeam();
 
+  /// The most recent GPS course (degrees) seen while moving.
+  double? _lastCourse;
+
+  /// The phone's compass heading (degrees), which the puck and the headlight
+  /// beam follow — so the beam turns as you turn, like Google Maps' cone.
+  double? _compass;
+  StreamSubscription<CompassEvent>? _compassSub;
+
   /// TEMPORARY, for testing: draw the headlight beam even when stationary.
   /// Set to false to hide it below walking pace.
   static const bool _alwaysShowBeam = true;
@@ -113,7 +123,18 @@ class _MapScreenState extends ConsumerState<MapScreen>
   PointAnnotationManager? _photoPoints;
   PointAnnotationManager? _placePoints;
   PointAnnotationManager? _savedPlacePoints;
-  PolylineAnnotationManager? _routeLines;
+  final _routeRenderer = RouteLines();
+
+  /// Directions preview for [_selectedPlace]: candidate routes from the user's
+  /// position, the chosen one drawn highlighted (others muted).
+  List<RouteOption> _previewRoutes = const [];
+  int _previewIndex = 0;
+  bool _previewLoading = false;
+  String? _previewError;
+
+  /// Bumped whenever the preview is cancelled or the place changes, so a slow
+  /// directions response for a stale request is dropped.
+  int _previewToken = 0;
   Cancelable? _photoTapCancel;
 
   /// Maps a created annotation back to its post for tap handling (annotation
@@ -142,6 +163,25 @@ class _MapScreenState extends ConsumerState<MapScreen>
     _style = RanmapMapStyle.fromId(settings.mapStyleId);
     _threeD = settings.mapThreeD;
     _terrain = settings.mapTerrain;
+    _listenToCompass();
+  }
+
+  void _listenToCompass() {
+    // Null on devices with no magnetometer; the beam then falls back to GPS
+    // course. Events arrive many times a second, so only act on real turns.
+    _compassSub = FlutterCompass.events?.listen((event) {
+      final heading = event.heading;
+      if (heading == null || !heading.isFinite) return;
+      final normalized = (heading % 360 + 360) % 360;
+      final previous = _compass;
+      if (previous != null) {
+        final delta = ((normalized - previous + 540) % 360) - 180;
+        if (delta.abs() < 3) return;
+      }
+      _compass = normalized;
+      final map = _mapKey.currentState?.map;
+      if (map != null) unawaited(_beam.updateHeading(map, normalized));
+    });
   }
 
   /// Mirrors a Settings change onto the live map (avoids a rebuild loop by
@@ -166,6 +206,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    unawaited(_compassSub?.cancel());
     // Release the native annotation managers; the style syncs are all
     // internally guarded so they simply no-op once these are null.
     unawaited(_disposeAnnotationManagers());
@@ -186,7 +227,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
   // Guards so overlays are only rebuilt when their data actually changes.
   List<String>? _renderedSavedPlaceIds;
   List<String>? _renderedPostIds;
-  String? _renderedRoutePolyline;
   String? _renderedPlaceId;
 
   // Set once after an overlay sync fails, so the user isn't left wondering why
@@ -226,7 +266,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
     _photoPoints = null;
     _placePoints = null;
     _savedPlacePoints = null;
-    _routeLines = null;
   }
 
   Future<void> _onStyleReady(MapboxMap map) async {
@@ -242,19 +281,18 @@ class _MapScreenState extends ConsumerState<MapScreen>
     _postByAnnotationId.clear();
     _renderedPostIds = null;
     _renderedSavedPlaceIds = null;
-    _renderedRoutePolyline = null;
+    _routeRenderer.reset();
     _renderedPlaceId = null;
 
     final photoPoints = await map.annotations.createPointAnnotationManager();
-    final routeLines = await map.annotations.createPolylineAnnotationManager();
     final savedPlacePoints = await map.annotations
         .createPointAnnotationManager();
     if (generation != _styleGeneration || !mounted) return;
 
     _photoTapCancel = photoPoints.tapEvents(onTap: _onPhotoTap);
+    _addMapInteractions(map);
     setState(() {
       _photoPoints = photoPoints;
-      _routeLines = routeLines;
       _savedPlacePoints = savedPlacePoints;
     });
   }
@@ -452,8 +490,409 @@ class _MapScreenState extends ConsumerState<MapScreen>
       routePolyline: (polyline == null || polyline.isEmpty) ? null : polyline,
     );
     if (place == null || !mounted) return;
-    setState(() => _selectedPlace = place);
+    await _selectPlace(place);
+  }
+
+  /// Selects [place] (from the nearby list, a tapped POI, or a long-press) and
+  /// shows its card with a Directions action.
+  Future<void> _selectPlace(NearbyPlace place) async {
+    if (!mounted) return;
+    _previewToken++;
+    setState(() {
+      _selectedPlace = place;
+      _previewRoutes = const [];
+      _previewIndex = 0;
+      _previewLoading = false;
+      _previewError = null;
+    });
     await _mapKey.currentState?.flyTo(place.location, zoom: kPlaceZoom);
+  }
+
+  void _clearSelectedPlace() {
+    _previewToken++;
+    setState(() {
+      _selectedPlace = null;
+      _previewRoutes = const [];
+      _previewIndex = 0;
+      _previewLoading = false;
+      _previewError = null;
+    });
+  }
+
+  /// Tap a point of interest, or long-press anywhere, to select it — like
+  /// Google Maps. POI taps need the Standard style's `poi` featureset; the
+  /// long-press works on every style.
+  void _addMapInteractions(MapboxMap map) {
+    const poiId = 'ranmap-poi-tap';
+    const pinId = 'ranmap-long-tap';
+    try {
+      map.removeInteraction(poiId);
+      map.removeInteraction(pinId);
+    } catch (_) {}
+    try {
+      map.addInteraction(
+        TapInteraction(StandardPOIs(), (feature, gesture) {
+          Position location;
+          try {
+            location = feature.coordinate!.coordinates;
+          } catch (_) {
+            location = gesture.point.coordinates;
+          }
+          unawaited(
+            _selectPlace(
+              NearbyPlace(
+                name: feature.name ?? 'Place',
+                placeId: 'poi:${location.lat},${location.lng}',
+                category: feature.category,
+                location: location,
+              ),
+            ),
+          );
+        }),
+        interactionID: poiId,
+      );
+    } catch (e) {
+      // Styles without the Standard `poi` featureset can't tap POIs.
+      debugPrint('POI tap interaction unavailable: $e');
+    }
+    try {
+      // Tap a muted route line to make it the chosen one, like Google Maps.
+      map.removeInteraction('ranmap-route-tap');
+      map.addInteraction(
+        TapInteraction.onMap(
+          (gesture) => unawaited(_pickRouteAt(map, gesture.point.coordinates)),
+          stopPropagation: false,
+        ),
+        interactionID: 'ranmap-route-tap',
+      );
+    } catch (e) {
+      debugPrint('Route tap interaction unavailable: $e');
+    }
+    try {
+      map.addInteraction(
+        LongTapInteraction.onMap((gesture) {
+          final location = gesture.point.coordinates;
+          unawaited(
+            _selectPlace(
+              NearbyPlace(
+                name: 'Dropped pin',
+                placeId: 'pin:${location.lat},${location.lng}',
+                location: location,
+              ),
+            ),
+          );
+        }),
+        interactionID: pinId,
+      );
+    } catch (e) {
+      debugPrint('Long-press interaction unavailable: $e');
+    }
+  }
+
+  /// Chooses the previewed route nearest to a map tap, if the tap landed close
+  /// enough to one of the lines (within ~36 px).
+  Future<void> _pickRouteAt(MapboxMap map, Position tap) async {
+    if (_previewRoutes.length < 2 || !mounted) return;
+    final zoom = (await map.getCameraState()).zoom;
+    final lat = tap.lat.toDouble();
+    final lng = tap.lng.toDouble();
+    final metersPerPx =
+        78271.517 * math.cos(lat * math.pi / 180) / math.pow(2, zoom);
+    final tolerance = 36 * metersPerPx;
+
+    var best = -1;
+    var bestDistance = double.infinity;
+    for (final (i, route) in _previewRoutes.indexed) {
+      final d = _distanceToLineMeters(lat, lng, route.points);
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = i;
+      }
+    }
+    if (best >= 0 &&
+        bestDistance <= tolerance &&
+        best != _previewIndex &&
+        mounted) {
+      setState(() => _previewIndex = best);
+    }
+  }
+
+  /// Shortest distance in metres from a point to a polyline (flat-earth
+  /// approximation, plenty accurate at tap-tolerance scale).
+  static double _distanceToLineMeters(
+    double lat,
+    double lng,
+    List<Position> line,
+  ) {
+    const metersPerDegLat = 111320.0;
+    final metersPerDegLng = metersPerDegLat * math.cos(lat * math.pi / 180);
+    double x(Position p) => (p.lng.toDouble() - lng) * metersPerDegLng;
+    double y(Position p) => (p.lat.toDouble() - lat) * metersPerDegLat;
+
+    var best = double.infinity;
+    for (var i = 0; i < line.length - 1; i++) {
+      final ax = x(line[i]);
+      final ay = y(line[i]);
+      final bx = x(line[i + 1]);
+      final by = y(line[i + 1]);
+      final dx = bx - ax;
+      final dy = by - ay;
+      final lengthSq = dx * dx + dy * dy;
+      final t = lengthSq == 0
+          ? 0.0
+          : ((-ax * dx - ay * dy) / lengthSq).clamp(0.0, 1.0);
+      final px = ax + t * dx;
+      final py = ay + t * dy;
+      final d = math.sqrt(px * px + py * py);
+      if (d < best) best = d;
+    }
+    return best;
+  }
+
+  /// Drops the directions preview but keeps the place selected, so the user can
+  /// back out of a route without losing the pin.
+  void _cancelRoutePreview() {
+    _previewToken++;
+    setState(() {
+      _previewRoutes = const [];
+      _previewIndex = 0;
+      _previewLoading = false;
+      _previewError = null;
+    });
+  }
+
+  /// Fetches routes from the user's position to the selected place and draws
+  /// the best one highlighted on the map.
+  Future<void> _previewDirections(double lat, double lng) async {
+    final place = _selectedPlace;
+    if (place == null || _previewLoading) return;
+
+    // Already there: don't spend a routing call on a zero-length route.
+    final meters = haversineMeters(
+      lat,
+      lng,
+      place.location.lat.toDouble(),
+      place.location.lng.toDouble(),
+    );
+    if (meters < 30) {
+      setState(() => _previewError = "You're already at this spot.");
+      return;
+    }
+
+    final token = ++_previewToken;
+    setState(() {
+      _previewLoading = true;
+      _previewError = null;
+    });
+    try {
+      const modes = {'car', 'bike', 'scooter', 'suv', 'other'};
+      final vehicle = ref.read(myProfileProvider).valueOrNull?.vehicleType;
+      final routes = await GoogleMapsApiService.directions(
+        origin: Geo.pos(lat, lng),
+        destination: place.location,
+        profile: modes.contains(vehicle) ? vehicle : null,
+      );
+      // Cancelled (or another place chosen) while the request was in flight.
+      if (!mounted || token != _previewToken) return;
+      setState(() {
+        _previewRoutes = routes;
+        _previewIndex = 0;
+      });
+      unawaited(_fitRoute(routes.first.points));
+    } catch (e) {
+      if (mounted && token == _previewToken) {
+        setState(() => _previewError = friendlyError(e));
+      }
+    } finally {
+      if (mounted && token == _previewToken) {
+        setState(() => _previewLoading = false);
+      }
+    }
+  }
+
+  /// Switches which of several active trips the map follows.
+  Future<void> _pickActiveTrip(List<Trip> trips, Trip? current) async {
+    final picked = await showFSheet<Trip>(
+      context: context,
+      side: FLayout.btt,
+      builder: (sheetContext) => BrandSheetSurface(
+        child: BrandCard(
+          padding: const EdgeInsets.symmetric(
+            horizontal: BrandSpace.md,
+            vertical: BrandSpace.xs,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final (i, trip) in trips.indexed) ...[
+                if (i > 0) const BrandRowDivider(),
+                BrandListRow(
+                  icon: trip.id == current?.id
+                      ? Icons.radio_button_checked_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  iconColor: BrandColors.primary,
+                  title: trip.title,
+                  subtitle: trip.destinationName == null
+                      ? 'Live now'
+                      : 'Live now · to ${trip.destinationName}',
+                  showChevron: false,
+                  onTap: () => Navigator.of(sheetContext).pop(trip),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    ref.read(selectedMapTripIdProvider.notifier).state = picked.id;
+    // Forget the previous trip's route line so the new one is drawn.
+    _routeRenderer.reset();
+    final target = picked.destinationPoint ?? picked.originPoint;
+    if (target != null) {
+      await _mapKey.currentState?.flyTo(
+        Geo.pos(target.lat, target.lng),
+        zoom: 12,
+      );
+    }
+  }
+
+  /// Attaches the previewed route to a trip the user picks (or starts a new
+  /// trip from it), so the road becomes part of the trip instead of a one-off.
+  Future<void> _useRouteForTrip(double lat, double lng) async {
+    final place = _selectedPlace;
+    if (place == null || _previewRoutes.isEmpty) return;
+    final route = _previewRoutes[_previewIndex];
+
+    final List<Trip> trips;
+    try {
+      trips = await ref.read(myTripsProvider.future);
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+      return;
+    }
+    final usable = [
+      for (final t in trips)
+        if (t.status == TripStatus.planned || t.status == TripStatus.active) t,
+    ];
+    if (!mounted) return;
+
+    // null result = dismissed; a Trip with empty id = "new trip".
+    final choice = await showFSheet<Trip?>(
+      context: context,
+      side: FLayout.btt,
+      builder: (sheetContext) => BrandSheetSurface(
+        child: SingleChildScrollView(
+          child: BrandCard(
+            padding: const EdgeInsets.symmetric(
+              horizontal: BrandSpace.md,
+              vertical: BrandSpace.xs,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                BrandListRow(
+                  icon: Icons.add_road_rounded,
+                  iconColor: BrandColors.primary,
+                  title: 'New trip with this route',
+                  subtitle: 'To ${place.name}',
+                  showChevron: false,
+                  onTap: () =>
+                      Navigator.of(sheetContext)
+                          .pop(Trip.draft(createdBy: '', title: '')),
+                ),
+                for (final trip in usable) ...[
+                  const BrandRowDivider(),
+                  BrandListRow(
+                    icon: trip.status == TripStatus.active
+                        ? Icons.play_circle_outline_rounded
+                        : Icons.event_outlined,
+                    iconColor: BrandColors.primary,
+                    title: trip.title,
+                    subtitle: trip.status == TripStatus.active
+                        ? 'Live now · replaces its route'
+                        : 'Planned · replaces its route',
+                    showChevron: false,
+                    onTap: () => Navigator.of(sheetContext).pop(trip),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    final origin = LatLngPoint(lat, lng);
+    final destination = LatLngPoint(
+      place.location.lat.toDouble(),
+      place.location.lng.toDouble(),
+    );
+
+    if (choice.id.isEmpty) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => NewTripScreen(
+            initialTitle: 'Trip to ${place.name}',
+            initialRoute: PlannedRoute(
+              originName: 'Current location',
+              originPoint: origin,
+              destinationName: place.name,
+              destinationPoint: destination,
+              routePolyline: route.encodedPolyline,
+            ),
+          ),
+        ),
+      );
+      if (mounted) _clearSelectedPlace();
+      return;
+    }
+
+    try {
+      final live = choice.status == TripStatus.active;
+      await ref
+          .read(tripRepositoryProvider)
+          .updateRoute(
+            tripId: choice.id,
+            // A live trip keeps its original start; a planned one now starts
+            // where this route starts.
+            originName: live ? null : 'Current location',
+            originPoint: live ? null : origin,
+            destinationName: place.name,
+            destinationPoint: destination,
+            routePolyline: route.encodedPolyline,
+          );
+      refreshTripData(ref, tripId: choice.id);
+      if (!mounted) return;
+      showAppToast(context, 'Route set for "${choice.title}".');
+      _clearSelectedPlace();
+    } catch (e, stack) {
+      // friendlyError hides details on purpose; keep the real cause in the log.
+      debugPrint('Use route for trip failed: $e\n$stack');
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
+
+  /// Frames [points] on screen, leaving room for the bottom card.
+  Future<void> _fitRoute(List<Position> points) async {
+    final map = _mapKey.currentState?.map;
+    if (map == null || points.length < 2) return;
+    final step = math.max(1, points.length ~/ 200);
+    final sample = <Position>[
+      for (var i = 0; i < points.length; i += step) points[i],
+      points.last,
+    ];
+    try {
+      final camera = await map.cameraForCoordinatesPadding(
+        [for (final p in sample) Point(coordinates: p)],
+        CameraOptions(),
+        MbxEdgeInsets(top: 140, left: 48, bottom: 340, right: 96),
+        null,
+        null,
+      );
+      await map.flyTo(camera, MapAnimationOptions(duration: 900));
+    } catch (_) {}
   }
 
   /// The map's entry into the group-convoy loop: pick one of your groups and
@@ -591,6 +1030,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
     double deviceHeadingDegrees,
   ) {
     final here = Geo.pos(deviceLat, deviceLng);
+    // Several trips can be live at once; the map follows one and this lets the
+    // user switch.
+    final activeTrips =
+        ref.watch(activeTripsProvider).valueOrNull ?? const <Trip>[];
     final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
 
     // Keep the AsyncValue around (not just valueOrNull) so a failed live-sync
@@ -710,17 +1153,22 @@ class _MapScreenState extends ConsumerState<MapScreen>
       // GPS course is meaningless below walking pace, so the beam hides then —
       // unless [_alwaysShowBeam] is on for testing, which shows it standing
       // still (pointing along the last known course, or north if there is none).
-      final movingHeading = deviceSpeedMps > 1.0 ? deviceHeadingDegrees : null;
+      final movingHeading = deviceSpeedMps > 1.0 && deviceHeadingDegrees >= 0
+          ? deviceHeadingDegrees
+          : null;
+      // Remember the last real course so the beam holds its direction when the
+      // vehicle stops, instead of snapping back to north.
+      if (movingHeading != null) _lastCourse = movingHeading;
       unawaited(
         _beam.sync(
           map,
           lat: deviceLat,
           lng: deviceLng,
           headingDegrees:
+              _compass ??
               movingHeading ??
-              (_alwaysShowBeam
-                  ? (deviceHeadingDegrees >= 0 ? deviceHeadingDegrees : 0)
-                  : null),
+              _lastCourse ??
+              (_alwaysShowBeam ? 0 : null),
           colorArgb: BrandColors.primary.toARGB32(),
           // Standard/Satellite draw custom layers under the basemap unless slotted.
           slot: _style.isStandard ? 'top' : null,
@@ -734,7 +1182,14 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
     // The map is full-bleed (under the status bar), but its floating overlays
     // must clear a notch/status bar — FScaffold has no header here to inset them.
-    final topInset = MediaQuery.paddingOf(context).top;
+    // MediaQuery's top padding can be zeroed by an ancestor scaffold (which is
+    // what put the pills under the Android status bar), so also read the real
+    // system inset from the view — Android draws edge-to-edge under its bar.
+    final view = View.of(context);
+    final topInset = math.max(
+      MediaQuery.paddingOf(context).top,
+      view.padding.top / view.devicePixelRatio,
+    );
 
     return FScaffold(
       childPad: false,
@@ -913,6 +1368,12 @@ class _MapScreenState extends ConsumerState<MapScreen>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // The selected place (nearby result, tapped POI, or dropped
+                  // pin) with a Directions action and route summary.
+                  if (_selectedPlace != null) ...[
+                    _buildPlaceCard(deviceLat, deviceLng),
+                    const SizedBox(height: BrandSpace.sm),
+                  ],
                   // Live roster: each teammate's avatar + how far away they are,
                   // tap to navigate to them.
                   if (teammates.isNotEmpty) ...[
@@ -1035,6 +1496,17 @@ class _MapScreenState extends ConsumerState<MapScreen>
                               ],
                             ),
                           ),
+                          if (activeTrips.length > 1)
+                            IconButton(
+                              tooltip: 'Switch trip',
+                              visualDensity: VisualDensity.compact,
+                              icon: Icon(
+                                Icons.swap_horiz_rounded,
+                                color: BrandColors.primary,
+                              ),
+                              onPressed: () =>
+                                  _pickActiveTrip(activeTrips, activeTrip),
+                            ),
                           if (teammates.isNotEmpty)
                             Icon(
                               Icons.chevron_right_rounded,
@@ -1049,6 +1521,192 @@ class _MapScreenState extends ConsumerState<MapScreen>
           ),
         ],
       ),
+    );
+  }
+
+  /// One selectable route in the card: time, distance, and how it compares to
+  /// the fastest.
+  Widget _routeOption(int i, RouteOption route, {required int fastestSeconds}) {
+    final selected = i == _previewIndex;
+    final extraMinutes = ((route.durationSeconds - fastestSeconds) / 60)
+        .round();
+    return InkWell(
+      borderRadius: BrandRadii.cardRadius,
+      onTap: () {
+        setState(() => _previewIndex = i);
+        unawaited(_fitRoute(route.points));
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? BrandColors.secondaryFixed.withValues(alpha: 0.45)
+              : Colors.transparent,
+          borderRadius: BrandRadii.cardRadius,
+          border: Border.all(
+            color: selected ? BrandColors.primary : BrandColors.hairline,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              selected
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              size: 18,
+              color: selected ? BrandColors.primary : BrandColors.textMuted,
+            ),
+            const SizedBox(width: 10),
+            Text(
+              route.durationLabel,
+              style: BrandText.weight(
+                BrandText.titleSm,
+                700,
+              ).copyWith(color: BrandColors.textHeadline),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '${route.distanceLabel} · via ${route.summary}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
+              ),
+            ),
+            if (i == 0)
+              BrandPill(label: 'Fastest')
+            else if (extraMinutes > 0)
+              Text(
+                '+$extraMinutes min',
+                style: BrandText.labelMd.copyWith(color: BrandColors.textMuted),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The card for [_selectedPlace]: name, a Directions button, and — once
+  /// routes are loaded — the ETA, alternatives, and a hand-off to Maps.
+  Widget _buildPlaceCard(double lat, double lng) {
+    final place = _selectedPlace!;
+    final routes = _previewRoutes;
+    final chosen = routes.isEmpty ? null : routes[_previewIndex];
+    final subtitle = chosen != null
+        ? '${chosen.durationLabel} · ${chosen.distanceLabel}'
+        : (place.category?.replaceAll('_', ' ') ??
+              (place.placeId.startsWith('pin:') ? 'Dropped pin' : 'Place'));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Container(
+              height: 38,
+              width: 38,
+              decoration: BoxDecoration(
+                color: BrandColors.secondaryFixed.withValues(alpha: 0.5),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.place_rounded,
+                color: BrandColors.primary,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    place.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: BrandText.weight(
+                      BrandText.titleSm,
+                      700,
+                    ).copyWith(color: BrandColors.textHeadline),
+                  ),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: BrandText.bodySm.copyWith(
+                      color: BrandColors.textMuted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Close',
+              visualDensity: VisualDensity.compact,
+              icon: Icon(Icons.close_rounded, color: BrandColors.textMuted),
+              onPressed: _clearSelectedPlace,
+            ),
+          ],
+        ),
+        if (_previewError != null) ...[
+          const SizedBox(height: BrandSpace.xs),
+          Text(
+            _previewError!,
+            style: BrandText.bodySm.copyWith(color: BrandColors.error),
+          ),
+        ],
+        if (routes.length > 1) ...[
+          const SizedBox(height: BrandSpace.sm),
+          for (final (i, route) in routes.indexed)
+            _routeOption(
+              i,
+              route,
+              fastestSeconds: routes.first.durationSeconds,
+            ),
+        ],
+        const SizedBox(height: BrandSpace.sm),
+        if (chosen == null)
+          BrandPrimaryButton(
+            label: _previewLoading
+                ? 'Finding route…'
+                : (_previewError != null ? 'Try again' : 'Directions'),
+            leadingIcon: Icons.directions_rounded,
+            loading: _previewLoading,
+            // Tapping again while loading would double-fire; cancelling is the
+            // close button (or the route-cancel row below).
+            onPressed: _previewLoading
+                ? null
+                : () => _previewDirections(lat, lng),
+          )
+        else ...[
+          BrandPrimaryButton(
+            label: 'Use for a trip',
+            leadingIcon: Icons.route_rounded,
+            onPressed: () => _useRouteForTrip(lat, lng),
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          BrandSecondaryButton(
+            label: 'Cancel route',
+            leading: Icon(
+              Icons.close_rounded,
+              size: 18,
+              color: BrandColors.textHeadlineAlt,
+            ),
+            onPressed: _cancelRoutePreview,
+          ),
+        ],
+        if (_previewLoading) ...[
+          const SizedBox(height: BrandSpace.xs),
+          Center(
+            child: TextButton(
+              onPressed: _cancelRoutePreview,
+              child: const Text('Cancel'),
+            ),
+          ),
+        ],
+      ],
     );
   }
 
@@ -1259,30 +1917,44 @@ class _MapScreenState extends ConsumerState<MapScreen>
   }
 
   Future<void> _syncRoute(String? encodedPolyline) async {
-    final manager = _routeLines;
-    if (manager == null) return;
-    if (_renderedRoutePolyline == encodedPolyline) return;
-    final lineColor = NavColors.of(context).activeRoute.toARGB32();
+    final map = _mapKey.currentState?.map;
+    if (map == null) return;
+    // Read theme colours before any await.
+    final nav = NavColors.of(context);
 
-    try {
-      await manager.deleteAll();
-      if (encodedPolyline != null) {
-        final points = _routePoints(encodedPolyline);
-        if (points.length >= 2) {
-          await manager.create(
-            PolylineAnnotationOptions(
-              geometry: Geo.lineString(points),
-              lineColor: lineColor,
-              lineWidth: 4,
-              lineJoin: LineJoin.ROUND,
-            ),
-          );
-        }
-      }
-      _renderedRoutePolyline = encodedPolyline;
-    } catch (error) {
-      _reportOverlaySyncFailure('route line', error);
+    final List<Position> main;
+    final List<List<Position>> alternatives;
+    if (_previewRoutes.isNotEmpty) {
+      // A directions preview takes over the line until it's dismissed.
+      main = _previewRoutes[_previewIndex].points;
+      alternatives = [
+        for (final (i, r) in _previewRoutes.indexed)
+          if (i != _previewIndex) r.points,
+      ];
+    } else {
+      main = encodedPolyline == null ? const [] : _routePoints(encodedPolyline);
+      alternatives = const [];
     }
+
+    final previewing = _previewRoutes.isNotEmpty;
+    await _routeRenderer.sync(
+      map,
+      main: main,
+      alternatives: alternatives,
+      // Time bubbles on each candidate route (only for a directions preview).
+      mainLabel: previewing
+          ? _previewRoutes[_previewIndex].durationLabel
+          : null,
+      altLabels: [
+        for (final (i, r) in _previewRoutes.indexed)
+          if (i != _previewIndex) r.durationLabel,
+      ],
+      mainColorArgb: nav.activeRoute.toARGB32(),
+      casingColorArgb: 0xFFFFFFFF,
+      altColorArgb: nav.altRoute.withValues(alpha: 0.75).toARGB32(),
+      // Standard/Satellite hide slot-less layers under the basemap.
+      slot: _style.isStandard ? 'top' : null,
+    );
   }
 
   Future<void> _syncSelectedPlace(double devicePixelRatio) async {

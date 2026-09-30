@@ -326,6 +326,17 @@ class SettingsScreen extends ConsumerWidget {
                   onChange: notifier.setVoiceAutoJoin,
                 ),
               ),
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: Icons.screen_lock_portrait_rounded,
+                title: 'Keep screen on during trips',
+                subtitle: 'Stops the screen sleeping while a trip is active',
+                onTap: null,
+                trailing: FSwitch(
+                  value: settings.keepScreenOn,
+                  onChange: notifier.setKeepScreenOn,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: BrandSpace.sm),

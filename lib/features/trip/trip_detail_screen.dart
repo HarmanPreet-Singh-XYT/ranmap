@@ -71,8 +71,7 @@ class TripDetailScreen extends ConsumerWidget {
       if (trip.routePolyline == null) {
         directionsError = await _loadDirections(ref);
       }
-      ref.invalidate(myTripsProvider);
-      ref.invalidate(activeTripProvider);
+      refreshTripData(ref, tripId: trip.id);
       if (!context.mounted) return;
       showAppToast(
         context,
@@ -162,8 +161,7 @@ class TripDetailScreen extends ConsumerWidget {
             destinationPoint: planned.destinationPoint,
             routePolyline: planned.routePolyline,
           );
-      ref.invalidate(myTripsProvider);
-      ref.invalidate(activeTripProvider);
+      refreshTripData(ref, tripId: trip.id);
       if (!context.mounted) return;
       showAppToast(context, 'Route updated.');
       // This screen holds an immutable snapshot of the trip; swap in the
@@ -204,7 +202,7 @@ class TripDetailScreen extends ConsumerWidget {
 
     try {
       await ref.read(tripRepositoryProvider).completeTrip(trip.id);
-      ref.invalidate(myTripsProvider);
+      refreshTripData(ref, tripId: trip.id);
       ref.invalidate(tripStatsProvider(trip.id));
       if (context.mounted) Navigator.of(context).pop();
     } catch (e) {
@@ -223,7 +221,7 @@ class TripDetailScreen extends ConsumerWidget {
     if (!confirmed) return;
     try {
       await ref.read(tripRepositoryProvider).leaveTrip(trip.id);
-      ref.invalidate(myTripsProvider);
+      refreshTripData(ref, tripId: trip.id);
       if (context.mounted) Navigator.of(context).pop();
     } catch (e) {
       if (context.mounted) showAppToast(context, friendlyError(e), error: true);
@@ -241,7 +239,7 @@ class TripDetailScreen extends ConsumerWidget {
     if (!confirmed) return;
     try {
       await ref.read(tripRepositoryProvider).deleteTrip(trip.id);
-      ref.invalidate(myTripsProvider);
+      refreshTripData(ref, tripId: trip.id);
       if (context.mounted) Navigator.of(context).pop();
     } catch (e) {
       if (context.mounted) showAppToast(context, friendlyError(e), error: true);

@@ -45,7 +45,14 @@ const _kTripCurrencies = <({String code, String label})>[
 /// active) happens from the map screen once at least the creator is ready
 /// to roll.
 class NewTripScreen extends ConsumerStatefulWidget {
-  const NewTripScreen({super.key});
+  const NewTripScreen({super.key, this.initialRoute, this.initialTitle});
+
+  /// A route to start from (e.g. one previewed on the map), so the trip opens
+  /// with its origin, destination and road already planned.
+  final PlannedRoute? initialRoute;
+
+  /// Suggested trip name, e.g. the destination.
+  final String? initialTitle;
 
   @override
   ConsumerState<NewTripScreen> createState() => _NewTripScreenState();
@@ -61,6 +68,14 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
   /// profile row here, so its avatar falls back to [kDefaultAvatarSeed].
   final Map<String, String> _inviteeAvatarIds = {};
   PlannedRoute? _plannedRoute;
+
+  @override
+  void initState() {
+    super.initState();
+    _plannedRoute = widget.initialRoute;
+    final title = widget.initialTitle;
+    if (title != null) _titleCtrl.text = title;
+  }
 
   /// Optional planned start time; null (the default) means the trip starts as
   /// soon as the creator goes active. Sent through as `scheduled_start` on
@@ -492,7 +507,9 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
         }
       }
 
-      ref.invalidate(myTripsProvider);
+      // Show the new trip everywhere (map, list, invites, stats) at once.
+      refreshTripData(ref, tripId: trip.id);
+      if (_groupId != null) ref.invalidate(myGroupsProvider);
 
       if (!mounted) return;
       if (failedInvites.isNotEmpty) {

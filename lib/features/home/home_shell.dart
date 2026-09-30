@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 import 'package:go_router/go_router.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../core/router/auth_state_provider.dart';
 import '../../core/util/error_text.dart';
@@ -22,6 +23,14 @@ import '../trip/trip_list_screen.dart';
 import '../trip/trip_providers.dart';
 import '../map/map_screen.dart';
 import '../profile/profile_screen.dart';
+
+/// True while the screen should be held awake: a trip is active and the user
+/// hasn't turned "Keep screen on during trips" off.
+final _keepScreenAwakeProvider = Provider.autoDispose<bool>((ref) {
+  final enabled = ref.watch(appSettingsProvider.select((s) => s.keepScreenOn));
+  final hasActiveTrip = ref.watch(activeTripProvider).valueOrNull != null;
+  return enabled && hasActiveTrip;
+});
 
 /// Bottom-nav shell hosting the four primary destinations.
 class HomeShell extends ConsumerStatefulWidget {
@@ -79,6 +88,16 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         }
       }
     });
+  }
+
+  /// The last wake-lock state pushed to the platform.
+  bool _wakeApplied = false;
+
+  @override
+  void dispose() {
+    // Never leave the screen locked awake once the shell is gone (sign-out).
+    unawaited(WakelockPlus.disable());
+    super.dispose();
   }
 
   static const int _mapTab = 0;
@@ -235,6 +254,14 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ref.listen(pendingGroupJoinProvider, (_, next) {
       if (next != null) _maybeResumeGroupJoin();
     });
+    // Keep the screen awake while driving a trip so the map doesn't go dark.
+    // Applied only when the value changes (the platform call is idempotent and
+    // touches no provider state, so it's safe to trigger from build).
+    final keepAwake = ref.watch(_keepScreenAwakeProvider);
+    if (_wakeApplied != keepAwake) {
+      _wakeApplied = keepAwake;
+      unawaited(keepAwake ? WakelockPlus.enable() : WakelockPlus.disable());
+    }
     // Always-on voice: join the trip's channel when it goes active, and drop
     // out when it ends.
     ref.listen(activeTripProvider, (previous, next) {

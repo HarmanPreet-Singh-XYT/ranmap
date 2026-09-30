@@ -11,8 +11,10 @@ enum DistanceUnit {
   kilometers,
   miles;
 
-  static DistanceUnit fromName(String? name) =>
-      DistanceUnit.values.firstWhere((u) => u.name == name, orElse: () => DistanceUnit.kilometers);
+  static DistanceUnit fromName(String? name) => DistanceUnit.values.firstWhere(
+    (u) => u.name == name,
+    orElse: () => DistanceUnit.kilometers,
+  );
 }
 
 /// The app's user-adjustable preferences, persisted in [SharedPreferences].
@@ -26,6 +28,7 @@ class AppSettings {
     this.photoVisibility = 'group',
     this.shareLocation = true,
     this.voiceAutoJoin = true,
+    this.keepScreenOn = true,
   });
 
   final ThemeMode themeMode;
@@ -48,6 +51,10 @@ class AppSettings {
   /// active (Discord-style always-on voice).
   final bool voiceAutoJoin;
 
+  /// Whether the screen stays awake while a trip is active, so the map and
+  /// directions don't go dark mid-drive.
+  final bool keepScreenOn;
+
   AppSettings copyWith({
     ThemeMode? themeMode,
     DistanceUnit? distanceUnit,
@@ -57,6 +64,7 @@ class AppSettings {
     String? photoVisibility,
     bool? shareLocation,
     bool? voiceAutoJoin,
+    bool? keepScreenOn,
   }) => AppSettings(
     themeMode: themeMode ?? this.themeMode,
     distanceUnit: distanceUnit ?? this.distanceUnit,
@@ -66,6 +74,7 @@ class AppSettings {
     photoVisibility: photoVisibility ?? this.photoVisibility,
     shareLocation: shareLocation ?? this.shareLocation,
     voiceAutoJoin: voiceAutoJoin ?? this.voiceAutoJoin,
+    keepScreenOn: keepScreenOn ?? this.keepScreenOn,
   );
 }
 
@@ -77,6 +86,7 @@ const _kMapTerrain = 'settings_map_terrain';
 const _kPhotoVisibility = 'settings_photo_visibility';
 const _kShareLocation = 'settings_share_location';
 const _kVoiceAutoJoin = 'settings_voice_auto_join';
+const _kKeepScreenOn = 'settings_keep_screen_on';
 
 /// Owns [AppSettings]; every setter persists immediately and updates state so
 /// the UI (including the app's theme) reacts at once.
@@ -95,6 +105,7 @@ class AppSettingsNotifier extends Notifier<AppSettings> {
       photoVisibility: prefs.getString(_kPhotoVisibility) ?? 'group',
       shareLocation: prefs.getBool(_kShareLocation) ?? true,
       voiceAutoJoin: prefs.getBool(_kVoiceAutoJoin) ?? true,
+      keepScreenOn: prefs.getBool(_kKeepScreenOn) ?? true,
     );
   }
 
@@ -133,13 +144,22 @@ class AppSettingsNotifier extends Notifier<AppSettings> {
     state = state.copyWith(shareLocation: enabled);
   }
 
+  void setKeepScreenOn(bool enabled) {
+    unawaited(_prefs.setBool(_kKeepScreenOn, enabled));
+    state = state.copyWith(keepScreenOn: enabled);
+  }
+
   void setVoiceAutoJoin(bool enabled) {
     unawaited(_prefs.setBool(_kVoiceAutoJoin, enabled));
     state = state.copyWith(voiceAutoJoin: enabled);
   }
 }
 
-final appSettingsProvider = NotifierProvider<AppSettingsNotifier, AppSettings>(AppSettingsNotifier.new);
+final appSettingsProvider = NotifierProvider<AppSettingsNotifier, AppSettings>(
+  AppSettingsNotifier.new,
+);
 
-ThemeMode _readThemeMode(String? name) =>
-    ThemeMode.values.firstWhere((m) => m.name == name, orElse: () => ThemeMode.system);
+ThemeMode _readThemeMode(String? name) => ThemeMode.values.firstWhere(
+  (m) => m.name == name,
+  orElse: () => ThemeMode.system,
+);

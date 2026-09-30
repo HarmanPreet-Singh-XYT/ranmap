@@ -14,6 +14,7 @@ export 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
 export 'geo.dart';
 export 'headlight_beam.dart';
+export 'route_lines.dart';
 export 'map_markers.dart';
 export 'map_style.dart';
 export 'mapbox_token.dart';

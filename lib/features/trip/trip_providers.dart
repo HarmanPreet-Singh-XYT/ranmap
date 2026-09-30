@@ -27,16 +27,48 @@ final myTripsProvider = FutureProvider.autoDispose<List<Trip>>((ref) {
   return ref.watch(tripRepositoryProvider).myTrips();
 });
 
-/// The trip currently being driven, if any (first trip with status active).
-/// Selecting the active trip this way keeps things simple for the skeleton;
-/// a dedicated "current trip" table/column could replace this later.
-final activeTripProvider = FutureProvider.autoDispose<Trip?>((ref) async {
+/// Every trip that is currently active (a user can run several at once).
+final activeTripsProvider = FutureProvider.autoDispose<List<Trip>>((ref) async {
   final trips = await ref.watch(myTripsProvider.future);
-  for (final trip in trips) {
-    if (trip.status == TripStatus.active) return trip;
-  }
-  return null;
+  return [
+    for (final trip in trips)
+      if (trip.status == TripStatus.active) trip,
+  ];
 });
+
+/// Which active trip the map follows when there are several. Null (or a trip
+/// that's no longer active) falls back to the first active one.
+final selectedMapTripIdProvider = StateProvider<String?>((ref) => null);
+
+/// The trip currently being driven, if any: the one chosen in
+/// [selectedMapTripIdProvider] when it's still active, otherwise the first
+/// active trip.
+final activeTripProvider = FutureProvider.autoDispose<Trip?>((ref) async {
+  final active = await ref.watch(activeTripsProvider.future);
+  if (active.isEmpty) return null;
+  final selectedId = ref.watch(selectedMapTripIdProvider);
+  for (final trip in active) {
+    if (trip.id == selectedId) return trip;
+  }
+  return active.first;
+});
+
+/// Re-fetches everything that depends on the user's trips. Call after creating,
+/// starting, completing, leaving, deleting or re-routing a trip so the map, the
+/// trip list, invites and stats all show the new state without an app restart.
+void refreshTripData(WidgetRef ref, {String? tripId}) {
+  ref.invalidate(myTripsProvider);
+  ref.invalidate(activeTripsProvider);
+  ref.invalidate(activeTripProvider);
+  ref.invalidate(tripInvitesProvider);
+  ref.invalidate(myTripStatsProvider);
+  if (tripId != null) {
+    ref.invalidate(tripMembersProvider(tripId));
+    ref.invalidate(tripStopsProvider(tripId));
+    ref.invalidate(tripLegsProvider(tripId));
+    ref.invalidate(tripStatsProvider(tripId));
+  }
+}
 
 /// Members (with joined profile) of a given trip.
 final tripMembersProvider = FutureProvider.autoDispose

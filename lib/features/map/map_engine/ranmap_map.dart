@@ -130,6 +130,9 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
         LocationComponentSettings(
           enabled: widget.showUserLocation,
           puckBearingEnabled: true,
+          // Face where the phone points (compass); the headlight beam follows
+          // the same compass heading, so the two agree.
+          puckBearing: PuckBearing.HEADING,
           // A soft pulsing halo (in screen pixels) so the vehicle stands out from
           // the map tiles.
           pulsingEnabled: true,
