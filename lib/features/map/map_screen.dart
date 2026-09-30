@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show listEquals;
-import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter/material.dart';
 import 'package:forui/forui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -47,6 +46,7 @@ import '../trip/trip_providers.dart';
 import 'add_map_post_screen.dart';
 import 'group_convoy_screen.dart';
 import 'live_sync_providers.dart';
+import 'map_engine/compass.dart';
 import 'map_engine/map_engine.dart';
 import 'map_post_providers.dart';
 import 'map_post_viewer_sheet.dart';
@@ -114,7 +114,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
   /// The phone's compass heading (degrees), which the puck and the headlight
   /// beam follow — so the beam turns as you turn, like Google Maps' cone.
   double? _compass;
-  StreamSubscription<CompassEvent>? _compassSub;
+  StreamSubscription<double>? _compassSub;
 
   /// TEMPORARY, for testing: draw the headlight beam even when stationary.
   /// Set to false to hide it below walking pace.
@@ -167,11 +167,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
   }
 
   void _listenToCompass() {
-    // Null on devices with no magnetometer; the beam then falls back to GPS
+    // Empty on devices with no magnetometer; the beam then falls back to GPS
     // course. Events arrive many times a second, so only act on real turns.
-    _compassSub = FlutterCompass.events?.listen((event) {
-      final heading = event.heading;
-      if (heading == null || !heading.isFinite) return;
+    _compassSub = RanmapCompass.headings.listen((heading) {
+      if (!heading.isFinite) return;
       final normalized = (heading % 360 + 360) % 360;
       final previous = _compass;
       if (previous != null) {
