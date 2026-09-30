@@ -164,6 +164,7 @@ class _SignInScreenState extends State<SignInScreen> {
                 icon: _obscure
                     ? Icons.visibility_rounded
                     : Icons.visibility_off_rounded,
+                semanticLabel: _obscure ? 'Show password' : 'Hide password',
                 onTap: () => setState(() => _obscure = !_obscure),
               ),
             ),

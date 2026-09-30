@@ -106,9 +106,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         data: (profile) {
           if (profile == null) {
             return Center(
-              child: Text(
-                'No profile found.',
-                style: BrandText.bodyMd.copyWith(color: BrandColors.textMuted),
+              child: BrandEmptyState(
+                icon: Icons.person_off_outlined,
+                title: 'No profile found',
+                message:
+                    'We couldn’t load your profile. Try again, and if it keeps '
+                    'happening, sign out and back in.',
+                action: BrandPrimaryButton(
+                  label: 'Retry',
+                  trailingIcon: null,
+                  expand: false,
+                  onPressed: () => ref.invalidate(myProfileProvider),
+                ),
               ),
             );
           }
@@ -201,22 +210,26 @@ class _ProfileBar extends StatelessWidget {
             ],
           ),
           const Spacer(),
-          GestureDetector(
-            onTap: () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              height: 40,
-              width: 40,
-              decoration: BoxDecoration(
-                color: BrandColors.surfaceContainerLow,
-                shape: BoxShape.circle,
+          Semantics(
+            button: true,
+            label: 'Settings',
+            child: GestureDetector(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
               ),
-              child: Icon(
-                Icons.settings_rounded,
-                size: 20,
-                color: BrandColors.textHeadline,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                height: 48,
+                width: 48,
+                decoration: BoxDecoration(
+                  color: BrandColors.surfaceContainerLow,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.settings_rounded,
+                  size: 20,
+                  color: BrandColors.textHeadline,
+                ),
               ),
             ),
           ),
@@ -476,11 +489,13 @@ class _SocialChips extends StatelessWidget {
   };
 }
 
-/// Masks all but the last four digits, e.g. `+1 555-***-0194`.
+/// Masks all but the last four digits, e.g. `+•••••••0194`.
 String _maskPhone(String phone) {
   final digits = phone.replaceAll(RegExp(r'\D'), '');
   if (digits.length <= 4) return phone;
-  return '${phone.substring(0, phone.length - 4)}****${phone.substring(phone.length - 4)}';
+  final last4 = digits.substring(digits.length - 4);
+  final masked = '•' * (digits.length - 4);
+  return '${phone.startsWith('+') ? '+' : ''}$masked$last4';
 }
 
 class _Chip extends StatelessWidget {

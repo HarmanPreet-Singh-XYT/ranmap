@@ -52,6 +52,13 @@ if (!process.env.TRUST_PROXY) {
 app.use(cors({ origin: env.corsOrigin ?? false }));
 app.use(express.json({ limit: "100kb" }));
 
+// Every API route lives on one router so it can be mounted at the root and,
+// when BASE_PATH is set, at a reverse-proxy path prefix too (e.g. "/ranmap" for
+// https://api.example.com/ranmap). The client's BACKEND_URL may include that
+// prefix, so mounting at both means the server works whether or not the proxy
+// strips it before forwarding.
+const api = express.Router();
+
 // Coarse per-IP cap applied BEFORE auth, so a flood of garbage bearer tokens
 // can't drive unbounded Supabase Auth traffic. The per-user limits stay on the
 // individual routes.
@@ -61,26 +68,29 @@ const preAuthLimit = rateLimit({
   max: 300,
   message: "Too many requests — please slow down.",
 });
-app.use(
+api.use(
   ["/ai", "/phone", "/voice", "/maps", "/account", "/notifications", "/plan", "/weather"],
   preAuthLimit,
 );
 
-app.get("/health", (_req, res) => res.json({ ok: true }));
-app.use("/ai", aiRouter);
-app.use("/phone", phoneRouter);
-app.use("/voice", voiceRouter);
-app.use("/maps", mapsRouter);
-app.use("/account", accountRouter);
-app.use("/notifications", notificationsRouter);
-app.use("/plan", planRouter);
-app.use("/weather", weatherRouter);
+api.get("/health", (_req, res) => res.json({ ok: true }));
+api.use("/ai", aiRouter);
+api.use("/phone", phoneRouter);
+api.use("/voice", voiceRouter);
+api.use("/maps", mapsRouter);
+api.use("/account", accountRouter);
+api.use("/notifications", notificationsRouter);
+api.use("/plan", planRouter);
+api.use("/weather", weatherRouter);
 // Public (no session): the "watch my ride" page, authorized by its share token.
-app.use("/watch", watchRouter);
+api.use("/watch", watchRouter);
 // Not behind the pre-auth IP limit above: RevenueCat's webhook has no session
 // and a burst of events shouldn't get rate-limited; it authenticates with a
 // shared secret (see billing.ts) instead.
-app.use("/billing", billingRouter);
+api.use("/billing", billingRouter);
+
+app.use(api);
+if (env.basePath) app.use(env.basePath, api);
 
 app.use((_req, res) => {
   res.status(404).json({ error: "Not found" });

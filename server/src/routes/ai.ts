@@ -51,12 +51,16 @@ const MAX_OUTPUT_TOKENS = 1024;
 const GEMINI_TIMEOUT_MS = 30_000;
 
 // Upper-bound tokens held against the allowance while the model runs: the
-// output budget for every possible round plus the input window. The hold is
-// tracked apart from settled usage (migration 0036), so it never appears in the
-// quota meter; the route settles it against the real spend once the turn
-// finishes, so a turn costs its actual tokens and the hold only bounds
-// concurrency.
-const AI_RESERVE_TOKENS = MAX_OUTPUT_TOKENS * MAX_TOOL_ROUNDS + MAX_CONTENT_CHARS;
+// output budget for every possible round plus the *whole replayed input window*
+// (the current message and up to MAX_HISTORY_MESSAGES prior ones, each of which
+// can carry MAX_CONTENT_CHARS). Counting only the current message understated
+// the hold, so a turn near the cap could overshoot its allowance by far more
+// than the reservation covered. The hold is tracked apart from settled usage
+// (migration 0036), so it never appears in the quota meter; the route settles it
+// against the real spend once the turn finishes, so a turn costs its actual
+// tokens and the hold only bounds concurrency.
+const AI_RESERVE_TOKENS =
+  MAX_OUTPUT_TOKENS * MAX_TOOL_ROUNDS + MAX_CONTENT_CHARS * MAX_HISTORY_MESSAGES;
 
 /** The allowance ceiling for a tier (mirrors the middleware ladder). */
 function aiLimitForTier(tier: string): number {
@@ -229,6 +233,24 @@ aiRouter.post(
       );
       const assistantText = rawReply.trim() || "Sorry, I didn't have a reply for that.";
 
+      const { error: insertAssistantMsgError } = await supabaseAdmin.from("ai_messages").insert({
+        conversation_id: conversationId,
+        role: "assistant",
+        content: assistantText,
+        tools: executed,
+      });
+      if (insertAssistantMsgError) {
+        // The reply never reached the client, so don't charge for it: release
+        // the hold rather than settling it against a reply nobody received.
+        try {
+          await releaseUsage(userId, aiAssistantAllowance.feature, AI_RESERVE_TOKENS, AI_WINDOW_SECONDS);
+        } catch (releaseError) {
+          console.error("ai: failed to release reservation:", releaseError);
+        }
+        fail(res, insertAssistantMsgError, 500, "The assistant's reply could not be saved.", "ai: insert assistant message");
+        return;
+      }
+
       // Record the real spend and release the hold in one atomic step, so the
       // meter never shows the reservation and the two counters can't drift.
       // Best-effort: a metering failure must not fail the reply.
@@ -242,17 +264,6 @@ aiRouter.post(
         );
       } catch (usageError) {
         console.error("ai: failed to settle token usage:", usageError);
-      }
-
-      const { error: insertAssistantMsgError } = await supabaseAdmin.from("ai_messages").insert({
-        conversation_id: conversationId,
-        role: "assistant",
-        content: assistantText,
-        tools: executed,
-      });
-      if (insertAssistantMsgError) {
-        fail(res, insertAssistantMsgError, 500, "The assistant's reply could not be saved.", "ai: insert assistant message");
-        return;
       }
 
       res.json({ conversationId, reply: assistantText, tools: executed, tokens });

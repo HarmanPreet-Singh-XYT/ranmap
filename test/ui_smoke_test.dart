@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:ranmap/core/providers/app_prefs_provider.dart';
 import 'package:ranmap/core/router/auth_state_provider.dart';
+import 'package:ranmap/core/storage/secure_store.dart';
 import 'package:ranmap/core/theme/forui_theme.dart';
 import 'package:ranmap/core/widgets/app_dialog.dart';
 import 'package:ranmap/core/widgets/avatar_view.dart';
@@ -330,6 +331,7 @@ void main() {
         const SettingsScreen(),
         overrides: [
           sharedPreferencesProvider.overrideWithValue(prefs),
+          secureStoreProvider.overrideWithValue(SecureStore.inMemory()),
           myProfileProvider.overrideWith(
             (ref) async => const Profile(id: 'u1', username: 'tester'),
           ),

@@ -719,11 +719,13 @@ class GroupDetailScreen extends ConsumerWidget {
           BrandFieldAction(
             icon: Icons.check_circle_outline_rounded,
             color: BrandColors.primary,
+            semanticLabel: 'Approve join request',
             onTap: () => _respond(context, ref, userId!, username, true),
           ),
           BrandFieldAction(
             icon: Icons.cancel_outlined,
             color: BrandColors.error,
+            semanticLabel: 'Deny join request',
             onTap: () => _respond(context, ref, userId!, username, false),
           ),
         ],
@@ -917,11 +919,13 @@ class _InviteCard extends ConsumerWidget {
                     children: [
                       BrandFieldAction(
                         icon: Icons.copy_rounded,
+                        semanticLabel: 'Copy invite code',
                         onTap: () => _copy(context),
                       ),
                       BrandFieldAction(
                         icon: Icons.ios_share_rounded,
                         color: BrandColors.primary,
+                        semanticLabel: 'Share invite link',
                         onTap: () => _share(context),
                       ),
                     ],

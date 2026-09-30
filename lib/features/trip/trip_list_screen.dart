@@ -293,30 +293,40 @@ class _FilterPill extends StatelessWidget {
   }
 }
 
-class _InviteCard extends ConsumerWidget {
+class _InviteCard extends ConsumerStatefulWidget {
   const _InviteCard({required this.invite});
 
   final Map<String, dynamic> invite;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_InviteCard> createState() => _InviteCardState();
+}
+
+class _InviteCardState extends ConsumerState<_InviteCard> {
+  bool _busy = false;
+
+  Future<void> _respond(bool accept) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await ref.read(tripRepositoryProvider).respondToInvite(
+            tripId: widget.invite['trip_id'] as String,
+            accept: accept,
+          );
+      ref.invalidate(tripInvitesProvider);
+      ref.invalidate(myTripsProvider);
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final invite = widget.invite;
     final trip = invite['trips'] as Map<String, dynamic>?;
     final creator = trip?['creator'] as Map<String, dynamic>?;
-    final tripId = invite['trip_id'] as String;
-
-    Future<void> respond(bool accept) async {
-      try {
-        await ref
-            .read(tripRepositoryProvider)
-            .respondToInvite(tripId: tripId, accept: accept);
-        ref.invalidate(tripInvitesProvider);
-        ref.invalidate(myTripsProvider);
-      } catch (e) {
-        if (context.mounted) {
-          showAppToast(context, friendlyError(e), error: true);
-        }
-      }
-    }
 
     return BrandCard(
       padding: const EdgeInsets.all(BrandSpace.md),
@@ -353,14 +363,15 @@ class _InviteCard extends ConsumerWidget {
                   label: 'Accept',
                   trailingIcon: null,
                   glow: false,
-                  onPressed: () => respond(true),
+                  loading: _busy,
+                  onPressed: _busy ? null : () => _respond(true),
                 ),
               ),
               const SizedBox(width: BrandSpace.gutterSm),
               Expanded(
                 child: BrandSecondaryButton(
                   label: 'Decline',
-                  onPressed: () => respond(false),
+                  onPressed: _busy ? null : () => _respond(false),
                 ),
               ),
             ],
@@ -371,22 +382,34 @@ class _InviteCard extends ConsumerWidget {
   }
 }
 
-class _TripCard extends ConsumerWidget {
+class _TripCard extends ConsumerStatefulWidget {
   const _TripCard({required this.trip});
 
   final Trip trip;
 
-  Future<void> _start(BuildContext context, WidgetRef ref) async {
+  @override
+  ConsumerState<_TripCard> createState() => _TripCardState();
+}
+
+class _TripCardState extends ConsumerState<_TripCard> {
+  bool _busy = false;
+
+  Future<void> _start() async {
+    if (_busy) return;
+    setState(() => _busy = true);
     try {
-      await ref.read(tripRepositoryProvider).startTrip(trip.id);
+      await ref.read(tripRepositoryProvider).startTrip(widget.trip.id);
       ref.invalidate(myTripsProvider);
     } catch (e) {
-      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
+    final trip = widget.trip;
     return GestureDetector(
       onTap: () => Navigator.of(
         context,
@@ -466,7 +489,8 @@ class _TripCard extends ConsumerWidget {
                 trailingIcon: null,
                 glow: false,
                 expand: false,
-                onPressed: () => _start(context, ref),
+                loading: _busy,
+                onPressed: _busy ? null : _start,
               )
             else
               Icon(

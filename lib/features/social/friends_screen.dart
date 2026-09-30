@@ -82,6 +82,7 @@ class _FriendsTab extends ConsumerWidget {
             trailing: BrandFieldAction(
               icon: Icons.person_remove_outlined,
               color: BrandColors.error,
+              semanticLabel: 'Remove friend',
               onTap: () async {
                 final confirmed = await showAppConfirmDialog(
                   context,
@@ -142,15 +143,55 @@ class _FriendsTab extends ConsumerWidget {
   }
 }
 
-class _RequestsTab extends ConsumerWidget {
+class _RequestsTab extends ConsumerStatefulWidget {
   const _RequestsTab();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_RequestsTab> createState() => _RequestsTabState();
+}
+
+class _RequestsTabState extends ConsumerState<_RequestsTab> {
+  /// Friendship ids with an in-flight accept/decline/cancel, so a double tap
+  /// can't submit the same action twice.
+  final Set<String> _busy = {};
+
+  Future<void> _respond(String friendshipId, bool accept) async {
+    if (_busy.contains(friendshipId)) return;
+    setState(() => _busy.add(friendshipId));
+    try {
+      await ref
+          .read(friendRepositoryProvider)
+          .respond(friendshipId: friendshipId, accept: accept);
+      ref.invalidate(incomingRequestsProvider);
+      ref.invalidate(friendsProvider);
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _busy.remove(friendshipId));
+    }
+  }
+
+  Future<void> _cancel(String friendshipId) async {
+    if (_busy.contains(friendshipId)) return;
+    setState(() => _busy.add(friendshipId));
+    try {
+      await ref.read(friendRepositoryProvider).remove(friendshipId);
+      ref.invalidate(outgoingRequestsProvider);
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _busy.remove(friendshipId));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final incomingAsync = ref.watch(incomingRequestsProvider);
     final outgoingAsync = ref.watch(outgoingRequestsProvider);
 
     Widget incomingCard(Map<String, dynamic> row) {
+      final id = row['id'] as String;
+      final busy = _busy.contains(id);
       final requester = row['requester'] as Map<String, dynamic>?;
       return BrandCard(
         padding: const EdgeInsets.all(BrandSpace.md),
@@ -169,43 +210,15 @@ class _RequestsTab extends ConsumerWidget {
                     label: 'Accept',
                     trailingIcon: null,
                     glow: false,
-                    onPressed: () async {
-                      try {
-                        await ref
-                            .read(friendRepositoryProvider)
-                            .respond(
-                              friendshipId: row['id'] as String,
-                              accept: true,
-                            );
-                        ref.invalidate(incomingRequestsProvider);
-                        ref.invalidate(friendsProvider);
-                      } catch (e) {
-                        if (context.mounted) {
-                          showAppToast(context, friendlyError(e), error: true);
-                        }
-                      }
-                    },
+                    loading: busy,
+                    onPressed: busy ? null : () => _respond(id, true),
                   ),
                 ),
                 const SizedBox(width: BrandSpace.sm),
                 Expanded(
                   child: BrandSecondaryButton(
                     label: 'Decline',
-                    onPressed: () async {
-                      try {
-                        await ref
-                            .read(friendRepositoryProvider)
-                            .respond(
-                              friendshipId: row['id'] as String,
-                              accept: false,
-                            );
-                        ref.invalidate(incomingRequestsProvider);
-                      } catch (e) {
-                        if (context.mounted) {
-                          showAppToast(context, friendlyError(e), error: true);
-                        }
-                      }
-                    },
+                    onPressed: busy ? null : () => _respond(id, false),
                   ),
                 ),
               ],
@@ -216,6 +229,8 @@ class _RequestsTab extends ConsumerWidget {
     }
 
     Widget outgoingRow(Map<String, dynamic> row) {
+      final id = row['id'] as String;
+      final busy = _busy.contains(id);
       final addressee = row['addressee'] as Map<String, dynamic>?;
       return BrandListRow(
         icon: Icons.person_rounded,
@@ -224,18 +239,7 @@ class _RequestsTab extends ConsumerWidget {
         trailing: BrandSecondaryButton(
           label: 'Cancel',
           expand: false,
-          onPressed: () async {
-            try {
-              await ref
-                  .read(friendRepositoryProvider)
-                  .remove(row['id'] as String);
-              ref.invalidate(outgoingRequestsProvider);
-            } catch (e) {
-              if (context.mounted) {
-                showAppToast(context, friendlyError(e), error: true);
-              }
-            }
-          },
+          onPressed: busy ? null : () => _cancel(id),
         ),
       );
     }

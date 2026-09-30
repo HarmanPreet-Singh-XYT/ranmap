@@ -86,6 +86,9 @@ const TIMEOUT_MS = 10_000;
 const MAX_RADIUS_METERS = 50_000;
 // Search Box caps results at 25 for /category.
 const MAX_RESULTS = 25;
+// An encoded route polyline is forwarded upstream verbatim; bound its length so
+// a multi-megabyte value can't be used to amplify load on Mapbox or this server.
+const MAX_ROUTE_CHARS = 100_000;
 // Each detour is its own paid Directions call, so only measure the handful of
 // top results a user is likely to consider stopping at.
 const MAX_DETOUR_PLACES = 5;
@@ -319,6 +322,10 @@ mapsRouter.get(
     // Native search-along-route: one request covering the whole polyline,
     // instead of sampling points and merging several responses.
     const route = typeof req.query.route === "string" ? req.query.route : "";
+    if (route.length > MAX_ROUTE_CHARS) {
+      res.status(413).json({ error: "route is too long" });
+      return;
+    }
     const center = parseLatLng(String(req.query.location ?? "").trim());
     if (!route && !center) {
       res.status(400).json({ error: "location must be valid lat,lng" });

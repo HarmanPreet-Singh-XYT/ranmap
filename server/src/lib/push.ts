@@ -11,6 +11,16 @@ export type NotificationKind =
   | "group_invites"
   | "convoy_alerts";
 
+/** Runtime allow-list: `kind` is interpolated into a PostgREST select, so it
+ *  must never be an arbitrary string even though the type says it can't be. */
+const NOTIFICATION_KINDS: readonly string[] = [
+  "trip_invites",
+  "chat_messages",
+  "trip_updates",
+  "group_invites",
+  "convoy_alerts",
+];
+
 /** FCM accepts at most 500 tokens per multicast request. */
 const MULTICAST_BATCH = 500;
 
@@ -147,6 +157,7 @@ async function recordNotifications(
  * preferences row means "subscribed" — the default in the schema.
  */
 async function optedOutUserIds(userIds: string[], kind: NotificationKind): Promise<Set<string>> {
+  if (!NOTIFICATION_KINDS.includes(kind)) return new Set();
   const { data, error } = await supabaseAdmin
     .from("notification_prefs")
     .select(`user_id, ${kind}`)

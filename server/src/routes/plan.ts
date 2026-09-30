@@ -3,6 +3,7 @@ import { asyncHandler } from "../lib/async-handler.js";
 import { meteredAllowances } from "../lib/allowances.js";
 import { fail } from "../lib/errors.js";
 import { planTier } from "../lib/plan-store.js";
+import { rateLimit } from "../lib/rate-limit.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { requireAuth } from "../middleware/require-auth.js";
 
@@ -15,6 +16,17 @@ import { requireAuth } from "../middleware/require-auth.js";
 export const planRouter = Router();
 
 planRouter.use(requireAuth);
+
+// Each call runs one `usage_status` RPC per metered feature, so cap it rather
+// than letting a client hammer the DB through it.
+planRouter.use(
+  rateLimit({
+    name: "plan-usage",
+    windowMs: 60 * 1000,
+    max: 60,
+    message: "Too many requests — please slow down.",
+  }),
+);
 
 // GET /plan/usage
 // -> { pro: boolean,

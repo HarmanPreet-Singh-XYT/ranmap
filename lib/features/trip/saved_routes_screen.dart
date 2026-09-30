@@ -155,11 +155,13 @@ class _RouteTemplateRow extends StatelessWidget {
         children: [
           BrandFieldAction(
             icon: Icons.edit_outlined,
+            semanticLabel: 'Rename saved route',
             onTap: onRename,
           ),
           BrandFieldAction(
             icon: Icons.delete_outline_rounded,
             color: BrandColors.error,
+            semanticLabel: 'Delete saved route',
             onTap: onDelete,
           ),
         ],

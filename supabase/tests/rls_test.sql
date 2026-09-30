@@ -11,13 +11,15 @@
 
 begin;
 
--- 29 assertions: 24 ok() (RLS + RPC/column privilege grants) plus five
+-- 32 assertions: 27 ok() (RLS + RPC/column privilege grants) plus five
 -- behavioural checks (lives_ok / throws_ok / is_empty) below.
-select plan(29);
+select plan(32);
 
 -- ---------------------------------------------------------------------------
--- RLS is enabled on every application table (catches a new table added without
--- `alter table ... enable row level security`).
+-- RLS is enabled on every table in `public`. Listing the tables by hand let new
+-- ones (notifications, trip_legs, stop_proposals, device_tokens, …) slip
+-- through untested, so this asserts it for *every* application table and only
+-- excludes extension-owned tables. `spatial_ref_sys` is PostGIS's, not ours.
 -- ---------------------------------------------------------------------------
 select ok(
   (
@@ -26,15 +28,7 @@ select ok(
     join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'public'
       and c.relkind = 'r'
-      and c.relname in (
-        'profiles', 'friendships', 'groups', 'group_members', 'trips',
-        'trip_members', 'trip_stops', 'location_pings', 'trip_stats',
-        'trip_expenses', 'map_posts', 'map_post_shares', 'chat_messages',
-        'ai_conversations', 'ai_messages', 'ai_saved_places', 'scheduled_trips',
-        'group_locations', 'group_alerts', 'alert_checkins',
-        'trip_checklist_items', 'route_templates', 'trip_shares',
-        'vehicle_service', 'user_documents'
-      )
+      and c.relname <> 'spatial_ref_sys'
   ),
   'RLS is enabled on every application table'
 );
@@ -89,6 +83,22 @@ select ok(
 select ok(
   not has_function_privilege('authenticated', 'public.start_due_scheduled_trips()', 'execute'),
   'authenticated cannot execute start_due_scheduled_trips'
+);
+select ok(
+  has_function_privilege('service_role', 'public.start_due_scheduled_trips()', 'execute'),
+  'service_role can execute start_due_scheduled_trips (the scheduler)'
+);
+
+-- ---------------------------------------------------------------------------
+-- notifications (0039/0040): the client may only flip read_at on its own rows.
+-- ---------------------------------------------------------------------------
+select ok(
+  has_column_privilege('authenticated', 'public.notifications', 'read_at', 'update'),
+  'authenticated can UPDATE notifications.read_at'
+);
+select ok(
+  not has_column_privilege('authenticated', 'public.notifications', 'title', 'update'),
+  'authenticated cannot UPDATE notifications.title'
 );
 select ok(
   not has_function_privilege(

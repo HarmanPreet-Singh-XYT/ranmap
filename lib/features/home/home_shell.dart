@@ -70,17 +70,35 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     );
   }
 
+  /// Re-attempts [action] shortly after [attempt] while another route is on
+  /// top, so a pending invite isn't silently dropped when the shell wasn't
+  /// current (e.g. the post-sign-in paywall was showing). Bounded so it can't
+  /// loop forever.
+  void _retryWhenCurrent(int attempt, Future<void> Function() action) {
+    if (attempt >= 10) return;
+    Future<void>.delayed(const Duration(milliseconds: 700), () {
+      if (mounted) action();
+    });
+  }
+
   /// Re-opens a group join link the user tapped before signing up. The code is
   /// persisted across the auth round trip, so once they're home with a profile
   /// we push the join screen; it clears the pending code on entry.
-  Future<void> _maybeResumeGroupJoin() async {
+  Future<void> _maybeResumeGroupJoin({int attempt = 0}) async {
     if (!mounted) return;
     final code = ref.read(pendingGroupJoinProvider);
     if (code == null) return;
     if (ref.read(authStateProvider).valueOrNull?.session == null) return;
     if (ref.read(myProfileProvider).valueOrNull == null) return;
-    // Don't stack it on top of another route (e.g. the paywall).
-    if (ModalRoute.of(context)?.isCurrent != true) return;
+    // Don't stack it on top of another route (e.g. the paywall) — retry once
+    // that route is gone, rather than dropping the pending code.
+    if (ModalRoute.of(context)?.isCurrent != true) {
+      _retryWhenCurrent(
+        attempt,
+        () => _maybeResumeGroupJoin(attempt: attempt + 1),
+      );
+      return;
+    }
     await context.push('/join/$code');
   }
 
@@ -88,7 +106,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   /// signed-in recipient already handled it on the invite screen (which clears
   /// the pending value), so this fires mainly for someone who signed up from an
   /// invite link and has now landed home.
-  Future<void> _maybeShowPendingInvite() async {
+  Future<void> _maybeShowPendingInvite({int attempt = 0}) async {
     if (!mounted || _invitePromptActive) return;
     final username = ref.read(pendingInviteProvider);
     if (username == null) return;
@@ -101,8 +119,15 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       return;
     }
 
-    // Don't stack the sheet on top of another route (e.g. the paywall).
-    if (ModalRoute.of(context)?.isCurrent != true) return;
+    // Don't stack the sheet on top of another route (e.g. the paywall) — retry
+    // once that route is gone, rather than dropping the pending invite.
+    if (ModalRoute.of(context)?.isCurrent != true) {
+      _retryWhenCurrent(
+        attempt,
+        () => _maybeShowPendingInvite(attempt: attempt + 1),
+      );
+      return;
+    }
 
     _invitePromptActive = true;
     try {

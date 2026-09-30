@@ -38,6 +38,16 @@ function trustProxy(name: string, fallback: number | false): number | boolean {
   return parsed;
 }
 
+// Normalizes an optional URL path prefix into a leading-slash, no-trailing-slash
+// form ("ranmap/" -> "/ranmap"). "/" and "" both mean "no prefix".
+function basePath(name: string): string | undefined {
+  const raw = optionalValue(name);
+  if (raw === undefined) return undefined;
+  const trimmed = raw.replace(/\/+$/, "");
+  if (trimmed === "" || trimmed === "/") return undefined;
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
 function port(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw === "") return fallback;
@@ -53,6 +63,10 @@ export const env = {
   // Number of reverse-proxy hops in front of this process (default 1). Set to
   // 0/"false" when exposed directly; never "true" in production.
   trustProxy: trustProxy("TRUST_PROXY", 1),
+  // Optional path prefix the API is served under behind a reverse proxy (e.g.
+  // "/ranmap" for https://api.example.com/ranmap). Routes are mounted at both
+  // the root and this prefix, so it works whether or not the proxy strips it.
+  basePath: basePath("BASE_PATH"),
   supabaseUrl: required("SUPABASE_URL"),
   // Supabase secret key (the replacement for the legacy service-role key).
   supabaseSecretKey: required("SUPABASE_SECRET_KEY"),

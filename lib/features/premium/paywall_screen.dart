@@ -326,20 +326,24 @@ class _PaywallHeader extends StatelessWidget {
       ),
       child: Row(
         children: [
-          GestureDetector(
-            onTap: onBack,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              height: 44,
-              width: 44,
-              decoration: BoxDecoration(
-                color: BrandColors.surfaceContainerLow,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.arrow_back_rounded,
-                size: 20,
-                color: BrandColors.onSurface,
+          Semantics(
+            button: true,
+            label: 'Back',
+            child: GestureDetector(
+              onTap: onBack,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                height: 48,
+                width: 48,
+                decoration: BoxDecoration(
+                  color: BrandColors.surfaceContainerLow,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.arrow_back_rounded,
+                  size: 20,
+                  color: BrandColors.onSurface,
+                ),
               ),
             ),
           ),
@@ -368,13 +372,16 @@ class _PaywallHeader extends StatelessWidget {
               ],
             ),
           ),
-          SizedBox(
-            height: 44,
-            width: 44,
-            child: Icon(
-              Icons.navigation_rounded,
-              size: 24,
-              color: BrandColors.primary,
+          // Decorative mark, not a control — keep screen readers off it.
+          ExcludeSemantics(
+            child: SizedBox(
+              height: 44,
+              width: 44,
+              child: Icon(
+                Icons.navigation_rounded,
+                size: 24,
+                color: BrandColors.primary,
+              ),
             ),
           ),
         ],

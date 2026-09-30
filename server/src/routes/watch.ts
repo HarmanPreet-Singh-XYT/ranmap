@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { asyncHandler } from "../lib/async-handler.js";
 import { decodePolyline } from "../lib/polyline.js";
 import { rateLimit } from "../lib/rate-limit.js";
@@ -9,6 +9,23 @@ import { supabaseAdmin } from "../lib/supabase.js";
 // data endpoint the page polls. The token is the capability: it's validated
 // here (service role) and a revoked/unknown token is a plain 404.
 export const watchRouter = Router();
+
+// Security headers for a page that can be opened by anyone. The page uses inline
+// <style>/<script> and fetches its own data endpoint, so the CSP allows exactly
+// those and nothing external; frame-ancestors / X-Frame-Options block
+// clickjacking, and nosniff stops MIME confusion.
+watchRouter.use((_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; " +
+      "img-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'; " +
+      "frame-ancestors 'none'",
+  );
+  next();
+});
 
 watchRouter.use(
   rateLimit({

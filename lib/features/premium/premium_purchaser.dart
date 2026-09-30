@@ -40,7 +40,7 @@ class PaywallPlan {
 abstract class PremiumPurchaser {
   /// Buys [plan] (Pro annual by default — the best-value option the paywall
   /// defaults to).
-  Future<void> purchase({PaywallPlan plan});
+  Future<void> purchase({PaywallPlan plan = PaywallPlan.proAnnual});
 
   /// Restores prior purchases and reports whether an active entitlement is now
   /// present, so the UI can be honest when there was nothing to restore.

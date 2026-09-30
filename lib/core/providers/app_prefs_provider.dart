@@ -18,8 +18,6 @@ const _kPaywallLastShownKey = 'paywall_last_shown_v1';
 const _kPendingInviteKey = 'pending_invite_v1';
 const _kPendingGroupCodeKey = 'pending_group_code_v1';
 const _kConvoyGroupKey = 'convoy_group_v1';
-const _kEmergencyNameKey = 'emergency_contact_name_v1';
-const _kEmergencyPhoneKey = 'emergency_contact_phone_v1';
 const _kIntroFlagsVersionKey = 'intro_flags_version';
 
 /// Bump when the *meaning* of the intro flags changes, so existing installs
@@ -109,24 +107,6 @@ class AppPrefs {
   Future<void> setConvoyGroupId(String? groupId) {
     if (groupId == null) return _prefs.remove(_kConvoyGroupKey);
     return _prefs.setString(_kConvoyGroupKey, groupId);
-  }
-
-  /// The emergency contact the SOS fallback texts, or null when unset.
-  String? get emergencyContactName => _prefs.getString(_kEmergencyNameKey);
-  String? get emergencyContactPhone => _prefs.getString(_kEmergencyPhoneKey);
-
-  /// Stores (or clears, when a value is null/empty) the emergency contact.
-  Future<void> setEmergencyContact({String? name, String? phone}) async {
-    if (name == null || name.isEmpty) {
-      await _prefs.remove(_kEmergencyNameKey);
-    } else {
-      await _prefs.setString(_kEmergencyNameKey, name);
-    }
-    if (phone == null || phone.isEmpty) {
-      await _prefs.remove(_kEmergencyPhoneKey);
-    } else {
-      await _prefs.setString(_kEmergencyPhoneKey, phone);
-    }
   }
 }
 

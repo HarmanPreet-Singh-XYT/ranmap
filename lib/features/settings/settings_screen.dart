@@ -587,9 +587,6 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
                       icon: Icons.mail_outline_rounded,
                       title: 'Trip invites',
                       subtitle: 'When someone invites you to a trip',
-                      onTap: () => _update(
-                        prefs.copyWith(tripInvites: !prefs.tripInvites),
-                      ),
                       trailing: FSwitch(
                         value: prefs.tripInvites,
                         onChange: (v) =>
@@ -601,9 +598,6 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
                       icon: Icons.forum_outlined,
                       title: 'Chat messages',
                       subtitle: 'New messages in your trip and group channels',
-                      onTap: () => _update(
-                        prefs.copyWith(chatMessages: !prefs.chatMessages),
-                      ),
                       trailing: FSwitch(
                         value: prefs.chatMessages,
                         onChange: (v) =>
@@ -616,9 +610,6 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
                       title: 'Group invites',
                       subtitle:
                           'When you are added to a group or approved to join',
-                      onTap: () => _update(
-                        prefs.copyWith(groupInvites: !prefs.groupInvites),
-                      ),
                       trailing: FSwitch(
                         value: prefs.groupInvites,
                         onChange: (v) =>
@@ -630,9 +621,6 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
                       icon: Icons.sos_rounded,
                       title: 'Convoy alerts',
                       subtitle: 'SOS and regroup signals from your crew',
-                      onTap: () => _update(
-                        prefs.copyWith(convoyAlerts: !prefs.convoyAlerts),
-                      ),
                       trailing: FSwitch(
                         value: prefs.convoyAlerts,
                         onChange: (v) =>
@@ -644,9 +632,6 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
                       icon: Icons.route_outlined,
                       title: 'Trip updates',
                       subtitle: 'When a scheduled trip starts',
-                      onTap: () => _update(
-                        prefs.copyWith(tripUpdates: !prefs.tripUpdates),
-                      ),
                       trailing: FSwitch(
                         value: prefs.tripUpdates,
                         onChange: (v) =>

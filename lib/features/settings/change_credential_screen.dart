@@ -52,7 +52,9 @@ class _ChangeCredentialScreenState
   Future<void> _save() async {
     final value = _valueCtrl.text.trim();
     if (_isPassword) {
-      final passwordValidationError = passwordError(value, requireDigit: false);
+      // Match the sign-up rule (length + at least one digit) so a password
+      // change can't weaken the account below what sign-up allows.
+      final passwordValidationError = passwordError(value);
       if (passwordValidationError != null) {
         setState(() => _error = passwordValidationError);
         return;

@@ -386,8 +386,16 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
           BrandSectionHeader(icon: Icons.campaign_rounded, title: 'Alerts'),
           const SizedBox(height: BrandSpace.sm),
           alertsAsync.when(
-            loading: () => const SizedBox.shrink(),
-            error: (e, _) => const SizedBox.shrink(),
+            // Never hide this section on failure: a silent blank could read as
+            // "no active alerts" when an SOS or regroup is actually pending.
+            loading: () => const Padding(
+              padding: EdgeInsets.symmetric(vertical: BrandSpace.md),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+            error: (e, _) => ErrorRetry(
+              error: e,
+              onRetry: () => ref.invalidate(groupAlertsProvider(widget.groupId)),
+            ),
             data: (alerts) {
               final active = alerts.where((a) => !a.isResolved).toList();
               if (active.isEmpty) {

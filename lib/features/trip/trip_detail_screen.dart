@@ -404,6 +404,7 @@ class TripDetailScreen extends ConsumerWidget {
             children: [
               _HeaderIconButton(
                 icon: Icons.photo_library_outlined,
+                semanticLabel: 'Trip photos',
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => TripPhotosScreen(
@@ -415,27 +416,22 @@ class TripDetailScreen extends ConsumerWidget {
               ),
               const Spacer(),
               if (trip.status == TripStatus.planned) ...[
-                BrandPrimaryButton(
+                _TripActionButton(
                   label: 'Start',
-                  trailingIcon: null,
-                  glow: false,
-                  expand: false,
                   onPressed: () => _startTrip(context, ref),
                 ),
                 const SizedBox(width: BrandSpace.sm),
               ],
               if (trip.status == TripStatus.active) ...[
-                BrandPrimaryButton(
+                _TripActionButton(
                   label: 'Complete',
-                  trailingIcon: null,
-                  glow: false,
-                  expand: false,
                   onPressed: () => _completeTrip(context, ref),
                 ),
                 const SizedBox(width: BrandSpace.sm),
               ],
               _HeaderIconButton(
                 icon: Icons.more_vert,
+                semanticLabel: 'More options',
                 onTap: () => _showActions(context, ref, isCreator),
               ),
             ],
@@ -490,26 +486,75 @@ class TripDetailScreen extends ConsumerWidget {
 /// A circular header action used for the trip-level affordances that used to
 /// live in the ForUI header's suffix slot.
 class _HeaderIconButton extends StatelessWidget {
-  const _HeaderIconButton({required this.icon, required this.onTap});
+  const _HeaderIconButton({
+    required this.icon,
+    required this.onTap,
+    required this.semanticLabel,
+  });
 
   final IconData icon;
   final VoidCallback onTap;
 
+  /// Icon-only, so a screen reader needs this to announce the control.
+  final String semanticLabel;
+
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        height: 44,
-        width: 44,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: BrandColors.surfaceContainerLow,
-          shape: BoxShape.circle,
+    return Semantics(
+      button: true,
+      label: semanticLabel,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          height: 48,
+          width: 48,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: BrandColors.surfaceContainerLow,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, size: 20, color: BrandColors.textHeadline),
         ),
-        child: Icon(icon, size: 20, color: BrandColors.textHeadline),
       ),
+    );
+  }
+}
+
+/// A header Start/Complete action that owns its own in-flight state, so a
+/// double tap can't start or complete a trip twice.
+class _TripActionButton extends StatefulWidget {
+  const _TripActionButton({required this.label, required this.onPressed});
+
+  final String label;
+  final Future<void> Function() onPressed;
+
+  @override
+  State<_TripActionButton> createState() => _TripActionButtonState();
+}
+
+class _TripActionButtonState extends State<_TripActionButton> {
+  bool _busy = false;
+
+  Future<void> _run() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.onPressed();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BrandPrimaryButton(
+      label: widget.label,
+      trailingIcon: null,
+      glow: false,
+      expand: false,
+      loading: _busy,
+      onPressed: _busy ? null : _run,
     );
   }
 }

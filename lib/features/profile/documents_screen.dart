@@ -87,12 +87,21 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
       return;
     }
 
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
-    if (picked == null || !mounted) return;
-    final bytes = await picked.readAsBytes();
-    final extension = picked.name.contains('.')
-        ? picked.name.split('.').last
-        : 'jpg';
+    // The picker and the byte read can both throw (permission, IO); keep them
+    // inside the guard so a failure surfaces as a toast, not an unhandled error.
+    final Uint8List bytes;
+    final String extension;
+    try {
+      final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
+      if (picked == null || !mounted) return;
+      bytes = Uint8List.fromList(await picked.readAsBytes());
+      extension = picked.name.contains('.')
+          ? picked.name.split('.').last
+          : 'jpg';
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+      return;
+    }
 
     setState(() => _busy = true);
     try {
@@ -101,7 +110,7 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
           .upload(
             name: name,
             kind: kind,
-            bytes: Uint8List.fromList(bytes),
+            bytes: bytes,
             fileExtension: extension,
           );
       ref.invalidate(userDocumentsProvider);
@@ -194,6 +203,7 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
                             trailing: BrandFieldAction(
                               icon: Icons.delete_outline_rounded,
                               color: BrandColors.error,
+                              semanticLabel: 'Delete document',
                               onTap: () => _delete(doc),
                             ),
                           ),

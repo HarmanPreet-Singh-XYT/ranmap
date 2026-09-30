@@ -4,6 +4,7 @@ import '../../core/theme/brand_palette.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
+import 'package:purchases_flutter/purchases_flutter.dart' show Offering, Package;
 
 import '../../core/theme/nav_palette.dart';
 import '../../core/widgets/app_spinner.dart';
@@ -13,6 +14,16 @@ import '../../core/widgets/brand/brand_sheet_surface.dart';
 import 'premium_providers.dart';
 import 'premium_purchaser.dart';
 import 'revenuecat.dart';
+
+/// The store package this sheet buys — the Pro annual pass (its only choice),
+/// matched by identifier first, then RevenueCat's standard annual package.
+Package? _proAnnualPackage(Offering? offering) {
+  if (offering == null) return null;
+  for (final package in offering.availablePackages) {
+    if (package.identifier == 'pro_annual') return package;
+  }
+  return offering.annual;
+}
 
 /// A paid capability. The [key] matches the server's `PremiumFeature` values for
 /// the server-gated features (ai_assistant/voice/maps_search); the rest are
@@ -108,7 +119,9 @@ class _PaywallSheetState extends ConsumerState<_PaywallSheet> {
   Future<void> _purchase() async {
     setState(() => _busy = true);
     try {
-      await ref.read(premiumPurchaserProvider).purchase();
+      await ref
+          .read(premiumPurchaserProvider)
+          .purchase(plan: PaywallPlan.proAnnual);
       // A successful purchase flips the plan server-side; refetch it.
       ref.invalidate(entitlementsProvider);
       if (mounted) Navigator.of(context).pop();
@@ -143,6 +156,13 @@ class _PaywallSheetState extends ConsumerState<_PaywallSheet> {
   @override
   Widget build(BuildContext context) {
     final c = NavColors.of(context);
+    // Show the price and term this sheet will charge *before* the purchase tap,
+    // rather than only inside the store sheet. Falls back to an honest note when
+    // the store hasn't loaded a price yet.
+    final proAnnual = _proAnnualPackage(
+      ref.watch(paywallOfferingProvider).valueOrNull,
+    );
+    final price = proAnnual?.storeProduct.priceString;
     return BrandSheetSurface(
       padding: EdgeInsets.zero,
       child: SingleChildScrollView(
@@ -237,6 +257,16 @@ class _PaywallSheetState extends ConsumerState<_PaywallSheet> {
                 ),
               ),
             const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                price != null
+                    ? 'Pro · Annual · $price/year'
+                    : 'Pricing is confirmed in the store before you pay.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: c.mutedForeground, fontSize: 13),
+              ),
+            ),
             FButton(
               size: .lg,
               onPress: _busy ? null : _purchase,

@@ -179,7 +179,14 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
   }
 
   Future<void> _pickFromFriends() async {
-    final friendRows = await ref.read(friendsProvider.future);
+    // A network failure here must surface as a toast, not an unhandled throw.
+    final List<Map<String, dynamic>> friendRows;
+    try {
+      friendRows = await ref.read(friendsProvider.future);
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+      return;
+    }
     final myUid = SupabaseService.currentUser?.id;
     final friends = friendRows
         .map((row) {

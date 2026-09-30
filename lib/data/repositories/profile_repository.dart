@@ -11,7 +11,10 @@ class ProfileRepository {
         .from('profiles')
         .select(kProfilePublicColumns)
         .eq('id', uid)
-        .maybeSingle();
+        .maybeSingle()
+        // Bound the wait: a stalled socket must surface as an error the router
+        // can recover from, not leave a returning user on the splash forever.
+        .timeout(const Duration(seconds: 20));
     return row == null ? null : Profile.fromJson(row);
   }
 

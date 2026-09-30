@@ -232,6 +232,7 @@ class _ChecklistRow extends StatelessWidget {
           BrandFieldAction(
             icon: Icons.close_rounded,
             color: BrandColors.textMuted,
+            semanticLabel: 'Remove item',
             onTap: onDelete,
           ),
         ],

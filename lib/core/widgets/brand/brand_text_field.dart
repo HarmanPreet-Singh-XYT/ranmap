@@ -175,6 +175,7 @@ class BrandFieldAction extends StatelessWidget {
     required this.onTap,
     this.color,
     this.size = 20,
+    this.semanticLabel,
   });
 
   final IconData icon;
@@ -182,16 +183,25 @@ class BrandFieldAction extends StatelessWidget {
   final Color? color;
   final double size;
 
+  /// Screen-reader label. Icon-only controls have no text, so without this a
+  /// screen reader announces nothing meaningful.
+  final String? semanticLabel;
+
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        height: 40,
-        width: 40,
-        alignment: Alignment.center,
-        child: Icon(icon, size: size, color: color ?? BrandColors.textMuted),
+    return Semantics(
+      button: true,
+      label: semanticLabel,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          // 48x48 is the Material minimum tap target; the glyph stays [size].
+          height: 48,
+          width: 48,
+          alignment: Alignment.center,
+          child: Icon(icon, size: size, color: color ?? BrandColors.textMuted),
+        ),
       ),
     );
   }

@@ -118,6 +118,7 @@ class _SavedPlaceRow extends StatelessWidget {
       trailing: BrandFieldAction(
         icon: Icons.delete_outline_rounded,
         color: BrandColors.error,
+        semanticLabel: 'Delete saved place',
         onTap: onDelete,
       ),
     );

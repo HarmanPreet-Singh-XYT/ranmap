@@ -366,7 +366,7 @@ final List<TourPage> kTourPages = [
       TourFeature(
         icon: Icons.price_check_rounded,
         title: 'Automated Equal Settlements',
-        body: 'Multi-currency ledger with 1-tap balance clearing via Apple Pay & Venmo.',
+        body: 'A shared ledger that tallies who paid what and works out each person’s equal share.',
         iconBg: BrandColors.secondaryFixed,
         iconColor: BrandColors.onSecondaryFixedVariant,
       ),

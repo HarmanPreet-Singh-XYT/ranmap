@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
@@ -122,9 +123,20 @@ class _OfflineMapsScreenState extends ConsumerState<OfflineMapsScreen> {
     }
   }
 
-  Future<void> _delete(TileRegion region) async {
+  Future<void> _delete(TileRegion region, {String? title}) async {
     final store = _store;
     if (store == null) return;
+    // Removing a download is destructive and expensive to undo (re-downloading
+    // uses data), so confirm first — like every other delete in the app.
+    final confirmed = await showAppConfirmDialog(
+      context,
+      title: 'Remove offline map?',
+      message:
+          'Remove "${title ?? 'this saved region'}"? You can download it again later, but that uses data.',
+      confirmLabel: 'Remove',
+      destructive: true,
+    );
+    if (!confirmed) return;
     try {
       await store.removeRegion(region.id);
       await _refreshRegions();
@@ -250,7 +262,11 @@ class _OfflineMapsScreenState extends ConsumerState<OfflineMapsScreen> {
                             trailing: BrandFieldAction(
                               icon: Icons.delete_outline_rounded,
                               color: BrandColors.error,
-                              onTap: () => _delete(region),
+                              semanticLabel: 'Remove offline map',
+                              onTap: () => _delete(
+                                region,
+                                title: _titleFor(region.id, trips),
+                              ),
                             ),
                           ),
                         ],
