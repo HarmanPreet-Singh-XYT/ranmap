@@ -469,6 +469,14 @@ class TripDetailScreen extends ConsumerWidget {
       header: BrandHeader(
         title: trip.title,
         onBack: () => Navigator.of(context).maybePop(),
+        // A live trip is finished from the header, as a tick.
+        actionIcon: trip.status == TripStatus.active
+            ? Icons.check_rounded
+            : null,
+        actionTooltip: 'Complete trip',
+        onAction: trip.status == TripStatus.active
+            ? () => _completeTrip(context, ref)
+            : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -493,13 +501,6 @@ class TripDetailScreen extends ConsumerWidget {
                 _TripActionButton(
                   label: 'Start',
                   onPressed: () => _startTrip(context, ref),
-                ),
-                const SizedBox(width: BrandSpace.sm),
-              ],
-              if (trip.status == TripStatus.active) ...[
-                _TripActionButton(
-                  label: 'Complete',
-                  onPressed: () => _completeTrip(context, ref),
                 ),
                 const SizedBox(width: BrandSpace.sm),
               ],

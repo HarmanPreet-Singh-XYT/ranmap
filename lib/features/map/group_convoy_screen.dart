@@ -394,7 +394,8 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
             ),
             error: (e, _) => ErrorRetry(
               error: e,
-              onRetry: () => ref.invalidate(groupAlertsProvider(widget.groupId)),
+              onRetry: () =>
+                  ref.invalidate(groupAlertsProvider(widget.groupId)),
             ),
             data: (alerts) {
               final active = alerts.where((a) => !a.isResolved).toList();

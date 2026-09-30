@@ -36,8 +36,7 @@ class SavedPlacesScreen extends ConsumerWidget {
               child: BrandEmptyState(
                 icon: Icons.bookmark_border_rounded,
                 title: 'No saved places yet',
-                message:
-                    'Tap a spot on the map and choose "Save this place", or ask the AI assistant to remember one. Your saved places collect here.',
+                message: 'Tap a spot on the map and choose "Save this place", or ask the AI assistant to remember one. Your saved places collect here.',
               ),
             );
           }
@@ -65,8 +64,10 @@ class SavedPlacesScreen extends ConsumerWidget {
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) =>
-            ErrorRetry(error: e, onRetry: () => ref.invalidate(savedPlacesProvider)),
+        error: (e, _) => ErrorRetry(
+          error: e,
+          onRetry: () => ref.invalidate(savedPlacesProvider),
+        ),
       ),
     );
   }
@@ -114,7 +115,9 @@ class _SavedPlaceRow extends StatelessWidget {
       title: place.name,
       subtitle: subtitle,
       showChevron: false,
-      onTap: point == null ? null : () => _openDirections(context, point.lat, point.lng),
+      onTap: point == null
+          ? null
+          : () => _openDirections(context, point.lat, point.lng),
       trailing: BrandFieldAction(
         icon: Icons.delete_outline_rounded,
         color: BrandColors.error,
@@ -135,7 +138,10 @@ class _SavedPlaceRow extends StatelessWidget {
       'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
     );
     try {
-      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
       if (!launched && context.mounted) {
         showAppToast(context, 'Could not open Google Maps.', error: true);
       }

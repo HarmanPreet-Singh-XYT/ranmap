@@ -97,7 +97,9 @@ class _MapPostViewerSheet extends ConsumerWidget {
     final friends = friendRows
         .map(
           (row) =>
-              (row['requester_id'] == myUid ? row['addressee'] : row['requester'])
+              (row['requester_id'] == myUid
+                      ? row['addressee']
+                      : row['requester'])
                   as Map<String, dynamic>?,
         )
         .whereType<Map<String, dynamic>>()

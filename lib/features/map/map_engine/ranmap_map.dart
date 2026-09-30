@@ -1,4 +1,3 @@
-import 'dart:io' show Platform;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -6,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
+import '../../../core/theme/brand_palette.dart';
 import 'map_style.dart';
 import 'mapbox_token.dart';
 import 'scene_3d.dart';
@@ -31,6 +31,7 @@ class RanmapMapView extends ConsumerStatefulWidget {
     this.userVehicleType,
     this.onMapReady,
     this.onStyleReady,
+    this.onCameraChanged,
   });
 
   /// Initial camera center. Null leaves the camera at Mapbox's default position
@@ -63,6 +64,9 @@ class RanmapMapView extends ConsumerStatefulWidget {
   /// Sources/layers/annotations are dropped by a style (re)load, so screens
   /// re-apply their overlays here.
   final ValueChanged<MapboxMap>? onStyleReady;
+
+  /// Fired continuously while the camera moves (pan/zoom/animation).
+  final ValueChanged<CameraChangedEventData>? onCameraChanged;
 
   @override
   ConsumerState<RanmapMapView> createState() => RanmapMapViewState();
@@ -112,12 +116,12 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
     widget.onStyleReady?.call(map);
   }
 
-  // The simulator sets no marker env var, but its app sandbox and binary
-  // always live under a `CoreSimulator` directory.
-  static final bool _isIosSimulator =
-      Platform.isIOS &&
-      (Platform.resolvedExecutable.contains('/CoreSimulator/') ||
-          (Platform.environment['HOME']?.contains('/CoreSimulator/') ?? false));
+  /// The old hand-rolled vehicle models crashed Mapbox's model parser (null
+  /// deref in MapboxCoreMaps on `com.mapbox.threadpool`) on the iOS simulator
+  /// and on real devices. The models were regenerated with indexed geometry and
+  /// UVs; this is back on to verify that. If it crashes again, set it to false
+  /// and the default 2D puck is used.
+  static const bool _use3dPuck = true;
 
   Future<void> _applyLocationPuck(MapboxMap map) async {
     final vehicleType = widget.userVehicleType;
@@ -126,18 +130,25 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
         LocationComponentSettings(
           enabled: widget.showUserLocation,
           puckBearingEnabled: true,
-          // Mapbox's model parser segfaults on the iOS simulator (null deref in
-          // MapboxCoreMaps on `com.mapbox.threadpool`), so the simulator gets the
-          // default puck; real devices get the 3D vehicle.
-          locationPuck: vehicleType == null || _isIosSimulator
+          // A soft pulsing halo (in screen pixels) so the vehicle stands out from
+          // the map tiles.
+          pulsingEnabled: true,
+          pulsingColor: BrandColors.primary.withValues(alpha: 0.45).toARGB32(),
+          pulsingMaxRadius: 60,
+          locationPuck: !_use3dPuck || vehicleType == null
               ? null
               : LocationPuck(
                   locationPuck3D: LocationPuck3D(
                     modelUri: VehicleModels.assetFor(vehicleType),
-                    modelScale: const <double?>[1, 1, 1],
-                    // Matches the SDK's default 3D-puck orientation; the puck
-                    // then rotates this with the device heading.
-                    modelRotation: const <double?>[0, 0, 90],
+                    // The puck scales in the viewport by default, so this is
+                    // pixels per model unit (metre): 1 would draw a 4 m car
+                    // ~4 px wide. ~11 px/m makes a car ~50 px on screen at any
+                    // zoom.
+                    modelScale: const <double?>[11, 11, 11],
+                    // The models face +X. +90 rendered them facing the wrong
+                    // way (tail toward the headlight beam), so yaw -90 instead;
+                    // the puck then rotates this with the device heading.
+                    modelRotation: const <double?>[0, 0, -90],
                   ),
                 ),
         ),
@@ -272,6 +283,8 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
               viewport: _viewport,
               onMapCreated: _onMapCreated,
               onStyleLoadedListener: _onStyleLoaded,
+              onCameraChangeListener: (data) =>
+                  widget.onCameraChanged?.call(data),
             );
           },
         );

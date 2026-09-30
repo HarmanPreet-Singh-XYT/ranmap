@@ -311,15 +311,10 @@ class BrandShadows {
     ),
   ];
 
-  /// Colored glow under the primary CTA.
-  static const List<BoxShadow> primaryGlow = [
-    BoxShadow(
-      color: Color(0x5922C55E),
-      offset: Offset(0, 8),
-      blurRadius: 20,
-      spreadRadius: -2,
-    ),
-  ];
+  /// The coloured glow under primary buttons, switched off (it read as a
+  /// distracting green halo). Kept as a named empty list so every call site that
+  /// asks for the glow simply renders flat, and it can be restored in one place.
+  static const List<BoxShadow> primaryGlow = [];
 
   static const List<BoxShadow> subtle = [
     BoxShadow(

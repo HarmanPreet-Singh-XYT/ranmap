@@ -104,6 +104,11 @@ class _MapScreenState extends ConsumerState<MapScreen>
     with WidgetsBindingObserver {
   final _mapKey = GlobalKey<RanmapMapViewState>();
   final _vehicles = VehicleModelLayerManager();
+  final _beam = HeadlightBeam();
+
+  /// TEMPORARY, for testing: draw the headlight beam even when stationary.
+  /// Set to false to hide it below walking pace.
+  static const bool _alwaysShowBeam = true;
 
   PointAnnotationManager? _photoPoints;
   PointAnnotationManager? _placePoints;
@@ -233,6 +238,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
     // and commit its change-guard, leaving the overlay permanently missing).
     await _disposeAnnotationManagers();
     _vehicles.reset();
+    _beam.reset();
     _postByAnnotationId.clear();
     _renderedPostIds = null;
     _renderedSavedPlaceIds = null;
@@ -492,9 +498,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
                   trailing: activeId == group.id
                       ? const BrandPill(label: 'Riding', bold: true)
                       : null,
-                  onTap: () => Navigator.of(sheetContext).pop(
-                    (id: group.id, name: group.name),
-                  ),
+                  onTap: () =>
+                      Navigator.of(sheetContext)
+                          .pop((id: group.id, name: group.name)),
                 ),
               ],
             ],
@@ -505,10 +511,8 @@ class _MapScreenState extends ConsumerState<MapScreen>
     if (selected == null || !mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => GroupConvoyScreen(
-          groupId: selected.id,
-          groupName: selected.name,
-        ),
+        builder: (_) =>
+            GroupConvoyScreen(groupId: selected.id, groupName: selected.name),
       ),
     );
   }
@@ -545,6 +549,8 @@ class _MapScreenState extends ConsumerState<MapScreen>
         activeTrip,
         // Geolocator's own speed in m/s (negative when it has no reading).
         position.speed,
+        // GPS course of travel; only trusted while actually moving (below).
+        position.heading,
       ),
       loading: () => const Center(child: FCircularProgress()),
       error: (e, _) =>
@@ -582,6 +588,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
     double deviceLng,
     Trip? activeTrip,
     double deviceSpeedMps,
+    double deviceHeadingDegrees,
   ) {
     final here = Geo.pos(deviceLat, deviceLng);
     final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
@@ -700,6 +707,25 @@ class _MapScreenState extends ConsumerState<MapScreen>
     final map = _mapKey.currentState?.map;
     if (map != null) {
       unawaited(_vehicles.sync(map, poses));
+      // GPS course is meaningless below walking pace, so the beam hides then —
+      // unless [_alwaysShowBeam] is on for testing, which shows it standing
+      // still (pointing along the last known course, or north if there is none).
+      final movingHeading = deviceSpeedMps > 1.0 ? deviceHeadingDegrees : null;
+      unawaited(
+        _beam.sync(
+          map,
+          lat: deviceLat,
+          lng: deviceLng,
+          headingDegrees:
+              movingHeading ??
+              (_alwaysShowBeam
+                  ? (deviceHeadingDegrees >= 0 ? deviceHeadingDegrees : 0)
+                  : null),
+          colorArgb: BrandColors.primary.toARGB32(),
+          // Standard/Satellite draw custom layers under the basemap unless slotted.
+          slot: _style.isStandard ? 'top' : null,
+        ),
+      );
       unawaited(_syncPhotoPins(mapPosts, devicePixelRatio));
       unawaited(_syncSavedPlacePins(savedPlaces, devicePixelRatio));
       unawaited(_syncRoute(routePolyline));
@@ -724,6 +750,12 @@ class _MapScreenState extends ConsumerState<MapScreen>
             showUserLocation: true,
             userVehicleType: userVehicleType,
             onStyleReady: _onStyleReady,
+            onCameraChanged: (data) {
+              final map = _mapKey.currentState?.map;
+              if (map != null) {
+                unawaited(_beam.onCameraChanged(map, data.cameraState.zoom));
+              }
+            },
           ),
           if (liveError != null)
             Positioned(
@@ -752,10 +784,8 @@ class _MapScreenState extends ConsumerState<MapScreen>
                   _MapControl(
                     icon: Icons.notifications_none_rounded,
                     tooltip: 'Notifications',
-                    badgeCount: ref
-                        .watch(unreadNotificationsProvider)
-                        .valueOrNull ??
-                        0,
+                    badgeCount:
+                        ref.watch(unreadNotificationsProvider).valueOrNull ?? 0,
                     onTap: () async {
                       await Navigator.of(context).push(
                         MaterialPageRoute(

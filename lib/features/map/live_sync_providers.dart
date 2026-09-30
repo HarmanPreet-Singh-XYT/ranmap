@@ -519,6 +519,7 @@ Stream<Map<String, MemberLocation>> _liveSync(
     }
     holder.notify();
   }
+
   pruneTimer = Timer.periodic(const Duration(seconds: 30), (_) => pruneStale());
 
   ref.onDispose(() {

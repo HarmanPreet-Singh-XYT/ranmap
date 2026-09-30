@@ -638,3 +638,15 @@ already anticipate them:
   planned or live trip's route can be changed from the trip's ⋮ menu
   (`update_trip_route`). Still open: autocomplete-as-you-type suggestions are
   debounced geocoding, not a session-based Places Autocomplete.
+
+## License
+
+Copyright (C) 2026 Harmanpreet Singh.
+
+Ranmap is free software, licensed under the **GNU Affero General Public
+License, version 3 or later** (AGPL-3.0-or-later). See [LICENSE](LICENSE) for
+the full text.
+
+The AGPL's network clause (section 13) matters here: anyone who runs a
+modified version of `ranmap-server` or `web-app` as a network service must
+offer that service's users the corresponding source.

@@ -114,12 +114,16 @@ class _NavigateToMemberSheetState
     // Tell the user when the hand-off doesn't work (no Google Maps handler),
     // instead of a button that silently does nothing.
     try {
-      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
       if (!launched && mounted) {
         showAppToast(context, 'Could not open Google Maps.', error: true);
       }
     } catch (e) {
-      if (mounted) showAppToast(context, 'Could not open Google Maps.', error: true);
+      if (mounted)
+        showAppToast(context, 'Could not open Google Maps.', error: true);
     }
   }
 

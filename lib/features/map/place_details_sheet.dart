@@ -53,7 +53,9 @@ class _PlaceDetailsSheetState extends ConsumerState<_PlaceDetailsSheet> {
     if (_saving || _saved) return;
     setState(() => _saving = true);
     try {
-      await ref.read(savedPlaceRepositoryProvider).createPlace(
+      await ref
+          .read(savedPlaceRepositoryProvider)
+          .createPlace(
             name: name,
             lat: widget.place.location.lat.toDouble(),
             lng: widget.place.location.lng.toDouble(),

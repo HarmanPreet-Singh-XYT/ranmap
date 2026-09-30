@@ -165,8 +165,7 @@ class _OfflineMapsScreenState extends ConsumerState<OfflineMapsScreen> {
           child: BrandEmptyState(
             icon: Icons.workspace_premium_rounded,
             title: 'Offline maps are a Ranmap Pro feature.',
-            message:
-                'Download your route area and keep navigating with no signal on remote passes.',
+            message: 'Download your route area and keep navigating with no signal on remote passes.',
             tint: BrandColors.accentPeach,
             action: BrandPrimaryButton(
               label: 'Upgrade to Pro',
