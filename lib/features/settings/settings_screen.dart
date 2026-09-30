@@ -315,6 +315,17 @@ class SettingsScreen extends ConsumerWidget {
                   onChange: notifier.setShareLocation,
                 ),
               ),
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: Icons.headset_mic_rounded,
+                title: 'Auto-join trip voice',
+                subtitle: 'Join the convoy voice channel when a trip starts',
+                onTap: null,
+                trailing: FSwitch(
+                  value: settings.voiceAutoJoin,
+                  onChange: notifier.setVoiceAutoJoin,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: BrandSpace.sm),

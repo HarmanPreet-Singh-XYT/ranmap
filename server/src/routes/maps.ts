@@ -10,6 +10,7 @@ import {
   mapboxProfileForMode,
   normalizeCategorySearch,
   normalizeDirections,
+  normalizeGeocode,
 } from "../lib/mapbox.js";
 import type { NormalizedDetour, NormalizedPlace } from "../lib/mapbox.js";
 import { createMapboxTokenVendor } from "../lib/mapbox-token.js";
@@ -81,6 +82,9 @@ function chargeSearch(req: Request, res: Response): Promise<boolean> {
 // per request from the caller's mode (see mapboxProfileForMode).
 const MAPBOX_DIRECTIONS_BASE = "https://api.mapbox.com/directions/v5/mapbox";
 const MAPBOX_CATEGORY_URL = "https://api.mapbox.com/search/searchbox/v1/category";
+const MAPBOX_GEOCODE_URL = "https://api.mapbox.com/search/geocode/v6/forward";
+const MAX_GEOCODE_QUERY_CHARS = 200;
+const GEOCODE_LIMIT = 6;
 const GOOGLE_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText";
 const TIMEOUT_MS = 10_000;
 const MAX_RADIUS_METERS = 50_000;
@@ -292,6 +296,65 @@ mapsRouter.get(
       res.json({ routes });
     } catch (err) {
       fail(res, err, 502, "Could not fetch directions. Please try again.", "maps: directions");
+    }
+  }),
+);
+
+// GET /maps/geocode?q=<address or place>[&proximity=lat,lng]
+// -> { results: [{ name, address, lat, lng }] }
+// Forward geocoding for the route planner's origin/destination search.
+// `proximity` biases results toward the caller (e.g. their current location).
+mapsRouter.get(
+  "/geocode",
+  asyncHandler(async (req, res) => {
+    const { mapboxAccessToken } = env;
+    if (!mapboxAccessToken) {
+      notConfigured(res, "Place search");
+      return;
+    }
+
+    const query = String(req.query.q ?? "").trim();
+    if (query.length < 2) {
+      res.status(400).json({ error: "q must be at least 2 characters" });
+      return;
+    }
+    if (query.length > MAX_GEOCODE_QUERY_CHARS) {
+      res.status(400).json({ error: `q must be at most ${MAX_GEOCODE_QUERY_CHARS} characters` });
+      return;
+    }
+    const proximityRaw = String(req.query.proximity ?? "").trim();
+    const proximity = proximityRaw ? parseLatLng(proximityRaw) : null;
+    if (proximityRaw && !proximity) {
+      res.status(400).json({ error: "proximity must be valid lat,lng" });
+      return;
+    }
+
+    // Validated: now the request may draw on the daily search allowance.
+    if (!(await chargeSearch(req, res))) return;
+
+    const params = new URLSearchParams({
+      q: query,
+      limit: String(GEOCODE_LIMIT),
+      language: "en",
+      access_token: mapboxAccessToken,
+    });
+    if (proximity) params.set("proximity", `${proximity.longitude},${proximity.latitude}`);
+
+    try {
+      const response = await fetchJson(`${MAPBOX_GEOCODE_URL}?${params.toString()}`);
+      if (providerFailed("maps: geocode", response)) {
+        res.status(502).json({ error: "Could not search places. Please try again." });
+        return;
+      }
+      const results = normalizeGeocode(response.body);
+      if (results === null) {
+        console.error("maps: geocode: unexpected response shape");
+        res.status(502).json({ error: "Could not search places. Please try again." });
+        return;
+      }
+      res.json({ results });
+    } catch (err) {
+      fail(res, err, 502, "Could not search places. Please try again.", "maps: geocode");
     }
   }),
 );

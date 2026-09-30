@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
@@ -46,7 +48,9 @@ import '../social/group_detail_screen.dart';
 import '../social/invite_share.dart';
 import '../social/social_providers.dart';
 import 'add_expense_screen.dart';
+import '../map/pick_location_screen.dart';
 import 'add_stop_screen.dart';
+import 'plan_route_screen.dart';
 import 'trip_checklist_tab.dart';
 import 'trip_ledger.dart';
 import 'trip_providers.dart';
@@ -117,6 +121,60 @@ class TripDetailScreen extends ConsumerWidget {
       return null;
     } catch (e) {
       return friendlyError(e);
+    }
+  }
+
+  /// Re-plans the route on a planned or live trip. Before the trip starts the
+  /// whole route can change; once it's live the new route starts from where the
+  /// traveller is now (the trip's original origin is kept).
+  Future<void> _replanRoute(BuildContext context, WidgetRef ref) async {
+    final live = trip.status == TripStatus.active;
+    final origin = trip.originPoint;
+    final destination = trip.destinationPoint;
+    final planned = await Navigator.of(context).push<PlannedRoute>(
+      MaterialPageRoute(
+        builder: (_) => PlanRouteScreen(
+          title: 'Change route',
+          initialOrigin: live || origin == null
+              ? null
+              : PickedLocation(
+                  Geo.pos(origin.lat, origin.lng),
+                  name: trip.originName,
+                ),
+          initialDestination: destination == null
+              ? null
+              : PickedLocation(
+                  Geo.pos(destination.lat, destination.lng),
+                  name: trip.destinationName,
+                ),
+        ),
+      ),
+    );
+    if (planned == null || !context.mounted) return;
+    try {
+      final updated = await ref
+          .read(tripRepositoryProvider)
+          .updateRoute(
+            tripId: trip.id,
+            originName: live ? null : planned.originName,
+            originPoint: live ? null : planned.originPoint,
+            destinationName: planned.destinationName,
+            destinationPoint: planned.destinationPoint,
+            routePolyline: planned.routePolyline,
+          );
+      ref.invalidate(myTripsProvider);
+      ref.invalidate(activeTripProvider);
+      if (!context.mounted) return;
+      showAppToast(context, 'Route updated.');
+      // This screen holds an immutable snapshot of the trip; swap in the
+      // updated one so the map, stats and stops reflect the new route.
+      unawaited(
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => TripDetailScreen(trip: updated)),
+        ),
+      );
+    } catch (e) {
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
     }
   }
 
@@ -238,6 +296,22 @@ class TripDetailScreen extends ConsumerWidget {
                   );
                 },
               ),
+              if (trip.status == TripStatus.planned ||
+                  trip.status == TripStatus.active) ...[
+                const BrandRowDivider(),
+                BrandListRow(
+                  icon: Icons.alt_route_rounded,
+                  iconColor: BrandColors.primary,
+                  title: 'Change route',
+                  subtitle: trip.status == TripStatus.active
+                      ? 'Re-plan from where you are now'
+                      : 'Pick a different origin, destination or route',
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _replanRoute(context, ref);
+                  },
+                ),
+              ],
               if (canSaveRoute) ...[
                 const BrandRowDivider(),
                 BrandListRow(

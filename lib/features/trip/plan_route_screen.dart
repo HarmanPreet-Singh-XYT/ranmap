@@ -41,7 +41,19 @@ class PlannedRoute {
 /// Pick an origin and destination, fetch route alternatives from the
 /// Directions API, preview them on the map, and choose one.
 class PlanRouteScreen extends StatefulWidget {
-  const PlanRouteScreen({super.key});
+  const PlanRouteScreen({
+    super.key,
+    this.title = 'Plan route',
+    this.initialOrigin,
+    this.initialDestination,
+  });
+
+  final String title;
+
+  /// Pre-filled endpoints when re-planning an existing trip. With no
+  /// [initialOrigin] the origin defaults to the traveller's current position.
+  final PickedLocation? initialOrigin;
+  final PickedLocation? initialDestination;
 
   @override
   State<PlanRouteScreen> createState() => _PlanRouteScreenState();
@@ -52,6 +64,8 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
 
   Position? _origin;
   Position? _destination;
+  String? _originName;
+  String? _destinationName;
   List<RouteOption> _routes = const [];
   int _selectedRoute = 0;
   bool _loadingLocation = true;
@@ -68,7 +82,20 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
   @override
   void initState() {
     super.initState();
-    _resolveCurrentLocationAsOrigin();
+    _destination = widget.initialDestination?.position;
+    _destinationName = widget.initialDestination?.name;
+    final origin = widget.initialOrigin;
+    if (origin != null) {
+      _origin = origin.position;
+      _originName = origin.name;
+      _loadingLocation = false;
+    } else {
+      _resolveCurrentLocationAsOrigin();
+    }
+    // A re-plan already knows both ends: go straight to the alternatives.
+    if (_origin != null && _destination != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fetchRoutes());
+    }
   }
 
   @override
@@ -92,8 +119,10 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
       if (!mounted) return;
       setState(() {
         _origin = Geo.pos(position.latitude, position.longitude);
+        _originName = 'Current location';
         _loadingLocation = false;
       });
+      if (_destination != null) unawaited(_fetchRoutes());
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -104,19 +133,23 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
   }
 
   Future<void> _pickOrigin() async {
-    final picked = await Navigator.of(context).push<Position>(
+    final picked = await Navigator.of(context).push<PickedLocation>(
       MaterialPageRoute(
         builder: (_) =>
             PickLocationScreen(title: 'Pick origin', initialCenter: _origin),
       ),
     );
     if (picked == null) return;
-    setState(() => _origin = picked);
-    _frameOn(picked);
+    setState(() {
+      _origin = picked.position;
+      _originName = picked.name;
+      _routes = const [];
+    });
+    _frameOn(picked.position);
   }
 
   Future<void> _pickDestination() async {
-    final picked = await Navigator.of(context).push<Position>(
+    final picked = await Navigator.of(context).push<PickedLocation>(
       MaterialPageRoute(
         builder: (_) => PickLocationScreen(
           title: 'Pick destination',
@@ -125,8 +158,12 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
       ),
     );
     if (picked == null) return;
-    setState(() => _destination = picked);
-    _frameOn(picked);
+    setState(() {
+      _destination = picked.position;
+      _destinationName = picked.name;
+      _routes = const [];
+    });
+    _frameOn(picked.position);
   }
 
   void _frameOn(Position center) {
@@ -176,9 +213,9 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
     final chosen = _routes[_selectedRoute];
     Navigator.of(context).pop(
       PlannedRoute(
-        originName: 'Origin',
+        originName: _originName ?? 'Origin',
         originPoint: LatLngPoint(origin.lat.toDouble(), origin.lng.toDouble()),
-        destinationName: 'Destination',
+        destinationName: _destinationName ?? 'Destination',
         destinationPoint: LatLngPoint(
           destination.lat.toDouble(),
           destination.lng.toDouble(),
@@ -267,7 +304,7 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
   Widget build(BuildContext context) {
     return BrandScaffold(
       header: BrandHeader(
-        title: 'Plan route',
+        title: widget.title,
         onBack: () => Navigator.of(context).maybePop(),
       ),
       child: _loadingLocation
@@ -286,7 +323,9 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
                         BrandListRow(
                           icon: Icons.trip_origin,
                           iconColor: BrandColors.primary,
-                          title: _origin == null ? 'Set origin' : 'Origin set',
+                          title: _origin == null
+                              ? 'Set origin'
+                              : (_originName ?? 'Origin set'),
                           trailing: BrandSecondaryButton(
                             label: 'Pick',
                             expand: false,
@@ -299,7 +338,7 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
                           iconColor: BrandColors.primary,
                           title: _destination == null
                               ? 'Set destination'
-                              : 'Destination set',
+                              : (_destinationName ?? 'Destination set'),
                           trailing: BrandSecondaryButton(
                             label: 'Pick',
                             expand: false,

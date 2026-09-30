@@ -33,6 +33,7 @@ import '../premium/premium_providers.dart';
 import '../settings/offline_queue_screen.dart';
 import '../settings/settings_screen.dart';
 import '../social/friends_screen.dart';
+import '../social/group_photos_screen.dart';
 import '../social/groups_screen.dart';
 import '../social/invite_share.dart';
 import '../social/social_providers.dart';
@@ -1248,6 +1249,18 @@ class _MenuCard extends ConsumerWidget {
             onTap: () => Navigator.of(
               context,
             ).push(MaterialPageRoute(builder: (_) => const DocumentsScreen())),
+            trailing: null,
+          ),
+          const BrandRowDivider(),
+          BrandListRow(
+            icon: Icons.photo_library_outlined,
+            title: 'Shared with me',
+            subtitle: 'Photos friends sent you directly',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const SharedWithMePhotosScreen(),
+              ),
+            ),
             trailing: null,
           ),
           const BrandRowDivider(),

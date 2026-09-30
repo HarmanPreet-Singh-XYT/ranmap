@@ -18,6 +18,13 @@ final groupSharedPostsProvider = FutureProvider.autoDispose
       return ref.watch(mapPostRepositoryProvider).postsSharedWithGroup(groupId);
     });
 
+/// Photos friends have shared directly with the current user.
+final sharedWithMePostsProvider = FutureProvider.autoDispose<List<MapPost>>((
+  ref,
+) {
+  return ref.watch(mapPostRepositoryProvider).postsSharedWithMe();
+});
+
 final mapPostSignedUrlProvider = FutureProvider.autoDispose
     .family<String, String>((ref, storagePath) {
       return ref.watch(mapPostRepositoryProvider).signedUrl(storagePath);

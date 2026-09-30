@@ -1,14 +1,30 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/constants/defaults.dart';
 import '../../core/theme/brand_palette.dart';
+import '../../core/theme/brand_typography.dart';
+import '../../core/util/error_text.dart';
+import '../../core/util/geo_distance.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/widgets/brand/brand_text_field.dart';
+import '../../data/services/google_maps_api_service.dart';
 import 'map_engine/map_engine.dart';
 
-/// Lets the user pick an arbitrary point on the map (rather than defaulting
-/// to their current location) by centering a fixed pin and dragging the map
-/// underneath it. Returns the picked [Position], or null if cancelled.
+/// What [PickLocationScreen] returns: the picked point, plus the place's name
+/// when it was chosen from a search result (and the map wasn't moved since).
+class PickedLocation {
+  const PickedLocation(this.position, {this.name});
+
+  final Position position;
+  final String? name;
+}
+
+/// Lets the user pick a point on the map — by searching for a place or address,
+/// or by dragging the map under a fixed centre pin. Returns a [PickedLocation],
+/// or null if cancelled.
 class PickLocationScreen extends StatefulWidget {
   const PickLocationScreen({
     super.key,
@@ -26,7 +42,83 @@ class PickLocationScreen extends StatefulWidget {
 }
 
 class _PickLocationScreenState extends State<PickLocationScreen> {
+  /// A search-result pick is only "the named place" while the pin is still on
+  /// it; past this distance the user has moved on and the name is dropped.
+  static const _nameKeepMeters = 75.0;
+
   final _mapKey = GlobalKey<RanmapMapViewState>();
+  final _searchCtrl = TextEditingController();
+  Timer? _debounce;
+
+  List<GeocodeResult> _results = const [];
+  GeocodeResult? _selected;
+  bool _searching = false;
+  String? _searchError;
+
+  /// Discards results from a query the user has since edited.
+  int _searchToken = 0;
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onQueryChanged(String value) {
+    _debounce?.cancel();
+    final query = value.trim();
+    if (query.length < 2) {
+      _searchToken++;
+      setState(() {
+        _results = const [];
+        _searching = false;
+        _searchError = null;
+      });
+      return;
+    }
+    _debounce = Timer(const Duration(milliseconds: 400), () => _search(query));
+  }
+
+  Future<void> _search(String query) async {
+    final token = ++_searchToken;
+    setState(() {
+      _searching = true;
+      _searchError = null;
+    });
+    try {
+      final results = await GoogleMapsApiService.geocode(
+        query,
+        near: widget.initialCenter,
+      );
+      if (!mounted || token != _searchToken) return;
+      setState(() {
+        _results = results;
+        _searchError = results.isEmpty ? 'No matches for "$query".' : null;
+      });
+    } catch (e) {
+      if (!mounted || token != _searchToken) return;
+      setState(() {
+        _results = const [];
+        _searchError = friendlyError(e);
+      });
+    } finally {
+      if (mounted && token == _searchToken) setState(() => _searching = false);
+    }
+  }
+
+  void _choose(GeocodeResult result) {
+    FocusScope.of(context).unfocus();
+    _searchToken++;
+    setState(() {
+      _selected = result;
+      _results = const [];
+      _searching = false;
+      _searchError = null;
+      _searchCtrl.text = result.name;
+    });
+    unawaited(_mapKey.currentState?.flyTo(result.location, zoom: 15));
+  }
 
   Future<void> _confirm() async {
     final map = _mapKey.currentState?.map;
@@ -35,11 +127,24 @@ class _PickLocationScreenState extends State<PickLocationScreen> {
     // simply wherever the camera is centered now.
     final camera = await map.getCameraState();
     if (!mounted) return;
-    Navigator.of(context).pop(camera.center.coordinates);
+    final center = camera.center.coordinates;
+    final selected = _selected;
+    final keepName =
+        selected != null &&
+        haversineMeters(
+              selected.location.lat.toDouble(),
+              selected.location.lng.toDouble(),
+              center.lat.toDouble(),
+              center.lng.toDouble(),
+            ) <=
+            _nameKeepMeters;
+    Navigator.of(context)
+        .pop(PickedLocation(center, name: keepName ? selected.label : null));
   }
 
   @override
   Widget build(BuildContext context) {
+    final showPanel = _searching || _results.isNotEmpty || _searchError != null;
     return BrandScaffold(
       header: BrandHeader(
         title: widget.title,
@@ -66,6 +171,92 @@ class _PickLocationScreenState extends State<PickLocationScreen> {
                 size: 48,
                 color: BrandColors.primary,
               ),
+            ),
+          ),
+          Positioned(
+            left: BrandSpace.md,
+            right: BrandSpace.md,
+            top: BrandSpace.sm,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                BrandTextField(
+                  controller: _searchCtrl,
+                  hint: 'Search a place or address',
+                  leadingIcon: Icons.search_rounded,
+                  textInputAction: TextInputAction.search,
+                  onChanged: _onQueryChanged,
+                  onSubmitted: (value) {
+                    _debounce?.cancel();
+                    if (value.trim().length >= 2) _search(value.trim());
+                  },
+                ),
+                if (showPanel)
+                  Padding(
+                    padding: const EdgeInsets.only(top: BrandSpace.xs),
+                    // ListTile needs a Material ancestor to paint its ink.
+                    child: Material(
+                      color: BrandColors.surface,
+                      elevation: 3,
+                      borderRadius: BrandRadii.cardRadius,
+                      clipBehavior: Clip.antiAlias,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 280),
+                        child: _searching
+                            ? const Padding(
+                                padding: EdgeInsets.all(BrandSpace.md),
+                                child: Center(
+                                  child: SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : _searchError != null
+                            ? Padding(
+                                padding: const EdgeInsets.all(BrandSpace.md),
+                                child: Text(
+                                  _searchError!,
+                                  style: BrandText.bodyMd.copyWith(
+                                    color: BrandColors.textMuted,
+                                  ),
+                                ),
+                              )
+                            : ListView.builder(
+                                shrinkWrap: true,
+                                padding: EdgeInsets.zero,
+                                itemCount: _results.length,
+                                itemBuilder: (context, i) {
+                                  final r = _results[i];
+                                  return ListTile(
+                                    dense: true,
+                                    leading: Icon(
+                                      Icons.place_outlined,
+                                      color: BrandColors.primary,
+                                    ),
+                                    title: Text(
+                                      r.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    subtitle: r.address == null
+                                        ? null
+                                        : Text(
+                                            r.address!,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                    onTap: () => _choose(r),
+                                  );
+                                },
+                              ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
           Positioned(

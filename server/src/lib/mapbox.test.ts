@@ -6,6 +6,7 @@ import {
   mapboxProfileForMode,
   normalizeCategorySearch,
   normalizeDirections,
+  normalizeGeocode,
 } from "./mapbox.js";
 import type { NormalizedPlace } from "./mapbox.js";
 
@@ -133,4 +134,23 @@ test("attachDetours attaches only the detours that were measured", () => {
   assert.deepEqual(places[0]?.detour, { durationSeconds: 720, distanceMeters: 12875 });
   assert.equal(places[1]?.detour, undefined);
   assert.equal(places[2]?.detour, undefined);
+});
+
+test("normalizeGeocode maps Geocoding v6 features and skips unusable ones", () => {
+  const results = normalizeGeocode({
+    features: [
+      {
+        geometry: { coordinates: [-122.4, 37.8] },
+        properties: { name: "Ferry Building", place_formatted: "San Francisco, California" },
+      },
+      { geometry: { coordinates: [1] }, properties: { name: "Broken" } },
+      { geometry: { coordinates: [2, 3] }, properties: {} },
+    ],
+  });
+  assert.deepEqual(results, [
+    { name: "Ferry Building", address: "San Francisco, California", lat: 37.8, lng: -122.4 },
+    { name: "Unnamed place", address: null, lat: 3, lng: 2 },
+  ]);
+  assert.equal(normalizeGeocode({}), null);
+  assert.equal(normalizeGeocode(null), null);
 });

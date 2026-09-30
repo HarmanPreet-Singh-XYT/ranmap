@@ -1,9 +1,9 @@
 name: CI
 
+# Manual only: this workflow never runs on push or pull_request. Start it from
+# the GitHub UI (Actions → CI → Run workflow) or with `gh workflow run CI`.
 on:
-  push:
-    branches: [main, master]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   app:

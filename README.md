@@ -619,24 +619,22 @@ picks it up automatically (and both files are gitignored).
 Each of these is a substantial feature; the schema and folder structure
 already anticipate them:
 
-- **Voice polish**: join/mute/leave + a live participant list is live (see
-  above), and the client now auto-reconnects with exponential backoff if the
-  connection drops. Still open: it's audio-only (no video), there's no
-  push-to-talk/deafen, and it isn't "always-on" Discord-style — you join
-  explicitly rather than the app auto-joining when a trip goes active.
-- **Photo sharing polish**: capture/pin and the trip gallery/grid are live
-  (see above). Still open: a UI for `map_post_shares` (sharing a specific
-  photo with a friend or another group beyond its default trip-participant
-  visibility).
+- **Voice polish**: voice is an app-wide session (`voice_session.dart`) that
+  auto-joins a trip's channel when the trip goes active (toggle in Settings),
+  shows a mini bar above the bottom nav, and supports mute, push-to-talk and
+  auto-reconnect with backoff. Still open: it's audio-only (no video) and
+  there's no deafen.
+- **Photo sharing polish**: capture/pin, the trip gallery, sharing to a group
+  and sharing with a friend (Profile → Shared with me) are live. Still open:
+  un-sharing / seeing who a photo is shared with.
 - **AI trip assistant polish**: the chat UI, conversation history, and all
   five tools (`save_place`/`create_trip`/`schedule_trip`/
   `invite_friend_to_trip`/`add_stop`) are live (see above). Still open: the
   `ranmap-server` scheduler poller could move to a proper job queue or
   Supabase Edge Function on a cron trigger for production instead of an
   in-process `setTimeout` loop.
-- **Route planning polish**: origin/destination are picked on the map
-  rather than searched by name/address (no Places Autocomplete/geocoding
-  yet), and a planned route isn't re-plannable once a trip is active —
-  `update_trip_route` exists for this but no screen calls it yet.
-- **Voice always-on**: joining is still explicit; an app-wide voice session
-  that auto-joins when a trip goes active (Discord-style) isn't built.
+- **Route planning polish**: origin/destination can be searched by name or
+  address (`GET /maps/geocode`, Mapbox Geocoding) or picked on the map, and a
+  planned or live trip's route can be changed from the trip's ⋮ menu
+  (`update_trip_route`). Still open: autocomplete-as-you-type suggestions are
+  debounced geocoding, not a session-based Places Autocomplete.

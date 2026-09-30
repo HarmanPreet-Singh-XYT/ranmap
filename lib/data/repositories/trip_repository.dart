@@ -46,11 +46,14 @@ class TripRepository {
   }
 
   /// Sets/replaces the planned route on an existing trip (see
-  /// 0006_trip_route_planning.sql).
+  /// 0006_trip_route_planning.sql). A null origin keeps the trip's existing
+  /// origin (the RPC only overwrites what it's given) — used when re-routing
+  /// mid-trip, where the new polyline starts from the current position but the
+  /// trip's start shouldn't move.
   Future<Trip> updateRoute({
     required String tripId,
-    required String originName,
-    required LatLngPoint originPoint,
+    String? originName,
+    LatLngPoint? originPoint,
     required String destinationName,
     required LatLngPoint destinationPoint,
     required String routePolyline,
@@ -60,8 +63,8 @@ class TripRepository {
       params: {
         'p_trip': tripId,
         'p_origin_name': originName,
-        'p_origin_lat': originPoint.lat,
-        'p_origin_lng': originPoint.lng,
+        'p_origin_lat': originPoint?.lat,
+        'p_origin_lng': originPoint?.lng,
         'p_destination_name': destinationName,
         'p_destination_lat': destinationPoint.lat,
         'p_destination_lng': destinationPoint.lng,

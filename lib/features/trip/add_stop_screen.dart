@@ -123,7 +123,7 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
       return;
     }
     if (!mounted) return;
-    final picked = await Navigator.of(context).push<Position>(
+    final picked = await Navigator.of(context).push<PickedLocation>(
       MaterialPageRoute(
         builder: (_) => PickLocationScreen(
           initialCenter: Geo.pos(current!.lat, current.lng),
@@ -131,10 +131,16 @@ class _AddStopScreenState extends ConsumerState<AddStopScreen> {
       ),
     );
     if (picked != null) {
-      setState(
-        () =>
-            _point = LatLngPoint(picked.lat.toDouble(), picked.lng.toDouble()),
-      );
+      setState(() {
+        _point = LatLngPoint(
+          picked.position.lat.toDouble(),
+          picked.position.lng.toDouble(),
+        );
+        // A searched place names the stop, unless the user already typed one.
+        if (picked.name != null && _nameCtrl.text.trim().isEmpty) {
+          _nameCtrl.text = picked.name!;
+        }
+      });
     }
   }
 

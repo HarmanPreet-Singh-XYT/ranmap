@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 
 import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
@@ -79,6 +80,89 @@ class _MapPostViewerSheet extends ConsumerWidget {
       if (context.mounted) showAppToast(context, 'Shared with the group.');
     } catch (e) {
       if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
+
+  /// Shares this photo with one friend so they can open it from "Shared with
+  /// me" even if they're not on the trip or in one of the groups.
+  Future<void> _shareToFriend(BuildContext context, WidgetRef ref) async {
+    final List<Map<String, dynamic>> friendRows;
+    try {
+      friendRows = await ref.read(friendsProvider.future);
+    } catch (e) {
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+      return;
+    }
+    final myUid = SupabaseService.currentUser?.id;
+    final friends = friendRows
+        .map(
+          (row) =>
+              (row['requester_id'] == myUid ? row['addressee'] : row['requester'])
+                  as Map<String, dynamic>?,
+        )
+        .whereType<Map<String, dynamic>>()
+        .toList();
+    if (!context.mounted) return;
+    if (friends.isEmpty) {
+      showAppToast(
+        context,
+        'No friends yet — add some from Profile > Friends.',
+        error: true,
+      );
+      return;
+    }
+    final selected = await showFSheet<Map<String, dynamic>>(
+      context: context,
+      side: FLayout.btt,
+      builder: (sheetContext) => BrandSheetSurface(
+        child: SingleChildScrollView(
+          child: BrandCard(
+            padding: const EdgeInsets.symmetric(
+              horizontal: BrandSpace.md,
+              vertical: BrandSpace.xs,
+            ),
+            child: Column(
+              children: [
+                for (final (i, friend) in friends.indexed) ...[
+                  if (i > 0) const BrandRowDivider(),
+                  BrandListRow(
+                    icon: Icons.person_rounded,
+                    iconColor: BrandColors.primary,
+                    title:
+                        (friend['display_name'] as String?)?.isNotEmpty == true
+                        ? friend['display_name'] as String
+                        : '@${friend['username']}',
+                    subtitle: '@${friend['username']}',
+                    showChevron: false,
+                    onTap: () => Navigator.of(sheetContext).pop(friend),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    final friendId = selected?['id'] as String?;
+    if (friendId == null || !context.mounted) return;
+    try {
+      await ref
+          .read(mapPostRepositoryProvider)
+          .shareWithUser(postId: post.id, userId: friendId);
+      if (context.mounted) {
+        showAppToast(context, 'Shared with @${selected!['username']}.');
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      // The (post, friend) pair is unique: sharing twice is not a failure.
+      final alreadyShared = e is PostgrestException && e.code == '23505';
+      showAppToast(
+        context,
+        alreadyShared
+            ? 'Already shared with @${selected!['username']}.'
+            : friendlyError(e),
+        error: !alreadyShared,
+      );
     }
   }
 
@@ -183,6 +267,16 @@ class _MapPostViewerSheet extends ConsumerWidget {
                 color: BrandColors.textHeadlineAlt,
               ),
               onPressed: () => _shareToGroup(context, ref),
+            ),
+            const SizedBox(height: BrandSpace.sm),
+            BrandSecondaryButton(
+              label: 'Share with a friend',
+              leading: Icon(
+                Icons.person_add_alt_1_rounded,
+                size: 18,
+                color: BrandColors.textHeadlineAlt,
+              ),
+              onPressed: () => _shareToFriend(context, ref),
             ),
             const SizedBox(height: BrandSpace.sm),
             BrandPressable(

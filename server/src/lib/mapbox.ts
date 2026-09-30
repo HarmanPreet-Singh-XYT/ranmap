@@ -133,6 +133,51 @@ export function normalizeCategorySearch(body: unknown): NormalizedPlace[] | null
   return places;
 }
 
+/** One geocoded address/place, as the client receives it. */
+export interface NormalizedGeocode {
+  name: string;
+  /** Secondary line (city, region, country) for disambiguating results. */
+  address: string | null;
+  lat: number;
+  lng: number;
+}
+
+/**
+ * Normalizes a Mapbox Geocoding v6 forward response (`/search/geocode/v6/forward`)
+ * into name + address + coordinates. Returns null when the body isn't a
+ * feature collection at all (an upstream contract change), and skips single
+ * features that lack a usable point.
+ */
+export function normalizeGeocode(body: unknown): NormalizedGeocode[] | null {
+  const response = asRecord(body);
+  if (!response) return null;
+  const features = response.features;
+  if (!Array.isArray(features)) return null;
+
+  const results: NormalizedGeocode[] = [];
+  for (const entry of features) {
+    const feature = asRecord(entry);
+    const properties = asRecord(feature?.properties);
+    if (!feature || !properties) continue;
+
+    const coordinates = asRecord(feature.geometry)?.coordinates;
+    if (!Array.isArray(coordinates) || coordinates.length < 2) continue;
+    const lng = coordinates[0];
+    const lat = coordinates[1];
+    if (typeof lat !== "number" || typeof lng !== "number") continue;
+
+    const name = properties.name;
+    const address = properties.place_formatted;
+    results.push({
+      name: typeof name === "string" && name ? name : "Unnamed place",
+      address: typeof address === "string" && address ? address : null,
+      lat,
+      lng,
+    });
+  }
+  return results;
+}
+
 /**
  * Attaches each measured detour to the place it belongs to, position by
  * position, leaving places with no measurement untouched. Split out from the

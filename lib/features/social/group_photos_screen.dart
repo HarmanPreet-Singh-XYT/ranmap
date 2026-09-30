@@ -66,6 +66,55 @@ class GroupPhotosScreen extends ConsumerWidget {
   }
 }
 
+/// Photos friends have shared directly with me ("Share with a friend" from a
+/// map photo).
+class SharedWithMePhotosScreen extends ConsumerWidget {
+  const SharedWithMePhotosScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final postsAsync = ref.watch(sharedWithMePostsProvider);
+    return BrandScaffold(
+      header: BrandHeader(
+        title: 'Shared with me',
+        onBack: () => Navigator.of(context).maybePop(),
+      ),
+      child: postsAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => ErrorRetry(
+          error: e,
+          onRetry: () => ref.invalidate(sharedWithMePostsProvider),
+        ),
+        data: (posts) {
+          if (posts.isEmpty) {
+            return Center(
+              child: SingleChildScrollView(
+                child: BrandEmptyState(
+                  imageAsset: 'assets/images/onboarding/welcome_memories.jpg',
+                  icon: Icons.photo_library_rounded,
+                  title: 'Nothing shared yet',
+                  message:
+                      'Photos your friends share with you directly will show up here.',
+                ),
+              ),
+            );
+          }
+          return GridView.builder(
+            padding: const EdgeInsets.symmetric(vertical: BrandSpace.md),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+            ),
+            itemCount: posts.length,
+            itemBuilder: (context, i) => _PhotoTile(post: posts[i]),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class _PhotoTile extends ConsumerWidget {
   const _PhotoTile({required this.post});
 

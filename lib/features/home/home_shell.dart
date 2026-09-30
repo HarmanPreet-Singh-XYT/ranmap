@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
@@ -7,7 +9,11 @@ import '../../core/router/auth_state_provider.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../data/models/trip.dart';
+import '../../core/providers/settings_provider.dart';
 import '../chat/chat_hub_screen.dart';
+import '../chat/chat_providers.dart';
+import '../chat/voice_mini_bar.dart';
+import '../chat/voice_session.dart';
 import '../premium/paywall_gate.dart';
 import '../social/invite_landing_screen.dart';
 import '../social/invite_providers.dart';
@@ -47,6 +53,33 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   /// Session latch for the pending-invite prompt, so it's presented once.
   bool _invitePromptActive = false;
+
+  /// Whether the launch-time active trip has been offered auto-join.
+  bool _voiceChecked = false;
+
+  /// Joins voice for a trip that just became active and leaves when it ends.
+  /// Deferred a frame: it changes another provider, which isn't allowed while
+  /// this widget is building.
+  void _syncVoiceToActiveTrip(Trip? previous, Trip? next) {
+    Future.microtask(() {
+      if (!mounted) return;
+      final voice = ref.read(voiceSessionProvider.notifier);
+      if (next != null && next.id != previous?.id) {
+        if (!ref.read(appSettingsProvider).voiceAutoJoin) return;
+        final channel = ChatChannel.trip(next.id);
+        if (voice.wasLeftByUser(channel)) return;
+        // Don't yank someone out of a call they started elsewhere.
+        final current = ref.read(voiceSessionProvider);
+        if (current.inCall && current.channel != channel) return;
+        unawaited(voice.join(channel, title: next.title, auto: true));
+      } else if (next == null && previous != null) {
+        final current = ref.read(voiceSessionProvider);
+        if (current.channel == ChatChannel.trip(previous.id)) {
+          unawaited(voice.leave(byUser: false));
+        }
+      }
+    });
+  }
 
   static const int _mapTab = 0;
   static const int _tripsTab = 1;
@@ -202,6 +235,20 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ref.listen(pendingGroupJoinProvider, (_, next) {
       if (next != null) _maybeResumeGroupJoin();
     });
+    // Always-on voice: join the trip's channel when it goes active, and drop
+    // out when it ends.
+    ref.listen(activeTripProvider, (previous, next) {
+      _syncVoiceToActiveTrip(previous?.valueOrNull, next.valueOrNull);
+    });
+    // The provider may already hold an active trip when the shell mounts (a
+    // trip started earlier); ref.listen only fires on change.
+    if (!_voiceChecked) {
+      final active = ref.watch(activeTripProvider).valueOrNull;
+      if (active != null) {
+        _voiceChecked = true;
+        _syncVoiceToActiveTrip(null, active);
+      }
+    }
 
     // Inbound signals had no home: a trip invite or friend request sat unseen
     // behind Profile → Friends. Badge the tabs that surface them instead.
@@ -239,14 +286,24 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         ],
       ),
       // Surfaces the non-Pro paywall once after onboarding and weekly after.
-      child: PaywallGate(
-        child: IndexedStack(
-          index: _index,
-          children: [
-            for (var i = 0; i < _screens.length; i++)
-              _visited.contains(i) ? _screens[i] : const SizedBox.shrink(),
-          ],
-        ),
+      child: Column(
+        children: [
+          Expanded(
+            child: PaywallGate(
+              child: IndexedStack(
+                index: _index,
+                children: [
+                  for (var i = 0; i < _screens.length; i++)
+                    _visited.contains(i)
+                        ? _screens[i]
+                        : const SizedBox.shrink(),
+                ],
+              ),
+            ),
+          ),
+          // Above the bottom nav, clear of the status bar / notch.
+          const VoiceMiniBar(),
+        ],
       ),
     );
   }

@@ -99,6 +99,23 @@ class MapPostRepository {
     return posts;
   }
 
+  /// Photos friends have shared directly with the current user (via
+  /// [shareWithUser]).
+  Future<List<MapPost>> postsSharedWithMe() async {
+    final rows = await _client
+        .from('map_post_shares')
+        .select('created_at, map_posts(*, profiles(username))')
+        .eq('shared_with_user', SupabaseService.currentUserId)
+        .order('created_at', ascending: false)
+        .limit(200);
+    final posts = <MapPost>[];
+    for (final raw in rows as List) {
+      final post = (raw as Map<String, dynamic>)['map_posts'];
+      if (post is Map<String, dynamic>) posts.add(MapPost.fromJson(post));
+    }
+    return posts;
+  }
+
   /// A signed URL for the post's photo (the bucket is private).
   Future<String> signedUrl(String storagePath, {int expiresInSeconds = 3600}) {
     return _client.storage

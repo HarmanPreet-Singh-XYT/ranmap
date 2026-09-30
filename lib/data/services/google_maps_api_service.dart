@@ -14,6 +14,24 @@ import '../models/route_option.dart';
 ///     Google, and only when a user opens a single result.
 ///
 /// Neither key reaches the client.
+/// One address/place match from [GoogleMapsApiService.geocode].
+class GeocodeResult {
+  const GeocodeResult({
+    required this.name,
+    required this.address,
+    required this.location,
+  });
+
+  final String name;
+
+  /// The secondary line (city, region), for telling similar names apart.
+  final String? address;
+  final Position location;
+
+  /// "Name, City, Region" — what gets stored as a trip's origin/destination.
+  String get label => address == null ? name : '$name, $address';
+}
+
 class GoogleMapsApiService {
   GoogleMapsApiService._();
 
@@ -53,6 +71,32 @@ class GoogleMapsApiService {
       throw Exception('No route found between those points.');
     }
     return options;
+  }
+
+  /// Forward-geocodes a typed address or place name into candidate locations,
+  /// nearest to [near] first when given.
+  static Future<List<GeocodeResult>> geocode(
+    String query, {
+    Position? near,
+  }) async {
+    final body = await _get('/maps/geocode', {
+      'q': query,
+      'proximity': ?(near == null ? null : '${near.lat},${near.lng}'),
+    });
+    final results = (body['results'] as List? ?? const [])
+        .cast<Map<String, dynamic>>();
+    return results
+        .map(
+          (r) => GeocodeResult(
+            name: r['name'] as String? ?? 'Unnamed place',
+            address: r['address'] as String?,
+            location: Position(
+              (r['lng'] as num).toDouble(),
+              (r['lat'] as num).toDouble(),
+            ),
+          ),
+        )
+        .toList();
   }
 
   /// Points of interest near [center], optionally filtered to a place

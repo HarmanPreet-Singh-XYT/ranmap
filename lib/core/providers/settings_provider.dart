@@ -25,6 +25,7 @@ class AppSettings {
     this.mapTerrain = true,
     this.photoVisibility = 'group',
     this.shareLocation = true,
+    this.voiceAutoJoin = true,
   });
 
   final ThemeMode themeMode;
@@ -43,6 +44,10 @@ class AppSettings {
   /// is written and background sharing is disabled.
   final bool shareLocation;
 
+  /// Whether the app joins the trip's voice channel by itself when a trip goes
+  /// active (Discord-style always-on voice).
+  final bool voiceAutoJoin;
+
   AppSettings copyWith({
     ThemeMode? themeMode,
     DistanceUnit? distanceUnit,
@@ -51,6 +56,7 @@ class AppSettings {
     bool? mapTerrain,
     String? photoVisibility,
     bool? shareLocation,
+    bool? voiceAutoJoin,
   }) => AppSettings(
     themeMode: themeMode ?? this.themeMode,
     distanceUnit: distanceUnit ?? this.distanceUnit,
@@ -59,6 +65,7 @@ class AppSettings {
     mapTerrain: mapTerrain ?? this.mapTerrain,
     photoVisibility: photoVisibility ?? this.photoVisibility,
     shareLocation: shareLocation ?? this.shareLocation,
+    voiceAutoJoin: voiceAutoJoin ?? this.voiceAutoJoin,
   );
 }
 
@@ -69,6 +76,7 @@ const _kMapThreeD = 'settings_map_3d';
 const _kMapTerrain = 'settings_map_terrain';
 const _kPhotoVisibility = 'settings_photo_visibility';
 const _kShareLocation = 'settings_share_location';
+const _kVoiceAutoJoin = 'settings_voice_auto_join';
 
 /// Owns [AppSettings]; every setter persists immediately and updates state so
 /// the UI (including the app's theme) reacts at once.
@@ -86,6 +94,7 @@ class AppSettingsNotifier extends Notifier<AppSettings> {
       mapTerrain: prefs.getBool(_kMapTerrain) ?? true,
       photoVisibility: prefs.getString(_kPhotoVisibility) ?? 'group',
       shareLocation: prefs.getBool(_kShareLocation) ?? true,
+      voiceAutoJoin: prefs.getBool(_kVoiceAutoJoin) ?? true,
     );
   }
 
@@ -122,6 +131,11 @@ class AppSettingsNotifier extends Notifier<AppSettings> {
   void setShareLocation(bool enabled) {
     unawaited(_prefs.setBool(_kShareLocation, enabled));
     state = state.copyWith(shareLocation: enabled);
+  }
+
+  void setVoiceAutoJoin(bool enabled) {
+    unawaited(_prefs.setBool(_kVoiceAutoJoin, enabled));
+    state = state.copyWith(voiceAutoJoin: enabled);
   }
 }
 
