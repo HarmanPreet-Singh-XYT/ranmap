@@ -152,31 +152,88 @@ final devicePositionProvider = StreamProvider.autoDispose<Position>((ref) {
   );
 });
 
+/// How long without a fresh GPS fix before the traveller is treated as stopped.
+/// [devicePositionProvider] only emits after ~5 m of movement, so it goes quiet
+/// the moment the device is still; a direct read of `Position.speed` would then
+/// freeze the speedometer at its last moving value.
+const _speedStaleAfter = Duration(seconds: 4);
+
+/// Speeds below this (m/s) are treated as stationary, so GPS Doppler jitter
+/// doesn't read as "moving" at a standstill. ~1.4 km/h.
+const _speedStationaryDeadbandMps = 0.4;
+
+/// The traveller's own live speed in m/s, or null before the first fix.
+///
+/// Derived from [devicePositionProvider] rather than reading `Position.speed`
+/// straight: that stream is distance-filtered, so it stops emitting when the
+/// device stops. A periodic tick decays the reading to zero once fixes stop
+/// arriving, so the speed drops when the traveller comes to a standstill instead
+/// of sticking at the last moving value.
+final liveSpeedMpsProvider = StreamProvider.autoDispose<double?>((ref) {
+  final controller = StreamController<double?>();
+  double? emitted;
+  DateTime lastFixAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  void emit(double? value) {
+    if (value == emitted) return;
+    emitted = value;
+    if (!controller.isClosed) controller.add(value);
+  }
+
+  void onPosition(Position? pos) {
+    if (pos == null) return;
+    lastFixAt = DateTime.now();
+    // A negative speed is geolocator's "no reading" sentinel.
+    final speed = pos.speed >= 0 ? pos.speed : null;
+    emit(speed != null && speed < _speedStationaryDeadbandMps ? 0 : speed);
+  }
+
+  ref.listen(
+    devicePositionProvider,
+    (_, next) => onPosition(next.valueOrNull),
+    fireImmediately: true,
+  );
+
+  final ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+    if (DateTime.now().difference(lastFixAt) > _speedStaleAfter) emit(0);
+  });
+
+  ref.onDispose(() {
+    ticker.cancel();
+    controller.close();
+  });
+
+  return controller.stream;
+});
+
+/// The app's location access state. The cases need different fixes, so the UI
+/// can't tell them apart from a plain bool: a first-time prompt ([denied]),
+/// a permanent block that only Settings can undo ([deniedForever]), and the
+/// device's location service being switched off ([serviceDisabled]).
+enum LocationAccess { granted, denied, deniedForever, serviceDisabled }
+
 /// Resolves (and, if needed, requests) location permission. Screens should
 /// gate the map — and the GPS stream — on this so they never watch
 /// [devicePositionProvider] before permission is granted.
-final locationPermissionProvider = FutureProvider.autoDispose<bool>((
+final locationPermissionProvider = FutureProvider.autoDispose<LocationAccess>((
   ref,
 ) async {
-  if (!await Geolocator.isLocationServiceEnabled()) return false;
+  if (!await Geolocator.isLocationServiceEnabled()) {
+    return LocationAccess.serviceDisabled;
+  }
   var permission = await Geolocator.checkPermission();
+  // Only a plain `denied` can prompt again; `deniedForever` would silently
+  // no-op, so it's surfaced as its own state for the Settings path.
   if (permission == LocationPermission.denied) {
     permission = await Geolocator.requestPermission();
   }
-  return permission == LocationPermission.always ||
-      permission == LocationPermission.whileInUse;
+  return switch (permission) {
+    LocationPermission.always ||
+    LocationPermission.whileInUse => LocationAccess.granted,
+    LocationPermission.deniedForever => LocationAccess.deniedForever,
+    _ => LocationAccess.denied,
+  };
 });
-
-/// Whether the device's location *service* (GPS) is switched on.
-///
-/// Distinct from [locationPermissionProvider], which is false both when the app
-/// lacks permission and when the service is off. A user who has granted the app
-/// permission but turned location off system-wide is stuck on the denied view
-/// unless it offers the device-settings path, so the view checks this to show
-/// the right message and button.
-final locationServiceEnabledProvider = FutureProvider.autoDispose<bool>(
-  (ref) => Geolocator.isLocationServiceEnabled(),
-);
 
 /// Minimum gap between live broadcast messages. The GPS stream fires every
 /// ~5 m (≈6/s at highway speed) and every message fans out to every teammate,

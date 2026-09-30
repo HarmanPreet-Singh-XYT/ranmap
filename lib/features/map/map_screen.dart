@@ -236,7 +236,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
     // stuck on the denied view.
     if (state == AppLifecycleState.resumed) {
       ref.invalidate(locationPermissionProvider);
-      ref.invalidate(locationServiceEnabledProvider);
     }
   }
 
@@ -994,8 +993,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
     final permissionAsync = ref.watch(locationPermissionProvider);
 
     return permissionAsync.when(
-      data: (granted) =>
-          granted ? _buildLocationView(context) : const _LocationDeniedView(),
+      data: (access) => switch (access) {
+        LocationAccess.granted => _buildLocationView(context),
+        _ => _LocationDeniedView(access: access),
+      },
       loading: () => const Center(child: FCircularProgress()),
       error: (e, _) =>
           _LocationErrorView(detail: friendlyError(e), onRetry: _retryLocation),
@@ -1154,11 +1155,11 @@ class _MapScreenState extends ConsumerState<MapScreen>
       appSettingsProvider.select((s) => s.shareLocation),
     );
 
-    // Only show telemetry when the platform actually reported a speed:
-    // geolocator returns a negative value (e.g. -1 on iOS) when it has none,
-    // so anything below zero is treated as "no reading" and omitted. Zero is a
-    // genuine stationary reading and is shown.
-    final liveSpeedMps = deviceSpeedMps >= 0 ? deviceSpeedMps : null;
+    // Live speed for the badge comes from [liveSpeedMpsProvider], which decays
+    // to zero when the distance-filtered GPS stream goes quiet — so it drops
+    // when the traveller stops instead of freezing at the last moving value.
+    // Null before the first fix hides the badge.
+    final liveSpeedMps = ref.watch(liveSpeedMpsProvider).valueOrNull;
 
     final mapPostsAsync = activeTrip == null
         ? null
@@ -2289,15 +2290,18 @@ class _MapScreenState extends ConsumerState<MapScreen>
 }
 
 class _LocationDeniedView extends ConsumerWidget {
-  const _LocationDeniedView();
+  const _LocationDeniedView({required this.access});
+
+  final LocationAccess access;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final c = NavColors.of(context);
-    // `false` here means the device's location *service* is off — a different
-    // fix (device settings) than a denied app permission.
-    final serviceOff =
-        ref.watch(locationServiceEnabledProvider).valueOrNull == false;
+    // The three non-granted states need different fixes: the device's location
+    // service (device settings), a permanent app block (app settings only), or
+    // a plain denial (prompt again).
+    final serviceOff = access == LocationAccess.serviceDisabled;
+    final blocked = access == LocationAccess.deniedForever;
     return FScaffold(
       childPad: false,
       child: Center(
@@ -2309,12 +2313,19 @@ class _LocationDeniedView extends ConsumerWidget {
               Icon(Icons.location_off_rounded, size: 56, color: c.activeRoute),
               const SizedBox(height: 20),
               Text(
-                serviceOff
-                    ? 'Location services are off. Turn them on so Ranmap can '
-                          'show you on the map and keep your trip in sync with '
-                          'your group.'
-                    : 'Ranmap needs your location to show you on the map and keep '
-                          'your trip in sync with your group.',
+                switch (access) {
+                  LocationAccess.serviceDisabled =>
+                    'Location services are off. Turn them on so Ranmap can '
+                        'show you on the map and keep your trip in sync with '
+                        'your group.',
+                  LocationAccess.deniedForever =>
+                    'Location permission is blocked. Open Settings and allow '
+                        'location so Ranmap can show you on the map and keep '
+                        'your trip in sync with your group.',
+                  _ =>
+                    'Ranmap needs your location to show you on the map and keep '
+                        'your trip in sync with your group.',
+                },
                 textAlign: TextAlign.center,
                 style: TextStyle(color: c.foreground, fontSize: 16),
               ),
@@ -2328,19 +2339,26 @@ class _LocationDeniedView extends ConsumerWidget {
                       // The device's location settings, not the app's — that's
                       // where the service toggle lives.
                       unawaited(Geolocator.openLocationSettings());
+                    } else if (blocked) {
+                      // The OS won't prompt again, so Settings is the only way
+                      // back; re-requesting here would silently no-op.
+                      unawaited(Geolocator.openAppSettings());
                     } else {
-                      // Re-request first: if permission was only denied once,
-                      // this prompts again instead of sending to Settings.
-                      ref.invalidate(locationServiceEnabledProvider);
+                      // Re-request: a plain denial can prompt again rather than
+                      // sending the user to Settings.
                       ref.invalidate(locationPermissionProvider);
                     }
                   },
                   child: Text(
-                    serviceOff ? 'Turn on location' : 'Allow location',
+                    switch (access) {
+                      LocationAccess.serviceDisabled => 'Turn on location',
+                      LocationAccess.deniedForever => 'Open settings',
+                      _ => 'Allow location',
+                    },
                   ),
                 ),
               ),
-              if (!serviceOff) ...[
+              if (!serviceOff && !blocked) ...[
                 const SizedBox(height: 6),
                 FButton(
                   variant: .ghost,
