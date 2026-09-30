@@ -11,13 +11,13 @@ import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/validation.dart';
 import '../../core/widgets/app_choice_sheet.dart';
+import '../../core/widgets/app_action_sheet.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
-import '../../core/widgets/brand/brand_text_field.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/user_document.dart';
 import '../premium/paywall.dart';
@@ -197,20 +197,32 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
                             iconColor: BrandColors.primary,
                             title: doc.name,
                             subtitle:
-                                '${_kindLabel(doc.kind)} · ${DateFormat.yMMMd().format(doc.createdAt)}',
+                                '${_kindLabel(doc.kind)} · ${DateFormat.yMMMd().format(doc.createdAt.toLocal())}',
                             showChevron: false,
                             onTap: () => _open(doc),
-                            trailing: BrandFieldAction(
-                              icon: Icons.delete_outline_rounded,
-                              color: BrandColors.error,
-                              semanticLabel: 'Delete document',
-                              onTap: () => _delete(doc),
+                            onLongPress: () => showAppActionSheet(
+                              context,
+                              title: doc.name,
+                              actions: [
+                                AppSheetAction(
+                                  label: 'Open',
+                                  icon: Icons.open_in_new_rounded,
+                                  onSelected: () => _open(doc),
+                                ),
+                                AppSheetAction(
+                                  label: 'Delete document',
+                                  icon: Icons.delete_outline_rounded,
+                                  destructive: true,
+                                  onSelected: () => _delete(doc),
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ],
                     ),
                   ),
+                  const LongPressHint(),
                   if (!isPro)
                     Padding(
                       padding: const EdgeInsets.only(

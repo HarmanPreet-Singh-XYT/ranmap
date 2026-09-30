@@ -1,3 +1,4 @@
+import 'trip.dart';
 import 'trip_stats.dart';
 
 /// A single location sample, decoupled from the Supabase row shape so the
@@ -16,11 +17,10 @@ class PingSample {
   final DateTime recordedAt;
 
   factory PingSample.fromRow(Map<String, dynamic> row) {
-    final point = row['point'] as Map<String, dynamic>;
-    final coords = point['coordinates'] as List<dynamic>;
+    final point = LatLngPoint.requirePostgrest(row['point']);
     return PingSample(
-      lat: (coords[1] as num).toDouble(),
-      lng: (coords[0] as num).toDouble(),
+      lat: point.lat,
+      lng: point.lng,
       speedMps: (row['speed_mps'] as num?)?.toDouble(),
       recordedAt: DateTime.parse(row['recorded_at'] as String),
     );

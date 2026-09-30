@@ -4,12 +4,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme/brand_palette.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/app_action_sheet.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
-import '../../core/widgets/brand/brand_text_field.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/saved_place.dart';
 import 'saved_place_providers.dart';
@@ -60,6 +60,7 @@ class SavedPlacesScreen extends ConsumerWidget {
                   ],
                 ),
               ),
+              const LongPressHint(),
             ],
           );
         },
@@ -118,11 +119,24 @@ class _SavedPlaceRow extends StatelessWidget {
       onTap: point == null
           ? null
           : () => _openDirections(context, point.lat, point.lng),
-      trailing: BrandFieldAction(
-        icon: Icons.delete_outline_rounded,
-        color: BrandColors.error,
-        semanticLabel: 'Delete saved place',
-        onTap: onDelete,
+      onLongPress: () => showAppActionSheet(
+        context,
+        title: place.name,
+        subtitle: subtitle,
+        actions: [
+          if (point != null)
+            AppSheetAction(
+              label: 'Directions',
+              icon: Icons.directions_rounded,
+              onSelected: () => _openDirections(context, point.lat, point.lng),
+            ),
+          AppSheetAction(
+            label: 'Remove saved place',
+            icon: Icons.delete_outline_rounded,
+            destructive: true,
+            onSelected: onDelete,
+          ),
+        ],
       ),
     );
   }

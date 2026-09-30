@@ -14,6 +14,7 @@ OutboxEntry _entry(String id, {String body = 'x'}) => OutboxEntry(
 );
 
 void main() {
+  _userScopingTests();
   group('OutboxEntry', () {
     test('round-trips through JSON', () {
       final entry = OutboxEntry(
@@ -133,5 +134,23 @@ void main() {
       expect(all.first.id, 'q5');
       expect(a.failed.value, isNotEmpty);
     });
+  });
+}
+
+// Appended: a queued write remembers which account queued it.
+void _userScopingTests() {
+  test('OutboxEntry round-trips its owner and tolerates legacy entries', () {
+    final owned = OutboxEntry(
+      id: 'a',
+      type: OutboxType.chatMessage,
+      payload: const {'body': 'hi'},
+      createdAt: DateTime.utc(2026, 1, 1),
+      userId: 'user-1',
+    );
+    expect(OutboxEntry.fromJson(owned.toJson())!.userId, 'user-1');
+
+    final legacy = owned.toJson()..remove('user_id');
+    expect(OutboxEntry.fromJson(legacy)!.userId, isNull);
+    expect(owned.withAttempts(3).userId, 'user-1');
   });
 }

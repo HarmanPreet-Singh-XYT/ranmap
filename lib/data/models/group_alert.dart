@@ -1,3 +1,5 @@
+import 'trip.dart';
+
 /// A convoy alert raised by a group member: an SOS, a rendezvous ("regroup")
 /// point, an arrival/departure check-in, or a quick status (wait / stopping /
 /// need fuel).
@@ -85,14 +87,7 @@ class GroupAlert {
   int get presentCount => checkins.where((c) => c.isPresent).length;
 
   factory GroupAlert.fromJson(Map<String, dynamic> json) {
-    final point = json['point'] as Map<String, dynamic>?;
-    double? lat;
-    double? lng;
-    if (point != null && point['coordinates'] is List) {
-      final coords = point['coordinates'] as List<dynamic>;
-      lng = (coords[0] as num).toDouble();
-      lat = (coords[1] as num).toDouble();
-    }
+    final point = LatLngPoint.fromPostgrest(json['point']);
     final creator = json['creator'] as Map<String, dynamic>?;
     final rawCheckins = json['alert_checkins'] as List<dynamic>? ?? const [];
     return GroupAlert(
@@ -101,8 +96,8 @@ class GroupAlert {
       createdBy: json['created_by'] as String,
       kind: groupAlertKindFromString(json['kind'] as String?),
       message: json['message'] as String?,
-      lat: lat,
-      lng: lng,
+      lat: point?.lat,
+      lng: point?.lng,
       createdAt: DateTime.parse(json['created_at'] as String),
       resolvedAt: json['resolved_at'] != null
           ? DateTime.parse(json['resolved_at'] as String)

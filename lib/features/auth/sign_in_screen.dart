@@ -264,7 +264,7 @@ class _Hero extends StatelessWidget {
         ),
         const SizedBox(height: BrandSpace.lg),
         BrandTag(
-          emoji: '👋',
+          icon: Icons.waving_hand_outlined,
           label: 'Welcome back, road tripper',
           background: BrandColors.secondaryContainer,
           foreground: BrandColors.onSecondaryFixedVariant,

@@ -1,3 +1,5 @@
+import 'trip.dart';
+
 class MapPost {
   final String id;
   final String? tripId;
@@ -24,14 +26,13 @@ class MapPost {
   });
 
   factory MapPost.fromJson(Map<String, dynamic> json) {
-    final point = json['point'] as Map<String, dynamic>;
-    final coords = point['coordinates'] as List<dynamic>;
+    final point = LatLngPoint.requirePostgrest(json['point']);
     return MapPost(
       id: json['id'] as String,
       tripId: json['trip_id'] as String?,
       userId: json['user_id'] as String,
-      lat: (coords[1] as num).toDouble(),
-      lng: (coords[0] as num).toDouble(),
+      lat: point.lat,
+      lng: point.lng,
       storagePath: json['storage_path'] as String,
       caption: json['caption'] as String?,
       visibility: json['visibility'] as String? ?? 'group',

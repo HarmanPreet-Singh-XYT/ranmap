@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
@@ -17,22 +18,53 @@ import '../../core/widgets/brand/brand_sheet_surface.dart';
 import '../../data/models/group.dart';
 import '../../data/models/map_post.dart';
 import '../../data/services/supabase_service.dart';
+import '../chat/chat_share.dart';
 import '../social/social_providers.dart';
 import 'map_post_providers.dart';
 
-Future<void> showMapPostViewerSheet(BuildContext context, MapPost post) {
+/// Opens [post] in the viewer. Pass [stack] — the photos pinned at the same
+/// spot (or any related set, [post] included) — to let the user swipe between
+/// them.
+Future<void> showMapPostViewerSheet(
+  BuildContext context,
+  MapPost post, {
+  List<MapPost>? stack,
+}) {
+  final posts = stack == null || stack.isEmpty ? [post] : stack;
+  final index = posts.indexWhere((p) => p.id == post.id);
   return showFSheet(
     context: context,
     side: FLayout.btt,
     mainAxisMaxRatio: null,
-    builder: (_) => _MapPostViewerSheet(post: post),
+    builder: (_) =>
+        _MapPostViewerSheet(posts: posts, initialIndex: index < 0 ? 0 : index),
   );
 }
 
-class _MapPostViewerSheet extends ConsumerWidget {
-  final MapPost post;
+class _MapPostViewerSheet extends ConsumerStatefulWidget {
+  final List<MapPost> posts;
+  final int initialIndex;
 
-  const _MapPostViewerSheet({required this.post});
+  const _MapPostViewerSheet({required this.posts, required this.initialIndex});
+
+  @override
+  ConsumerState<_MapPostViewerSheet> createState() =>
+      _MapPostViewerSheetState();
+}
+
+class _MapPostViewerSheetState extends ConsumerState<_MapPostViewerSheet> {
+  late final PageController _pages = PageController(
+    initialPage: widget.initialIndex,
+  );
+  late int _index = widget.initialIndex;
+
+  MapPost get post => widget.posts[_index];
+
+  @override
+  void dispose() {
+    _pages.dispose();
+    super.dispose();
+  }
 
   /// Shares this photo with one of the user's groups, which makes it readable
   /// to every member (see `can_view_map_post` / `map_post_shares`).
@@ -169,7 +201,7 @@ class _MapPostViewerSheet extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final signedUrlAsync = ref.watch(
       mapPostSignedUrlProvider(post.storagePath),
     );
@@ -180,44 +212,64 @@ class _MapPostViewerSheet extends ConsumerWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ClipRRect(
-            borderRadius: BrandRadii.cardRadius,
-            child: signedUrlAsync.when(
-              loading: () => SizedBox(
-                height: 240,
-                child: Center(
-                  child: CircularProgressIndicator(
-                    color: BrandColors.primaryContainer,
+          if (widget.posts.length > 1) ...[
+            SizedBox(
+              height: 300,
+              child: Stack(
+                children: [
+                  PageView.builder(
+                    controller: _pages,
+                    itemCount: widget.posts.length,
+                    onPageChanged: (i) => setState(() => _index = i),
+                    itemBuilder: (context, i) => Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: _PostImage(post: widget.posts[i]),
+                    ),
                   ),
-                ),
-              ),
-              error: (e, _) => SizedBox(
-                height: 120,
-                child: Center(
-                  child: Text(
-                    friendlyError(e),
-                    style: BrandText.bodyMd.copyWith(color: BrandColors.error),
-                  ),
-                ),
-              ),
-              data: (url) => Image.network(
-                url,
-                fit: BoxFit.cover,
-                width: double.infinity,
-                errorBuilder: (_, _, _) => SizedBox(
-                  height: 160,
-                  child: Center(
-                    child: Text(
-                      'Could not load this photo.',
-                      style: BrandText.bodySm.copyWith(
-                        color: BrandColors.textMuted,
+                  Positioned(
+                    top: 10,
+                    right: 12,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${_index + 1} / ${widget.posts.length}',
+                        style: BrandText.labelSm.copyWith(color: Colors.white),
                       ),
                     ),
                   ),
-                ),
+                ],
               ),
             ),
-          ),
+            const SizedBox(height: BrandSpace.sm),
+            Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var i = 0; i < widget.posts.length; i++)
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      height: 6,
+                      width: i == _index ? 16 : 6,
+                      decoration: BoxDecoration(
+                        color: i == _index
+                            ? BrandColors.primary
+                            : BrandColors.textMuted.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ] else
+            _PostImage(post: post, fixedHeight: false),
           const SizedBox(height: BrandSpace.md),
           Row(
             children: [
@@ -232,7 +284,7 @@ class _MapPostViewerSheet extends ConsumerWidget {
                 ),
               ),
               Text(
-                DateFormat.yMMMd().add_jm().format(post.createdAt),
+                DateFormat.yMMMd().add_jm().format(post.createdAt.toLocal()),
                 style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
               ),
               IconButton(
@@ -261,6 +313,25 @@ class _MapPostViewerSheet extends ConsumerWidget {
           ],
           if (isMine) ...[
             const SizedBox(height: BrandSpace.md),
+            BrandSecondaryButton(
+              label: 'Send in chat',
+              leading: Icon(
+                Icons.send_rounded,
+                size: 18,
+                color: BrandColors.textHeadlineAlt,
+              ),
+              onPressed: () => showShareToSheet(
+                context,
+                ref,
+                title: 'Send photo',
+                share: ChatShare.photos(
+                  postIds: [post.id],
+                  lat: post.lat,
+                  lng: post.lng,
+                ),
+              ),
+            ),
+            const SizedBox(height: BrandSpace.sm),
             BrandSecondaryButton(
               label: 'Share to a group',
               leading: Icon(
@@ -333,6 +404,69 @@ class _MapPostViewerSheet extends ConsumerWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// One post's photo, loaded through its signed URL.
+class _PostImage extends ConsumerWidget {
+  const _PostImage({required this.post, this.fixedHeight = true});
+
+  final MapPost post;
+
+  /// Fill the parent's height (inside a pager) rather than sizing to the image.
+  final bool fixedHeight;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final signedUrlAsync = ref.watch(
+      mapPostSignedUrlProvider(post.storagePath),
+    );
+    return ClipRRect(
+      borderRadius: BrandRadii.cardRadius,
+      child: signedUrlAsync.when(
+        loading: () => SizedBox(
+          height: 240,
+          child: Center(
+            child: CircularProgressIndicator(
+              color: BrandColors.primaryContainer,
+            ),
+          ),
+        ),
+        error: (e, _) => SizedBox(
+          height: 120,
+          child: Center(
+            child: Text(
+              friendlyError(e),
+              style: BrandText.bodyMd.copyWith(color: BrandColors.error),
+            ),
+          ),
+        ),
+        data: (url) => CachedNetworkImage(
+          imageUrl: url,
+          cacheKey: post.storagePath,
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: fixedHeight ? double.infinity : null,
+          placeholder: (_, _) => SizedBox(
+            height: 240,
+            child: Center(
+              child: CircularProgressIndicator(
+                color: BrandColors.primaryContainer,
+              ),
+            ),
+          ),
+          errorWidget: (_, _, _) => SizedBox(
+            height: 160,
+            child: Center(
+              child: Text(
+                'Could not load this photo.',
+                style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

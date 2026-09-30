@@ -32,7 +32,7 @@ class TripHistoryScreen extends ConsumerWidget {
   String _chartLabel(String? iso) {
     if (iso == null) return '';
     final parsed = DateTime.tryParse(iso);
-    return parsed == null ? '' : DateFormat.Md().format(parsed);
+    return parsed == null ? '' : DateFormat.Md().format(parsed.toLocal());
   }
 
   BrandListRow _historyTile(Map<String, dynamic> stats, DistanceUnit unit) {

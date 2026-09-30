@@ -218,19 +218,19 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
                         message: 'Your intelligent route scout. Tap a prompt below or ask anything about stops, EV range, and convoy routing.',
                         quickChips: [
                           _promptChip(
-                            '☕ Coffee stops ahead',
+                            'Coffee stops ahead',
                             Icons.local_cafe_rounded,
                           ),
                           _promptChip(
-                            '⚡ EV chargers on route',
+                            'EV chargers on route',
                             Icons.ev_station_rounded,
                           ),
                           _promptChip(
-                            '🌄 Find scenic overlooks',
+                            'Find scenic overlooks',
                             Icons.landscape_rounded,
                           ),
                           _promptChip(
-                            '📍 Save a waypoint',
+                            'Save a waypoint',
                             Icons.bookmark_add_rounded,
                           ),
                         ],

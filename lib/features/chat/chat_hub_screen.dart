@@ -4,8 +4,9 @@ import 'package:forui/forui.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import 'ai_conversations_screen.dart';
 import 'chat_channels_screen.dart';
+import 'direct_messages_screen.dart';
 
-/// Hub for the AI trip assistant and group text/voice chat. Group Chat
+/// Hub for direct messages, the AI trip assistant and group text/voice chat. Group Chat
 /// lists a channel per trip/group (ChatChannelsScreen); each channel's
 /// ChatScreen has a "Join voice" action that opens a live LiveKit voice
 /// channel (VoiceChannelScreen) sharing the same channel identity as text.
@@ -23,6 +24,7 @@ class ChatHubScreen extends StatelessWidget {
       child: FTabs(
         expands: true,
         children: const [
+          FTabEntry(label: Text('Direct'), child: DirectMessagesScreen()),
           FTabEntry(label: Text('Groups'), child: ChatChannelsScreen()),
           FTabEntry(
             label: Text('AI Assistant'),

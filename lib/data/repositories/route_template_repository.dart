@@ -38,9 +38,9 @@ class RouteTemplateRepository {
           'user_id': uid,
           'name': name,
           'origin_name': originName,
-          'origin_point': originPoint?.toGeoJson(),
+          'origin_point': originPoint?.toEwkt(),
           'destination_name': destinationName,
-          'destination_point': destinationPoint?.toGeoJson(),
+          'destination_point': destinationPoint?.toEwkt(),
           'route_polyline': routePolyline,
         })
         .select()

@@ -470,6 +470,12 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
       return;
     }
 
+    final start = _scheduledStart;
+    if (start != null && !start.isAfter(DateTime.now())) {
+      setState(() => _error = 'Pick a start time in the future.');
+      return;
+    }
+
     setState(() {
       _saving = true;
       _error = null;

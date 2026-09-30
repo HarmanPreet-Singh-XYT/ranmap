@@ -1,4 +1,5 @@
 import '../models/saved_place.dart';
+import '../models/trip.dart';
 import '../services/supabase_service.dart';
 
 /// The AI copilot's saved places (`ai_saved_places`), written by the
@@ -37,18 +38,14 @@ class SavedPlaceRepository {
     String? notes,
   }) async {
     final uid = SupabaseService.currentUserId;
-    final hasPoint = lat != null && lng != null;
     final row = await _client
         .from('ai_saved_places')
         .insert({
           'user_id': uid,
           'name': name,
           'notes': notes,
-          'point': hasPoint
-              ? {
-                  'type': 'Point',
-                  'coordinates': [lng, lat],
-                }
+          'point': (lat != null && lng != null)
+              ? LatLngPoint(lat, lng).toEwkt()
               : null,
         })
         .select()

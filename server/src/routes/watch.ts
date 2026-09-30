@@ -1,5 +1,6 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { asyncHandler } from "../lib/async-handler.js";
+import { pointFromPostgis } from "../lib/ewkb.js";
 import { decodePolyline } from "../lib/polyline.js";
 import { rateLimit } from "../lib/rate-limit.js";
 import { supabaseAdmin } from "../lib/supabase.js";
@@ -38,7 +39,7 @@ watchRouter.use(
 
 // 32 lowercase hex chars (the trip_shares.token default).
 const TOKEN_RE = /^[0-9a-f]{32}$/;
-const MAX_PINGS = 500;
+const MAX_MEMBERS = 50;
 
 interface WatchMember {
   username: string;
@@ -85,29 +86,48 @@ async function loadWatch(token: string): Promise<WatchData | null> {
   }
   if (!trip) return null;
 
-  const { data: pings, error: pingsError } = await supabaseAdmin
-    .from("location_pings")
-    .select("user_id, point, recorded_at")
-    .eq("trip_id", share.trip_id)
-    .order("recorded_at", { ascending: false })
-    .limit(MAX_PINGS);
-  if (pingsError) {
-    console.error("watch: load pings failed:", pingsError.message);
-    throw new Error("watch: ping lookup failed");
-  }
+  // A finished trip shares no live positions: the link must not keep revealing
+  // where riders are after the ride is over.
+  const live = trip.status === "active" || trip.status === "planned";
 
-  // Latest ping per member (rows are newest-first, so first wins).
+  // Latest ping per accepted member. Querying each member on its own (instead of
+  // one recent-N window across everyone) means a quiet rider isn't pushed out by
+  // chatty ones.
   const latest = new Map<string, { lat: number; lng: number; recordedAt: string }>();
-  for (const ping of pings ?? []) {
-    const userId = ping.user_id as string;
-    if (latest.has(userId)) continue;
-    const point = ping.point as { coordinates?: unknown } | null;
-    const coords = point?.coordinates;
-    if (!Array.isArray(coords) || coords.length < 2) continue;
-    const lng = Number(coords[0]);
-    const lat = Number(coords[1]);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-    latest.set(userId, { lat, lng, recordedAt: ping.recorded_at as string });
+  if (live) {
+    const { data: memberRows, error: membersError } = await supabaseAdmin
+      .from("trip_members")
+      .select("user_id")
+      .eq("trip_id", share.trip_id)
+      .eq("invite_status", "accepted")
+      .limit(MAX_MEMBERS);
+    if (membersError) {
+      console.error("watch: load members failed:", membersError.message);
+      throw new Error("watch: member lookup failed");
+    }
+    const results = await Promise.all(
+      (memberRows ?? []).map(async (m) => {
+        const { data, error } = await supabaseAdmin
+          .from("location_pings")
+          .select("point, recorded_at")
+          .eq("trip_id", share.trip_id)
+          .eq("user_id", m.user_id as string)
+          .order("recorded_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) {
+          console.error("watch: load ping failed:", error.message);
+          throw new Error("watch: ping lookup failed");
+        }
+        return { userId: m.user_id as string, ping: data };
+      }),
+    );
+    for (const { userId, ping } of results) {
+      if (!ping) continue;
+      const loc = pointFromPostgis(ping.point);
+      if (!loc) continue;
+      latest.set(userId, { ...loc, recordedAt: ping.recorded_at as string });
+    }
   }
 
   const userIds = [...latest.keys()];

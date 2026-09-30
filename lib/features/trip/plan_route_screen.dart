@@ -72,6 +72,11 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
   bool _fetchingRoutes = false;
   String? _error;
 
+  /// Bumped whenever the endpoints change or a fetch starts; a response whose
+  /// token is no longer current belongs to an old origin/destination and is
+  /// discarded, so a slow reply can't attach routes to the wrong trip.
+  int _fetchToken = 0;
+
   PointAnnotationManager? _pins;
   PolylineAnnotationManager? _lines;
   Uint8List? _originPin;
@@ -109,13 +114,19 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
 
   Future<void> _resolveCurrentLocationAsOrigin() async {
     try {
-      final position =
-          await Geolocator.getLastKnownPosition() ??
-          await Geolocator.getCurrentPosition(
-            locationSettings: const LocationSettings(
-              timeLimit: kLocationFixTimeout,
-            ),
-          );
+      final cached = await Geolocator.getLastKnownPosition();
+      // A cached fix can be hours old; don't call that "Current location".
+      final fresh =
+          cached != null &&
+          DateTime.now().difference(cached.timestamp) <
+              const Duration(minutes: 5);
+      final position = fresh
+          ? cached
+          : await Geolocator.getCurrentPosition(
+              locationSettings: const LocationSettings(
+                timeLimit: kLocationFixTimeout,
+              ),
+            );
       if (!mounted) return;
       setState(() {
         _origin = Geo.pos(position.latitude, position.longitude);
@@ -140,10 +151,13 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
       ),
     );
     if (picked == null) return;
+    _fetchToken++;
     setState(() {
       _origin = picked.position;
       _originName = picked.name;
       _routes = const [];
+      _fetchingRoutes = false;
+      _error = null;
     });
     _frameOn(picked.position);
   }
@@ -158,10 +172,13 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
       ),
     );
     if (picked == null) return;
+    _fetchToken++;
     setState(() {
       _destination = picked.position;
       _destinationName = picked.name;
       _routes = const [];
+      _fetchingRoutes = false;
+      _error = null;
     });
     _frameOn(picked.position);
   }
@@ -175,6 +192,17 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
     final destination = _destination;
     if (origin == null || destination == null) return;
 
+    // Same place both ends: there is no route to find.
+    if ((origin.lat - destination.lat).abs() < 1e-5 &&
+        (origin.lng - destination.lng).abs() < 1e-5) {
+      setState(() {
+        _routes = const [];
+        _error = 'Origin and destination are the same place.';
+      });
+      return;
+    }
+
+    final token = ++_fetchToken;
     setState(() {
       _fetchingRoutes = true;
       _error = null;
@@ -185,16 +213,18 @@ class _PlanRouteScreenState extends State<PlanRouteScreen> {
         origin: origin,
         destination: destination,
       );
-      if (!mounted) return;
+      if (!mounted || token != _fetchToken) return;
       setState(() {
         _routes = routes;
         _selectedRoute = 0;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || token != _fetchToken) return;
       setState(() => _error = friendlyError(e));
     } finally {
-      if (mounted) setState(() => _fetchingRoutes = false);
+      if (mounted && token == _fetchToken) {
+        setState(() => _fetchingRoutes = false);
+      }
     }
   }
 

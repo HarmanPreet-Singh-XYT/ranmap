@@ -6,6 +6,7 @@ import { ActiveLink } from "../../_components/active-link";
 
 const accountNav: { href: string; label: string; exact?: boolean }[] = [
   { href: "/account", label: "Profile", exact: true },
+  { href: "/account/photos", label: "Photos" },
   { href: "/account/stats", label: "Stats" },
   { href: "/account/billing", label: "Billing" },
 ];

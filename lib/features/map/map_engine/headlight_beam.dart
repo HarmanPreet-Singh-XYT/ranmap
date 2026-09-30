@@ -18,9 +18,12 @@ class HeadlightBeam {
   /// Beam reach on screen, in logical pixels (kept short: it is a hint, not a spotlight).
   static const _reachPx = 60.0;
 
-  /// How far above sea level the beam floats on Standard-style maps, to clear
-  /// building tops (metres; experimental Mapbox `fill-z-offset`).
-  static const _liftMeters = 60.0;
+  /// How far above sea level the beam floats (metres; experimental Mapbox
+  /// `fill-z-offset`). Kept tiny: the offset is vertical, so in a pitched view a
+  /// large lift slides the cone up-screen and, as you zoom in, visibly detaches
+  /// it from the vehicle. Just above the ground clears z-fighting with the road
+  /// without breaking the "beam comes out of the car" alignment.
+  static const _liftMeters = 2.0;
 
   /// Half the cone's opening angle, in degrees.
   static const _halfAngle = 30.0;
@@ -155,6 +158,10 @@ class HeadlightBeam {
       lng: lng,
       headingDegrees: _heading,
       colorArgb: _colorArgb,
+      // Preserve the slot: a camera change can arrive while the layer is absent
+      // (a style reload reset it), and re-adding it slot-less buries it under
+      // Standard's basemap.
+      slot: _slot,
     );
   }
 

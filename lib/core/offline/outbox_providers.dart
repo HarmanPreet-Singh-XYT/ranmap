@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/models/chat_message.dart';
 import '../../data/repositories/chat_repository.dart';
 import '../../data/repositories/trip_repository.dart';
 import '../../features/chat/chat_providers.dart';
@@ -42,7 +43,7 @@ Future<void> _drain(Ref ref, Outbox outbox) async {
   if (outbox.draining) return;
   outbox.draining = true;
   try {
-    final entries = await outbox.all();
+    final entries = await outbox.allForCurrentUser();
     for (final entry in entries) {
       try {
         switch (entry.type) {
@@ -51,7 +52,11 @@ Future<void> _drain(Ref ref, Outbox outbox) async {
               id: entry.id,
               tripId: entry.payload['trip_id'] as String?,
               groupId: entry.payload['group_id'] as String?,
+              conversationId: entry.payload['conversation_id'] as String?,
               body: entry.payload['body'] as String,
+              kind: ChatMessageKind.fromWire(entry.payload['kind'] as String?),
+              payload: (entry.payload['payload'] as Map?)
+                  ?.cast<String, dynamic>(),
             );
             _invalidateChat(ref, entry.payload);
           case OutboxType.tripExpense:
@@ -96,9 +101,12 @@ Future<void> _drain(Ref ref, Outbox outbox) async {
 void _invalidateChat(Ref ref, Map<String, dynamic> payload) {
   final tripId = payload['trip_id'] as String?;
   final groupId = payload['group_id'] as String?;
+  final conversationId = payload['conversation_id'] as String?;
   if (tripId != null) {
     ref.invalidate(chatMessagesProvider(ChatChannel.trip(tripId)));
   } else if (groupId != null) {
     ref.invalidate(chatMessagesProvider(ChatChannel.group(groupId)));
+  } else if (conversationId != null) {
+    ref.invalidate(chatMessagesProvider(ChatChannel.direct(conversationId)));
   }
 }

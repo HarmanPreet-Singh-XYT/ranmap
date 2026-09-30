@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/constants/avatars.dart';
@@ -11,7 +14,9 @@ import '../../core/constants/plan_limits.dart';
 import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
+import '../../core/util/image_upload.dart';
 import '../../core/util/validation.dart';
+import '../../core/widgets/app_choice_sheet.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/avatar_view.dart';
@@ -24,6 +29,7 @@ import '../../core/widgets/brand/brand_sheet_surface.dart';
 import '../../core/widgets/brand/brand_text_field.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/group.dart';
+import '../../data/providers/repository_providers.dart';
 import '../../data/services/supabase_service.dart';
 import '../map/group_convoy_screen.dart';
 import '../premium/paywall.dart';
@@ -221,18 +227,35 @@ class GroupDetailScreen extends ConsumerWidget {
       builder: (_) => _EditGroupSheet(group: group),
     );
     if (updated == null || !context.mounted) return;
-    await _run(
-      context,
-      () => ref
+    final oldPath = isCustomAvatar(group.avatarId)
+        ? customAvatarPath(group.avatarId)
+        : null;
+    final newPath = isCustomAvatar(updated.$3)
+        ? customAvatarPath(updated.$3)
+        : null;
+    try {
+      await ref
           .read(groupRepositoryProvider)
           .updateGroup(
             groupId: group.id,
             name: updated.$1,
             description: updated.$2.isEmpty ? null : updated.$2,
             avatarId: updated.$3,
-          ),
-      onSuccess: () => _refresh(ref),
-    );
+          );
+      // Drop the photo this group used before, now that the write stuck.
+      if (oldPath != null && oldPath != newPath) {
+        unawaited(ref.read(avatarRepositoryProvider).remove(oldPath));
+      }
+      _refresh(ref);
+    } catch (e) {
+      // Don't orphan a freshly uploaded photo when the save is rejected.
+      if (newPath != null && newPath != oldPath) {
+        unawaited(ref.read(avatarRepositoryProvider).remove(newPath));
+      }
+      if (context.mounted) {
+        showAppToast(context, friendlyError(e), error: true);
+      }
+    }
   }
 
   Future<void> _transferTo(
@@ -1075,16 +1098,16 @@ class _MemberRow extends StatelessWidget {
 
 /// Edit a group's name, description and avatar. Returns
 /// `(name, description, avatarId)`.
-class _EditGroupSheet extends StatefulWidget {
+class _EditGroupSheet extends ConsumerStatefulWidget {
   const _EditGroupSheet({required this.group});
 
   final Group group;
 
   @override
-  State<_EditGroupSheet> createState() => _EditGroupSheetState();
+  ConsumerState<_EditGroupSheet> createState() => _EditGroupSheetState();
 }
 
-class _EditGroupSheetState extends State<_EditGroupSheet> {
+class _EditGroupSheetState extends ConsumerState<_EditGroupSheet> {
   late final TextEditingController _nameCtrl = TextEditingController(
     text: widget.group.name,
   );
@@ -1092,15 +1115,80 @@ class _EditGroupSheetState extends State<_EditGroupSheet> {
     text: widget.group.description ?? '',
   );
   late String _avatarId = widget.group.avatarId;
+  // A photo uploaded in this sheet but not yet persisted on save. Handed off to
+  // the caller on save (cleared) so it survives; dropped in dispose otherwise.
+  String? _pendingUpload;
+  bool _uploading = false;
   String? _error;
 
   static const int _descMaxLength = 200;
 
   @override
   void dispose() {
+    // Discard an unsaved upload so it doesn't linger in the avatars bucket.
+    final pending = _pendingUpload;
+    if (pending != null) {
+      unawaited(ref.read(avatarRepositoryProvider).remove(pending));
+    }
     _nameCtrl.dispose();
     _descCtrl.dispose();
     super.dispose();
+  }
+
+  /// Picks a photo (camera or library), uploads it, and selects it. Persisted
+  /// only when the sheet is saved.
+  Future<void> _uploadPhoto() async {
+    final source = await showAppChoiceSheet<ImageSource>(
+      context,
+      title: 'Group photo',
+      options: const [
+        (value: ImageSource.camera, label: 'Take a photo'),
+        (value: ImageSource.gallery, label: 'Choose from library'),
+      ],
+    );
+    if (source == null || !mounted) return;
+
+    setState(() => _uploading = true);
+    final previous = _pendingUpload;
+    try {
+      final file = await ImagePicker().pickImage(
+        source: source,
+        imageQuality: 85,
+        maxWidth: 1024,
+        maxHeight: 1024,
+      );
+      if (file == null) return;
+      final bytes = await file.readAsBytes();
+      final extension = imageExtensionOf(file.name);
+
+      final path = await ref
+          .read(avatarRepositoryProvider)
+          .upload(bytes: bytes, fileExtension: extension);
+      if (!mounted) return;
+      setState(() {
+        _pendingUpload = path;
+        _avatarId = customAvatarId(path);
+      });
+      if (previous != null) {
+        unawaited(ref.read(avatarRepositoryProvider).remove(previous));
+      }
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  /// Switches back to a generated avatar, dropping any unsaved upload.
+  void _shuffle() {
+    final pending = _pendingUpload;
+    if (pending != null) {
+      _pendingUpload = null;
+      unawaited(ref.read(avatarRepositoryProvider).remove(pending));
+    }
+    setState(() {
+      _avatarId = randomAvatarSeed();
+    });
   }
 
   void _save() {
@@ -1117,6 +1205,9 @@ class _EditGroupSheetState extends State<_EditGroupSheet> {
       );
       return;
     }
+    // Hand the uploaded photo off: it's now the caller's to persist or drop,
+    // so dispose must not delete it.
+    _pendingUpload = null;
     Navigator.of(context).pop((name, _descCtrl.text.trim(), _avatarId));
   }
 
@@ -1136,6 +1227,7 @@ class _EditGroupSheetState extends State<_EditGroupSheet> {
             ),
             const SizedBox(height: BrandSpace.md),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 AvatarView(
                   seed: _avatarId,
@@ -1144,16 +1236,33 @@ class _EditGroupSheetState extends State<_EditGroupSheet> {
                   accentColor: BrandColors.primary,
                 ),
                 const SizedBox(width: BrandSpace.md),
-                BrandSecondaryButton(
-                  label: 'Shuffle avatar',
-                  leading: Icon(
-                    Icons.casino_outlined,
-                    size: 18,
-                    color: BrandColors.textHeadlineAlt,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      BrandSecondaryButton(
+                        label: _uploading ? 'Uploading…' : 'Upload a photo',
+                        leading: Icon(
+                          Icons.add_a_photo_outlined,
+                          size: 18,
+                          color: BrandColors.textHeadlineAlt,
+                        ),
+                        expand: true,
+                        onPressed: _uploading ? null : _uploadPhoto,
+                      ),
+                      const SizedBox(height: BrandSpace.sm),
+                      BrandSecondaryButton(
+                        label: 'Shuffle avatar',
+                        leading: Icon(
+                          Icons.casino_outlined,
+                          size: 18,
+                          color: BrandColors.textHeadlineAlt,
+                        ),
+                        expand: true,
+                        onPressed: _uploading ? null : _shuffle,
+                      ),
+                    ],
                   ),
-                  expand: false,
-                  onPressed: () =>
-                      setState(() => _avatarId = randomAvatarSeed()),
                 ),
               ],
             ),

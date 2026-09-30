@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { AvatarView } from "./avatar-view";
 
 const MAX_BYTES = 5 * 1024 * 1024;
+// Mirrors kAllowedImageExtensions in lib/core/util/image_upload.dart, minus
+// HEIC/HEIF — browsers can't reliably decode those, so they stay mobile-only.
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
 function extensionFor(file: File): string {

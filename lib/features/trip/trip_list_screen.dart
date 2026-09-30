@@ -6,7 +6,10 @@ import 'package:intl/intl.dart';
 import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/app_action_sheet.dart';
+import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../data/services/supabase_service.dart';
 import '../../core/widgets/brand/brand_alert.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
@@ -407,10 +410,78 @@ class _TripCardState extends ConsumerState<_TripCard> {
     }
   }
 
+  void _open() => Navigator.of(context).push(
+    MaterialPageRoute(builder: (_) => TripDetailScreen(trip: widget.trip)),
+  );
+
+  /// Deletes (creator) or leaves (member) the trip, after confirming.
+  Future<void> _removeOrLeave(bool isCreator) async {
+    final trip = widget.trip;
+    final confirmed = await showAppConfirmDialog(
+      context,
+      title: isCreator ? 'Delete trip?' : 'Leave trip?',
+      message: isCreator
+          ? 'This permanently deletes the trip, its stops and expenses for everyone.'
+          : 'You will stop sharing your location on this trip.',
+      confirmLabel: isCreator ? 'Delete' : 'Leave',
+      destructive: true,
+    );
+    if (!confirmed || !mounted) return;
+    try {
+      final repo = ref.read(tripRepositoryProvider);
+      if (isCreator) {
+        await repo.deleteTrip(trip.id);
+      } else {
+        await repo.leaveTrip(trip.id);
+      }
+      refreshTripData(ref, tripId: trip.id);
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
+
+  void _showActions() {
+    final trip = widget.trip;
+    final isCreator = trip.createdBy == SupabaseService.currentUser?.id;
+    showAppActionSheet(
+      context,
+      title: trip.title,
+      subtitle: _statusLabel(trip.status),
+      actions: [
+        AppSheetAction(
+          label: 'Open',
+          icon: Icons.open_in_new_rounded,
+          onSelected: _open,
+        ),
+        if (trip.status == TripStatus.planned)
+          AppSheetAction(
+            label: 'Start now',
+            icon: Icons.play_arrow_rounded,
+            onSelected: _start,
+          ),
+        if (isCreator)
+          AppSheetAction(
+            label: 'Delete trip',
+            icon: Icons.delete_outline_rounded,
+            destructive: true,
+            onSelected: () => _removeOrLeave(true),
+          )
+        else if (trip.status != TripStatus.completed)
+          AppSheetAction(
+            label: 'Leave trip',
+            icon: Icons.logout_rounded,
+            destructive: true,
+            onSelected: () => _removeOrLeave(false),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final trip = widget.trip;
     return GestureDetector(
+      onLongPress: _showActions,
       onTap: () => Navigator.of(
         context,
       ).push(MaterialPageRoute(builder: (_) => TripDetailScreen(trip: trip))),
@@ -467,7 +538,7 @@ class _TripCardState extends ConsumerState<_TripCard> {
                         Flexible(
                           child: Text(
                             DateFormat.yMMMd().add_jm().format(
-                              trip.scheduledStart!,
+                              trip.scheduledStart!.toLocal(),
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,

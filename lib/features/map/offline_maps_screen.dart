@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/app_action_sheet.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
@@ -11,7 +12,6 @@ import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_data.dart';
 import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
-import '../../core/widgets/brand/brand_text_field.dart';
 import '../../data/models/trip.dart';
 import '../premium/paywall.dart';
 import '../premium/premium_providers.dart';
@@ -258,20 +258,27 @@ class _OfflineMapsScreenState extends ConsumerState<OfflineMapsScreen> {
                             subtitle:
                                 '~${_formatBytes(region.completedResourceSize)} · ${region.completedResourceCount}/${region.requiredResourceCount} tiles',
                             showChevron: false,
-                            trailing: BrandFieldAction(
-                              icon: Icons.delete_outline_rounded,
-                              color: BrandColors.error,
-                              semanticLabel: 'Remove offline map',
-                              onTap: () => _delete(
-                                region,
-                                title: _titleFor(region.id, trips),
-                              ),
+                            onLongPress: () => showAppActionSheet(
+                              context,
+                              title: _titleFor(region.id, trips),
+                              actions: [
+                                AppSheetAction(
+                                  label: 'Remove offline map',
+                                  icon: Icons.delete_outline_rounded,
+                                  destructive: true,
+                                  onSelected: () => _delete(
+                                    region,
+                                    title: _titleFor(region.id, trips),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ],
                     ),
                   ),
+                  const LongPressHint(text: 'Press and hold a map to remove it.'),
                   const SizedBox(height: BrandSpace.lg),
                 ],
                 const BrandSectionHeader(

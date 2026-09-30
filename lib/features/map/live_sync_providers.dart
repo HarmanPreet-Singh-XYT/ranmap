@@ -8,7 +8,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/providers/app_prefs_provider.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../data/models/group_alert.dart';
+import '../../data/models/trip.dart';
 import '../../data/providers/repository_providers.dart';
+import '../../data/repositories/trip_repository.dart';
 import '../../data/services/supabase_service.dart';
 import '../trip/trip_providers.dart';
 
@@ -31,12 +33,11 @@ class MemberLocation {
   final DateTime recordedAt;
 
   factory MemberLocation.fromRow(Map<String, dynamic> row) {
-    final point = row['point'] as Map<String, dynamic>;
-    final coords = point['coordinates'] as List<dynamic>;
+    final point = LatLngPoint.requirePostgrest(row['point']);
     return MemberLocation(
       userId: row['user_id'] as String,
-      lat: (coords[1] as num).toDouble(),
-      lng: (coords[0] as num).toDouble(),
+      lat: point.lat,
+      lng: point.lng,
       speedMps: (row['speed_mps'] as num?)?.toDouble(),
       heading: (row['heading'] as num?)?.toDouble(),
       recordedAt: DateTime.parse(row['recorded_at'] as String),
@@ -195,6 +196,10 @@ const _presencePersistInterval = Duration(seconds: 30);
 /// Coarse persisted pings between each `trip_stats` recompute. Recomputing
 /// re-reads the trip's whole ping history, so it must not run per ping.
 const _statsRecomputeEveryNPings = 4;
+
+/// Cap on fixes buffered while offline (~6 h at the persist interval); past it
+/// the oldest are dropped so memory stays bounded.
+const _maxPendingPings = 500;
 
 /// How long a teammate's last-known position stays on the live map before it
 /// ages out. Without this, a member who lost signal or stopped sharing lingers
@@ -413,6 +418,29 @@ Stream<Map<String, MemberLocation>> _liveSync(
   DateTime? lastBroadcastAt;
   DateTime? lastPersistedAt;
   var pingsSinceRecompute = 0;
+  final pendingPings = <PendingPing>[];
+  var flushing = false;
+
+  /// Writes every buffered ping in one batch; on failure they stay queued for
+  /// the next tick.
+  Future<void> flushPings() async {
+    if (flushing || pendingPings.isEmpty) return;
+    flushing = true;
+    final batch = List.of(pendingPings);
+    try {
+      await tripRepo.logLocations(id, batch);
+      pendingPings.removeWhere(batch.contains);
+      pingsSinceRecompute += batch.length;
+      if (pingsSinceRecompute >= _statsRecomputeEveryNPings) {
+        pingsSinceRecompute = 0;
+        await tripRepo.recomputeStats(id);
+      }
+    } catch (_) {
+      // Best-effort background sync: keep the buffer and retry next tick.
+    } finally {
+      flushing = false;
+    }
+  }
 
   /// Publishes via the server RPC, which stamps the sender id — the client
   /// never authors a broadcast, so it can't forge another member's position.
@@ -467,25 +495,20 @@ Stream<Map<String, MemberLocation>> _liveSync(
       if (lastPersistedAt == null ||
           now.difference(lastPersistedAt!) >= _persistInterval) {
         lastPersistedAt = now;
-        unawaited(() async {
-          try {
-            await tripRepo.logLocation(
-              tripId: id,
-              lat: pos.latitude,
-              lng: pos.longitude,
-              speedMps: pos.speed,
-              heading: pos.heading,
-            );
-            pingsSinceRecompute++;
-            if (pingsSinceRecompute >= _statsRecomputeEveryNPings) {
-              pingsSinceRecompute = 0;
-              await tripRepo.recomputeStats(id);
-            }
-          } catch (_) {
-            // Best-effort background sync: a dropped ping or a transient
-            // network failure must not surface as an unhandled async error.
-          }
-        }());
+        // Buffer first: a fix taken with no signal (tunnel, mountains) is kept
+        // and flushed in order once a write succeeds, instead of being lost and
+        // leaving a straight-line gap in the trail.
+        if (pendingPings.length >= _maxPendingPings) pendingPings.removeAt(0);
+        pendingPings.add(
+          PendingPing(
+            lat: pos.latitude,
+            lng: pos.longitude,
+            speedMps: pos.speed,
+            heading: pos.heading,
+            recordedAt: now,
+          ),
+        );
+        unawaited(flushPings());
       }
     } else {
       // Group convoy: one throttled broadcast, refreshing the presence

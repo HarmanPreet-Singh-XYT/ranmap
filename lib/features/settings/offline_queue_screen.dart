@@ -47,7 +47,7 @@ class _OfflineQueueScreenState extends ConsumerState<OfflineQueueScreen> {
   void _refresh() => unawaited(_load());
 
   Future<void> _load() async {
-    final entries = await _outbox.all();
+    final entries = await _outbox.allForCurrentUser();
     if (mounted) setState(() => _entries = entries);
   }
 

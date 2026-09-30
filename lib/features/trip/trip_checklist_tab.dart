@@ -5,6 +5,7 @@ import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/validation.dart';
+import '../../core/widgets/app_action_sheet.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
@@ -199,43 +200,58 @@ class _ChecklistRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => onToggle(!item.done),
-            behavior: HitTestBehavior.opaque,
-            child: Icon(
-              item.done
-                  ? Icons.check_circle_rounded
-                  : Icons.radio_button_unchecked_rounded,
-              size: 24,
-              color: item.done ? BrandColors.primary : BrandColors.textMuted,
-            ),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onLongPress: () => showAppActionSheet(
+        context,
+        title: item.label,
+        actions: [
+          AppSheetAction(
+            label: item.done ? 'Mark as not done' : 'Mark as done',
+            icon: item.done
+                ? Icons.radio_button_unchecked_rounded
+                : Icons.check_circle_outline_rounded,
+            onSelected: () => onToggle(!item.done),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              item.label,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: BrandText.titleSm.copyWith(
-                color: item.done
-                    ? BrandColors.textMuted
-                    : BrandColors.textHeadline,
-                decoration: item.done ? TextDecoration.lineThrough : null,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          BrandFieldAction(
-            icon: Icons.close_rounded,
-            color: BrandColors.textMuted,
-            semanticLabel: 'Remove item',
-            onTap: onDelete,
+          AppSheetAction(
+            label: 'Remove item',
+            icon: Icons.delete_outline_rounded,
+            destructive: true,
+            onSelected: onDelete,
           ),
         ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            GestureDetector(
+              onTap: () => onToggle(!item.done),
+              behavior: HitTestBehavior.opaque,
+              child: Icon(
+                item.done
+                    ? Icons.check_circle_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                size: 24,
+                color: item.done ? BrandColors.primary : BrandColors.textMuted,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                item.label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: BrandText.titleSm.copyWith(
+                  color: item.done
+                      ? BrandColors.textMuted
+                      : BrandColors.textHeadline,
+                  decoration: item.done ? TextDecoration.lineThrough : null,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

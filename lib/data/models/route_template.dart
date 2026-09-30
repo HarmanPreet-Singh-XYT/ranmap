@@ -29,10 +29,7 @@ class RouteTemplate {
       originPoint != null && destinationPoint != null && routePolyline != null;
 
   factory RouteTemplate.fromJson(Map<String, dynamic> json) {
-    LatLngPoint? point(String key) {
-      final raw = json[key];
-      return raw is Map<String, dynamic> ? LatLngPoint.fromGeoJson(raw) : null;
-    }
+    LatLngPoint? point(String key) => LatLngPoint.fromPostgrest(json[key]);
 
     return RouteTemplate(
       id: json['id'] as String,

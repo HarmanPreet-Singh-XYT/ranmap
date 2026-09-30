@@ -321,5 +321,5 @@ String _relativeTime(DateTime time) {
   if (diff.inMinutes < 60) return '${diff.inMinutes}m';
   if (diff.inHours < 24) return '${diff.inHours}h';
   if (diff.inDays < 7) return '${diff.inDays}d';
-  return DateFormat.yMMMd().format(time);
+  return DateFormat.yMMMd().format(time.toLocal());
 }

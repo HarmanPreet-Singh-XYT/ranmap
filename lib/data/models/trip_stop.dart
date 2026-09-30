@@ -48,7 +48,7 @@ class TripStop {
         createdBy: json['created_by'] as String,
         kind: json['kind'] as String? ?? 'custom',
         name: json['name'] as String,
-        point: LatLngPoint.fromGeoJson(json['point'] as Map<String, dynamic>),
+        point: LatLngPoint.requirePostgrest(json['point']),
         plannedArrival: json['planned_arrival'] != null
             ? DateTime.parse(json['planned_arrival'] as String)
             : null,
@@ -67,8 +67,8 @@ class TripStop {
         'created_by': createdBy,
         'kind': kind,
         'name': name,
-        'point': point.toGeoJson(),
-        'planned_arrival': plannedArrival?.toIso8601String(),
+        'point': point.toEwkt(),
+        'planned_arrival': plannedArrival?.toUtc().toIso8601String(),
         'notes': notes,
       };
 }

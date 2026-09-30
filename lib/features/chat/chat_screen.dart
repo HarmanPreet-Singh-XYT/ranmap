@@ -1,9 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 
-import '../../core/network/backend_client.dart';
 import '../../core/offline/outbox.dart';
 import '../../core/offline/outbox_providers.dart';
 import '../../core/providers/connectivity_provider.dart';
@@ -11,6 +12,7 @@ import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/validation.dart';
+import '../../core/widgets/app_action_sheet.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
@@ -21,6 +23,8 @@ import '../../core/widgets/error_retry.dart';
 import '../../data/models/chat_message.dart';
 import '../../data/services/supabase_service.dart';
 import 'chat_providers.dart';
+import 'chat_rich_message.dart';
+import 'chat_share.dart';
 import 'voice_channel_screen.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -89,11 +93,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             id: id,
             tripId: widget.channel.tripId,
             groupId: widget.channel.groupId,
+            conversationId: widget.channel.conversationId,
             body: text,
           );
       // Best-effort push so members with the app closed are told; the realtime
       // channel only reaches open apps. Failure must never affect the send.
-      unawaited(_notifyChatPush());
+      unawaited(notifyChatPush(widget.channel));
     } catch (e) {
       if (!mounted) return;
       if (isNetworkError(e) || ref.read(isOfflineProvider)) {
@@ -108,6 +113,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 payload: {
                   'trip_id': widget.channel.tripId,
                   'group_id': widget.channel.groupId,
+                  'conversation_id': widget.channel.conversationId,
                   'body': text,
                 },
                 createdAt: DateTime.now(),
@@ -120,6 +126,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 id: id,
                 tripId: widget.channel.tripId,
                 groupId: widget.channel.groupId,
+                conversationId: widget.channel.conversationId,
                 senderId: SupabaseService.currentUserId,
                 body: text,
                 createdAt: DateTime.now(),
@@ -142,24 +149,72 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
-  /// Tells the server to push this message to the other members. Deliberately
-  /// swallowed: the message is already stored, so a push failure isn't a send
-  /// failure. Not called from the offline-queue replay path, so a retried send
-  /// can't push twice.
-  Future<void> _notifyChatPush() async {
-    final channel = widget.channel;
+  /// Sends the user's current position as a location card.
+  Future<void> _shareCurrentLocation() async {
     try {
-      await BackendClient.postJson(
-        '/notifications/chat-message',
-        {
-          if (channel.tripId != null) 'tripId': channel.tripId,
-          if (channel.groupId != null) 'groupId': channel.groupId,
-        },
-        fallbackMessage: 'Could not notify the channel',
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          timeLimit: Duration(seconds: 10),
+        ),
       );
-    } catch (_) {
-      // Best-effort only.
+      await sendChatShare(
+        ref,
+        widget.channel,
+        ChatShare.location(
+          lat: pos.latitude,
+          lng: pos.longitude,
+          name: 'My location',
+        ),
+      );
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted) {
+        showAppToast(
+          context,
+          'Could not get your location. ${friendlyError(e)}',
+          error: true,
+        );
+      }
     }
+  }
+
+  /// Lets the user pick some of their pinned photos and sends them as one card.
+  Future<void> _sharePinnedPhotos() async {
+    final picked = await showPhotoPickerSheet(context);
+    if (picked == null || picked.isEmpty || !mounted) return;
+    try {
+      await sendChatShare(
+        ref,
+        widget.channel,
+        ChatShare.photos(
+          postIds: [for (final p in picked) p.id],
+          lat: picked.first.lat,
+          lng: picked.first.lng,
+        ),
+      );
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
+
+  void _showAttachMenu() {
+    showAppActionSheet(
+      context,
+      title: 'Share',
+      actions: [
+        AppSheetAction(
+          label: 'Pinned photos',
+          icon: Icons.push_pin_rounded,
+          onSelected: _sharePinnedPhotos,
+        ),
+        AppSheetAction(
+          label: 'My location',
+          icon: Icons.my_location_rounded,
+          onSelected: _shareCurrentLocation,
+        ),
+      ],
+    );
   }
 
   Future<void> _confirmDelete(ChatMessage message) async {
@@ -221,16 +276,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       header: BrandHeader(
         title: widget.title,
         onBack: () => Navigator.of(context).maybePop(),
-        actionIcon: Icons.call_rounded,
+        // Voice rooms belong to trips and groups; a direct message has none.
+        actionIcon: widget.channel.isDirect ? null : Icons.call_rounded,
         actionTooltip: 'Voice channel',
-        onAction: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => VoiceChannelScreen(
-              channel: widget.channel,
-              title: widget.title,
-            ),
-          ),
-        ),
+        onAction: widget.channel.isDirect
+            ? null
+            : () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => VoiceChannelScreen(
+                    channel: widget.channel,
+                    title: widget.title,
+                  ),
+                ),
+              ),
       ),
       child: Column(
         children: [
@@ -285,6 +343,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
+                IconButton(
+                  tooltip: 'Share a photo or location',
+                  onPressed: _sending ? null : _showAttachMenu,
+                  icon: Icon(
+                    Icons.add_circle_outline_rounded,
+                    size: 28,
+                    color: BrandColors.textMuted,
+                  ),
+                ),
                 Expanded(
                   child: BrandTextField(
                     controller: _inputController,
@@ -351,7 +418,27 @@ class _ChatBubble extends StatelessWidget {
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: GestureDetector(
-        onLongPress: onDelete,
+        onLongPress: () => showAppActionSheet(
+          context,
+          title: 'Message',
+          actions: [
+            AppSheetAction(
+              label: 'Copy text',
+              icon: Icons.copy_rounded,
+              onSelected: () {
+                Clipboard.setData(ClipboardData(text: message.body ?? ''));
+                showAppToast(context, 'Copied.');
+              },
+            ),
+            if (onDelete != null)
+              AppSheetAction(
+                label: 'Delete message',
+                icon: Icons.delete_outline_rounded,
+                destructive: true,
+                onSelected: onDelete!,
+              ),
+          ],
+        ),
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: BrandSpace.xs),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -376,10 +463,13 @@ class _ChatBubble extends StatelessWidget {
                     ).copyWith(color: BrandColors.primary),
                   ),
                 ),
-              Text(
-                message.body ?? '',
-                style: BrandText.bodyMd.copyWith(color: fg),
-              ),
+              if (message.kind == ChatMessageKind.text)
+                Text(
+                  message.body ?? '',
+                  style: BrandText.bodyMd.copyWith(color: fg),
+                )
+              else
+                RichMessageBody(message: message, color: fg),
             ],
           ),
         ),

@@ -19,12 +19,17 @@ class ImageUploadException implements Exception {
   String toString() => message;
 }
 
-/// Image container formats the app is willing to upload.
+/// Image container formats the app is willing to upload. Kept in step with the
+/// web client's allow-list (`web-app/app/(account)/_components/avatar-upload.tsx`)
+/// so an avatar accepted on one surface is accepted on the other. HEIC/HEIF are
+/// mobile-only: browsers can't reliably decode them, so the web list is a
+/// deliberate subset rather than a drift.
 const Set<String> kAllowedImageExtensions = {
   'jpg',
   'jpeg',
   'png',
   'webp',
+  'gif',
   'heic',
   'heif',
 };
@@ -34,6 +39,7 @@ const Map<String, String> _mimeByExtension = {
   'jpeg': 'image/jpeg',
   'png': 'image/png',
   'webp': 'image/webp',
+  'gif': 'image/gif',
   'heic': 'image/heic',
   'heif': 'image/heif',
 };
@@ -57,7 +63,7 @@ String? imageUploadError({
   required String extension,
 }) {
   if (!kAllowedImageExtensions.contains(extension.toLowerCase())) {
-    return 'Unsupported image type — use a JPEG, PNG, WebP or HEIC photo.';
+    return 'Unsupported image type — use a JPEG, PNG, WebP, GIF or HEIC photo.';
   }
   if (byteLength == 0) {
     return 'That photo looks empty — try another.';

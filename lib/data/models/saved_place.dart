@@ -35,9 +35,7 @@ class SavedPlace {
     return SavedPlace(
       id: json['id'] as String,
       name: json['name'] as String? ?? 'Saved place',
-      point: rawPoint is Map<String, dynamic>
-          ? LatLngPoint.fromGeoJson(rawPoint)
-          : null,
+      point: LatLngPoint.fromPostgrest(rawPoint),
       notes: json['notes'] as String?,
       createdAt: json['created_at'] is String
           ? DateTime.parse(json['created_at'] as String)

@@ -5,9 +5,8 @@ import '../../core/theme/brand_palette.dart';
 import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/error_retry.dart';
-import '../../data/models/map_post.dart';
+import '../map/map_photo_tile.dart';
 import '../map/map_post_providers.dart';
-import '../map/map_post_viewer_sheet.dart';
 
 /// Photos group members have shared with the crew ("Share to a group" from a
 /// map photo). Reachable from the group's convoy screen.
@@ -58,7 +57,11 @@ class GroupPhotosScreen extends ConsumerWidget {
               crossAxisSpacing: 8,
             ),
             itemCount: posts.length,
-            itemBuilder: (context, i) => _PhotoTile(post: posts[i]),
+            itemBuilder: (context, i) => MapPhotoTile(
+              post: posts[i],
+              stack: posts,
+              borderRadius: BrandRadii.miniRadius,
+            ),
           );
         },
       ),
@@ -107,47 +110,13 @@ class SharedWithMePhotosScreen extends ConsumerWidget {
               crossAxisSpacing: 8,
             ),
             itemCount: posts.length,
-            itemBuilder: (context, i) => _PhotoTile(post: posts[i]),
+            itemBuilder: (context, i) => MapPhotoTile(
+              post: posts[i],
+              stack: posts,
+              borderRadius: BrandRadii.miniRadius,
+            ),
           );
         },
-      ),
-    );
-  }
-}
-
-class _PhotoTile extends ConsumerWidget {
-  const _PhotoTile({required this.post});
-
-  final MapPost post;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final urlAsync = ref.watch(mapPostSignedUrlProvider(post.storagePath));
-    return GestureDetector(
-      onTap: () => showMapPostViewerSheet(context, post),
-      child: ClipRRect(
-        borderRadius: BrandRadii.miniRadius,
-        child: urlAsync.when(
-          loading: () => Container(color: BrandColors.surfaceContainerLow),
-          error: (_, _) => Container(
-            color: BrandColors.surfaceContainerLow,
-            child: Icon(
-              Icons.broken_image_outlined,
-              color: BrandColors.textMuted,
-            ),
-          ),
-          data: (url) => Image.network(
-            url,
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => Container(
-              color: BrandColors.surfaceContainerLow,
-              child: Icon(
-                Icons.broken_image_outlined,
-                color: BrandColors.textMuted,
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }

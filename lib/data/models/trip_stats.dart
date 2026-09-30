@@ -31,6 +31,6 @@ class TripStats {
         'max_speed_kmh': maxSpeedKmh,
         'avg_speed_kmh': avgSpeedKmh,
         'duration_seconds': durationSeconds,
-        'updated_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
       };
 }

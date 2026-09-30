@@ -39,6 +39,7 @@ import '../../data/models/trip_stats.dart';
 import '../../data/models/trip_stop.dart';
 import '../../data/services/google_maps_api_service.dart';
 import '../../data/services/supabase_service.dart';
+import '../chat/chat_share.dart';
 import '../map/live_sync_providers.dart';
 import '../map/map_engine/geo.dart';
 import '../map/trip_photos_screen.dart';
@@ -58,12 +59,18 @@ import 'trip_recap_screen.dart';
 import 'vehicle_mode_ui.dart';
 import 'weather_ui.dart';
 
+/// Trips whose start is currently in flight (guards against double taps).
+final Set<String> _startingTrips = {};
+
 class TripDetailScreen extends ConsumerWidget {
   const TripDetailScreen({super.key, required this.trip});
 
   final Trip trip;
 
   Future<void> _startTrip(BuildContext context, WidgetRef ref) async {
+    // A second tap while the first is in flight would hit the (now strict)
+    // planned→active update and surface a bogus error.
+    if (!_startingTrips.add(trip.id)) return;
     try {
       await ref.read(tripRepositoryProvider).startTrip(trip.id);
       // Directions are best-effort: the trip is already live either way.
@@ -83,6 +90,8 @@ class TripDetailScreen extends ConsumerWidget {
       Navigator.of(context).maybePop();
     } catch (e) {
       if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+    } finally {
+      _startingTrips.remove(trip.id);
     }
   }
 
@@ -323,6 +332,22 @@ class TripDetailScreen extends ConsumerWidget {
                   },
                 ),
               ],
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: Icons.send_rounded,
+                iconColor: BrandColors.primary,
+                title: 'Send in chat',
+                subtitle: 'Share this trip with a friend, group or trip chat',
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  showShareToSheet(
+                    context,
+                    ref,
+                    title: 'Share trip',
+                    share: ChatShare.trip(tripId: trip.id, title: trip.title),
+                  );
+                },
+              ),
               if (isCreator) ...[
                 const BrandRowDivider(),
                 BrandListRow(
@@ -1649,7 +1674,7 @@ class _StopCard extends StatelessWidget {
                 ),
                 if (stop.plannedArrival != null)
                   Text(
-                    'ETA ${DateFormat.yMMMd().add_jm().format(stop.plannedArrival!)}',
+                    'ETA ${DateFormat.yMMMd().add_jm().format(stop.plannedArrival!.toLocal())}',
                     style: BrandText.bodySm.copyWith(
                       color: BrandColors.textMuted,
                     ),

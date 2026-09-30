@@ -245,7 +245,7 @@ class SettingsScreen extends ConsumerWidget {
                   final first = await showAppConfirmDialog(
                     context,
                     title: 'Delete your account?',
-                    message: 'This permanently deletes your profile, trips, photos, chats and messages. It cannot be undone.',
+                    message: 'This permanently deletes your profile, photos, chats and messages. Trips you created are deleted for everyone on them, and groups you own are deleted for all members. It cannot be undone.',
                     confirmLabel: 'Continue',
                     destructive: true,
                   );

@@ -15,6 +15,23 @@ import '../models/trip_stats_rollup.dart';
 import '../models/trip_stop.dart';
 import '../services/supabase_service.dart';
 
+/// A location fix waiting to be persisted to `location_pings`.
+class PendingPing {
+  const PendingPing({
+    required this.lat,
+    required this.lng,
+    required this.recordedAt,
+    this.speedMps,
+    this.heading,
+  });
+
+  final double lat;
+  final double lng;
+  final double? speedMps;
+  final double? heading;
+  final DateTime recordedAt;
+}
+
 class TripRepository {
   final _client = SupabaseService.client;
 
@@ -28,7 +45,7 @@ class TripRepository {
       params: {
         'p_title': trip.title,
         'p_group_id': trip.groupId,
-        'p_scheduled_start': trip.scheduledStart?.toIso8601String(),
+        'p_scheduled_start': trip.scheduledStart?.toUtc().toIso8601String(),
         'p_origin_name': trip.originName,
         'p_origin_lat': trip.originPoint?.lat,
         'p_origin_lng': trip.originPoint?.lng,
@@ -95,10 +112,19 @@ class TripRepository {
     required String tripId,
     required String username,
   }) async {
+    final handle = username.trim().replaceFirst(RegExp(r'^@+'), '');
+    if (handle.isEmpty) return false;
+    // Matched case-insensitively; LIKE wildcards are escaped so `a_b` can't
+    // match `axb`.
+    final escaped = handle.replaceAllMapped(
+      RegExp(r'[\\%_]'),
+      (m) => '\\${m[0]}',
+    );
     final profileRow = await _client
         .from('profiles')
         .select('id')
-        .eq('username', username)
+        .ilike('username', escaped)
+        .limit(1)
         .maybeSingle();
     if (profileRow == null) return false;
     final inviteeId = profileRow['id'] as String;
@@ -130,14 +156,20 @@ class TripRepository {
   }) async {
     final uid = SupabaseService.currentUserId;
     if (accept) {
-      await _client
+      final updated = await _client
           .from('trip_members')
           .update({
             'invite_status': 'accepted',
-            'joined_at': DateTime.now().toIso8601String(),
+            'joined_at': DateTime.now().toUtc().toIso8601String(),
           })
           .eq('trip_id', tripId)
-          .eq('user_id', uid);
+          .eq('user_id', uid)
+          .select('user_id');
+      // An invite the creator cancelled matches no row; say so rather than
+      // reporting a join that never happened.
+      if ((updated as List).isEmpty) {
+        throw Exception('This invite is no longer available.');
+      }
     } else {
       // Remove the row rather than parking it at 'declined', so the creator can
       // invite this user again later (the row is unique per trip+user).
@@ -189,27 +221,44 @@ class TripRepository {
   }
 
   Future<void> startTrip(String tripId) async {
-    await _client
+    // Only a planned trip can start: a completed one must not be revived, and a
+    // blocked update (zero rows) must not look like success.
+    final updated = await _client
         .from('trips')
         .update({
           'status': 'active',
-          'started_at': DateTime.now().toIso8601String(),
+          'started_at': DateTime.now().toUtc().toIso8601String(),
         })
-        .eq('id', tripId);
+        .eq('id', tripId)
+        .eq('status', 'planned')
+        .select('id');
+    if ((updated as List).isEmpty) {
+      throw Exception('This trip can no longer be started.');
+    }
   }
 
   Future<void> completeTrip(String tripId) async {
     // Finalize this user's stats before marking the trip completed, so the
     // dashboard reflects the full ride rather than whatever the last
     // periodic recompute happened to catch.
-    await recomputeStats(tripId);
-    await _client
+    // Best-effort: a stats failure (offline blip, one odd row) must never keep
+    // the trip from being completed.
+    try {
+      await recomputeStats(tripId);
+    } catch (error) {
+      debugPrint('completeTrip: stats recompute failed: $error');
+    }
+    final updated = await _client
         .from('trips')
         .update({
           'status': 'completed',
-          'ended_at': DateTime.now().toIso8601String(),
+          'ended_at': DateTime.now().toUtc().toIso8601String(),
         })
-        .eq('id', tripId);
+        .eq('id', tripId)
+        .select('id');
+    if ((updated as List).isEmpty) {
+      throw Exception('Only a trip member can complete this trip.');
+    }
   }
 
   Future<void> logLocation({
@@ -218,18 +267,38 @@ class TripRepository {
     required double lng,
     double? speedMps,
     double? heading,
-  }) async {
+  }) => logLocations(tripId, [
+    PendingPing(
+      lat: lat,
+      lng: lng,
+      speedMps: speedMps,
+      heading: heading,
+      recordedAt: DateTime.now(),
+    ),
+  ]);
+
+  /// Inserts several buffered pings in one request, each keeping the time it was
+  /// actually recorded (so a trail gathered while offline lands in order).
+  /// Speed/heading outside the column CHECK ranges (geolocator reports -1 when
+  /// unknown) are sent as null instead of failing the whole batch.
+  Future<void> logLocations(String tripId, List<PendingPing> pings) async {
+    if (pings.isEmpty) return;
     final uid = SupabaseService.currentUserId;
-    await _client.from('location_pings').insert({
-      'trip_id': tripId,
-      'user_id': uid,
-      'point': {
-        'type': 'Point',
-        'coordinates': [lng, lat],
-      },
-      'speed_mps': speedMps,
-      'heading': heading,
-    });
+    await _client.from('location_pings').insert([
+      for (final p in pings)
+        {
+          'trip_id': tripId,
+          'user_id': uid,
+          'point': LatLngPoint(p.lat, p.lng).toEwkt(),
+          'speed_mps': p.speedMps != null && p.speedMps! >= 0
+              ? p.speedMps
+              : null,
+          'heading': p.heading != null && p.heading! >= 0 && p.heading! <= 360
+              ? p.heading
+              : null,
+          'recorded_at': p.recordedAt.toUtc().toIso8601String(),
+        },
+    ]);
   }
 
   /// Latest ping per member for a trip (one row per user), fetched via RPC so
@@ -542,6 +611,7 @@ class TripRepository {
   /// Leave a trip you were invited to (removes your own membership).
   Future<void> leaveTrip(String tripId) async {
     final uid = SupabaseService.currentUserId;
+    await _assertNotCreator(tripId, uid);
     await _client
         .from('trip_members')
         .delete()
@@ -555,11 +625,25 @@ class TripRepository {
     required String tripId,
     required String userId,
   }) async {
+    await _assertNotCreator(tripId, userId);
     await _client
         .from('trip_members')
         .delete()
         .eq('trip_id', tripId)
         .eq('user_id', userId);
+  }
+
+  /// The creator can't be removed from their own trip (it would orphan it);
+  /// they delete the trip instead.
+  Future<void> _assertNotCreator(String tripId, String userId) async {
+    final row = await _client
+        .from('trips')
+        .select('created_by')
+        .eq('id', tripId)
+        .maybeSingle();
+    if (row != null && row['created_by'] == userId) {
+      throw Exception('The trip creator can\'t leave — delete the trip instead.');
+    }
   }
 
   /// Cancel/delete a trip you created.
@@ -600,16 +684,30 @@ class TripRepository {
   /// `location_pings` and upserts it into `trip_stats`.
   Future<TripStats> recomputeStats(String tripId) async {
     final uid = SupabaseService.currentUserId;
-    final rows = await _client
-        .from('location_pings')
-        .select('point, speed_mps, recorded_at')
-        .eq('trip_id', tripId)
-        .eq('user_id', uid)
-        .order('recorded_at');
-
-    final samples = (rows as List)
-        .map((r) => PingSample.fromRow(r as Map<String, dynamic>))
-        .toList();
+    // PostgREST caps a response (1000 rows by default), so page through the
+    // whole trail — otherwise a long trip's stats silently stop growing.
+    const pageSize = 1000;
+    final samples = <PingSample>[];
+    for (var from = 0; ; from += pageSize) {
+      final page =
+          await _client
+                  .from('location_pings')
+                  .select('point, speed_mps, recorded_at')
+                  .eq('trip_id', tripId)
+                  .eq('user_id', uid)
+                  .order('recorded_at')
+                  .range(from, from + pageSize - 1)
+              as List;
+      for (final row in page) {
+        // One undecodable row must not sink the whole rollup.
+        try {
+          samples.add(PingSample.fromRow(row as Map<String, dynamic>));
+        } catch (_) {
+          continue;
+        }
+      }
+      if (page.length < pageSize) break;
+    }
     final stats = computeTripStats(
       tripId: tripId,
       userId: uid,
@@ -617,6 +715,16 @@ class TripRepository {
       distanceMeters: (a, b) =>
           Geolocator.distanceBetween(a.lat, a.lng, b.lat, b.lng),
     );
+    // Stats only ever grow during a trip. If retention has pruned old pings (or
+    // the trail is empty), the recompute would be *lower* than what's stored —
+    // keep the stored rollup instead of overwriting it with partial data.
+    final existing = await statsFor(tripId: tripId, userId: uid);
+    if (existing != null &&
+        (samples.isEmpty ||
+            stats.totalDistanceKm < existing.totalDistanceKm ||
+            stats.durationSeconds < existing.durationSeconds)) {
+      return existing;
+    }
     await _client
         .from('trip_stats')
         .upsert(stats.toUpsertJson(), onConflict: 'trip_id,user_id');

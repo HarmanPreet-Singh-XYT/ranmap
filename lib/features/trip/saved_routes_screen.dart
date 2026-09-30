@@ -4,12 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/brand_palette.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/validation.dart';
+import '../../core/widgets/app_action_sheet.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
-import '../../core/widgets/brand/brand_text_field.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/route_template.dart';
 import 'trip_providers.dart';
@@ -62,6 +62,7 @@ class SavedRoutesScreen extends ConsumerWidget {
                   ],
                 ),
               ),
+              const LongPressHint(text: 'Press and hold a route to rename or delete it.'),
             ],
           );
         },
@@ -150,19 +151,21 @@ class _RouteTemplateRow extends StatelessWidget {
       iconColor: BrandColors.primary,
       title: template.name,
       subtitle: route.isEmpty ? 'Saved route' : route,
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          BrandFieldAction(
+      onLongPress: () => showAppActionSheet(
+        context,
+        title: template.name,
+        subtitle: route.isEmpty ? null : route,
+        actions: [
+          AppSheetAction(
+            label: 'Rename',
             icon: Icons.edit_outlined,
-            semanticLabel: 'Rename saved route',
-            onTap: onRename,
+            onSelected: onRename,
           ),
-          BrandFieldAction(
+          AppSheetAction(
+            label: 'Delete saved route',
             icon: Icons.delete_outline_rounded,
-            color: BrandColors.error,
-            semanticLabel: 'Delete saved route',
-            onTap: onDelete,
+            destructive: true,
+            onSelected: onDelete,
           ),
         ],
       ),

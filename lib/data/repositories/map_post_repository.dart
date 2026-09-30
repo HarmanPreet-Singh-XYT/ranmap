@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/constants/defaults.dart';
 import '../../core/util/image_upload.dart';
 import '../models/map_post.dart';
+import '../models/trip.dart';
 import '../services/supabase_service.dart';
 
 /// Photos pinned to the map (`map_posts`, backed by files in the private
@@ -48,10 +49,7 @@ class MapPostRepository {
           .insert({
             'trip_id': tripId,
             'user_id': uid,
-            'point': {
-              'type': 'Point',
-              'coordinates': [lng, lat],
-            },
+            'point': LatLngPoint(lat, lng).toEwkt(),
             'storage_path': storagePath,
             'caption': caption,
             'visibility': visibility,
@@ -97,6 +95,79 @@ class MapPostRepository {
       if (post is Map<String, dynamic>) posts.add(MapPost.fromJson(post));
     }
     return posts;
+  }
+
+  /// Every photo the current user pinned, across all trips, newest first.
+  Future<List<MapPost>> myPosts() async {
+    final rows = await _client
+        .from('map_posts')
+        .select('*, profiles(username)')
+        .eq('user_id', SupabaseService.currentUserId)
+        .order('created_at', ascending: false)
+        .limit(500);
+    final posts = <MapPost>[];
+    for (final row in rows as List) {
+      // One undecodable row must not hide the whole library.
+      try {
+        posts.add(MapPost.fromJson(row as Map<String, dynamic>));
+      } catch (_) {
+        continue;
+      }
+    }
+    return posts;
+  }
+
+  /// Photos pinned to any of [tripIds], by anyone on those trips. RLS decides
+  /// which of other members' photos the caller may see (their `group` and
+  /// `public` ones, not their `private` ones), so this never widens access.
+  Future<List<MapPost>> postsForTrips(List<String> tripIds) async {
+    if (tripIds.isEmpty) return const [];
+    final posts = <MapPost>[];
+    // Chunked so a long trip history can't overflow the request URL.
+    for (var i = 0; i < tripIds.length; i += 50) {
+      final chunk = tripIds.sublist(i, i + 50 > tripIds.length ? tripIds.length : i + 50);
+      final rows = await _client
+          .from('map_posts')
+          .select('*, profiles(username)')
+          .inFilter('trip_id', chunk)
+          .order('created_at', ascending: false)
+          .limit(500);
+      for (final row in rows as List) {
+        try {
+          posts.add(MapPost.fromJson(row as Map<String, dynamic>));
+        } catch (_) {
+          continue;
+        }
+      }
+    }
+    return posts;
+  }
+
+  /// Photos shared with any of [groupIds], each paired with the group it was
+  /// shared to (a photo shared to two groups appears twice, once per group).
+  Future<List<({String groupId, MapPost post})>> postsSharedWithGroups(
+    List<String> groupIds,
+  ) async {
+    if (groupIds.isEmpty) return const [];
+    final rows = await _client
+        .from('map_post_shares')
+        .select('shared_with_group, map_posts(*, profiles(username))')
+        .inFilter('shared_with_group', groupIds)
+        .order('created_at', ascending: false)
+        .limit(500);
+    final out = <({String groupId, MapPost post})>[];
+    for (final raw in rows as List) {
+      final row = raw as Map<String, dynamic>;
+      final post = row['map_posts'];
+      final groupId = row['shared_with_group'];
+      if (post is! Map<String, dynamic> || groupId is! String) continue;
+      try {
+        out.add((groupId: groupId, post: MapPost.fromJson(post)));
+      } catch (_) {
+        continue;
+      }
+    }
+    return out;
   }
 
   /// Photos friends have shared directly with the current user (via

@@ -13,6 +13,7 @@ class BrandListRow extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.onTap,
+    this.onLongPress,
     this.iconBackground,
     this.iconColor,
     this.trailing,
@@ -25,6 +26,9 @@ class BrandListRow extends StatelessWidget {
   final String title;
   final String? subtitle;
   final VoidCallback? onTap;
+
+  /// Press-and-hold action (usually opens a context sheet).
+  final VoidCallback? onLongPress;
 
   /// The icon circle's fill; defaults to the neutral container.
   final Color? iconBackground;
@@ -45,6 +49,7 @@ class BrandListRow extends StatelessWidget {
         BrandColors.surfaceContainerLow;
     return GestureDetector(
       onTap: onTap,
+      onLongPress: onLongPress,
       behavior: HitTestBehavior.opaque,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),

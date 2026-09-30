@@ -59,7 +59,7 @@ async function removeUserMedia(userId: string): Promise<void> {
   // Only remove files under the user's own id — never a blanket wipe of the
   // bucket. The UUID check also guards against a malformed id reaching here.
   if (!UUID_RE.test(userId)) return;
-  for (const bucket of ["map-media", "avatars"] as const) {
+  for (const bucket of ["map-media", "avatars", "documents"] as const) {
     try {
       const paths = await listAllFiles(bucket, userId);
       // Chunk so a very large library doesn't send one oversized remove call.

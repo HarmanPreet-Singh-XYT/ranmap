@@ -122,8 +122,9 @@ class _NavigateToMemberSheetState
         showAppToast(context, 'Could not open Google Maps.', error: true);
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         showAppToast(context, 'Could not open Google Maps.', error: true);
+      }
     }
   }
 

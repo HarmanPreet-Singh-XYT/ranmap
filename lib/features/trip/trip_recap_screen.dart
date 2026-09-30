@@ -126,7 +126,7 @@ class TripRecapScreen extends ConsumerWidget {
                     if (date != null) ...[
                       BrandPill(
                         icon: Icons.event_rounded,
-                        label: DateFormat.yMMMd().format(date),
+                        label: DateFormat.yMMMd().format(date.toLocal()),
                       ),
                       const SizedBox(width: BrandSpace.sm),
                     ],

@@ -25,6 +25,7 @@ import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/profile.dart';
 import '../../data/services/supabase_service.dart';
+import '../map/photo_library_screen.dart';
 import '../map/saved_places_screen.dart';
 import '../notifications/notifications_providers.dart';
 import '../notifications/notifications_screen.dart';
@@ -552,7 +553,7 @@ class _ProCard extends ConsumerWidget {
     final expires = ref.watch(entitlementsProvider).valueOrNull?.expiresAt;
     final subtitle = isPro
         ? (expires != null
-              ? 'Renews ${DateFormat('MMM yyyy').format(expires)}'
+              ? 'Renews ${DateFormat('MMM yyyy').format(expires.toLocal())}'
               : 'Active subscription')
         : 'Unlock AI, voice & more search';
 
@@ -1260,6 +1261,17 @@ class _MenuCard extends ConsumerWidget {
               MaterialPageRoute(
                 builder: (_) => const SharedWithMePhotosScreen(),
               ),
+            ),
+            trailing: null,
+          ),
+          const BrandRowDivider(),
+          BrandListRow(
+            icon: Icons.photo_library_rounded,
+            iconColor: BrandColors.primary,
+            title: 'Photos',
+            subtitle: 'Every pinned photo, grouped by place',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const PhotoLibraryScreen()),
             ),
             trailing: null,
           ),

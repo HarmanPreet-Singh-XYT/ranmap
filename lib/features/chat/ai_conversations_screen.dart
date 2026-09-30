@@ -98,7 +98,7 @@ class AiConversationsScreen extends ConsumerWidget {
                   icon: Icons.smart_toy_outlined,
                   title: conversation.title,
                   subtitle: DateFormat.yMMMd().add_jm().format(
-                    conversation.createdAt,
+                    conversation.createdAt.toLocal(),
                   ),
                   onTap: () => _openConversation(context, conversation.id),
                 ),

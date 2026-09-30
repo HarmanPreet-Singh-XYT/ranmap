@@ -257,7 +257,7 @@ class _IntroHeader extends StatelessWidget {
     return Column(
       children: [
         BrandTag(
-          emoji: '👋',
+          icon: Icons.waving_hand_outlined,
           label: 'Hey there, road tripper',
           background: BrandColors.secondaryContainer,
           foreground: BrandColors.onSecondaryFixedVariant,

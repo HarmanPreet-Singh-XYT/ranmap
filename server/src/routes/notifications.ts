@@ -347,12 +347,15 @@ notificationsRouter.post(
 );
 
 /**
- * POST /notifications/chat-message  { tripId } | { groupId }
+ * POST /notifications/chat-message
+ *   { tripId } | { groupId } | { conversationId }  [, kind ]
  *
- * Pushes a "New message" to the rest of a trip's or group's members after the
- * app stores a chat message — the realtime channel delivers to open apps, but a
- * member whose app is closed would otherwise be told nothing. Scoped: only a
- * member of the trip/group may trigger it, and the sender is excluded.
+ * Pushes a "New message" to the rest of a trip's or group's members — or to the
+ * other person in a direct conversation — after the app stores a chat message.
+ * The realtime channel delivers to open apps, but a member whose app is closed
+ * would otherwise be told nothing. Scoped: only a member of the trip/group/
+ * conversation may trigger it, and the sender is excluded. `kind` (photo |
+ * location | trip) only changes the wording of the push.
  */
 notificationsRouter.post(
   "/chat-message",
@@ -360,16 +363,64 @@ notificationsRouter.post(
   asyncHandler(async (req, res) => {
     const tripId = String(req.body?.tripId ?? "").trim();
     const groupId = String(req.body?.groupId ?? "").trim();
+    const conversationId = String(req.body?.conversationId ?? "").trim();
     const hasTrip = UUID_RE.test(tripId);
     const hasGroup = UUID_RE.test(groupId);
-    if (hasTrip === hasGroup) {
-      res.status(400).json({ error: "exactly one of tripId or groupId (uuid) is required" });
+    const hasConversation = UUID_RE.test(conversationId);
+    if ([hasTrip, hasGroup, hasConversation].filter(Boolean).length !== 1) {
+      res.status(400).json({
+        error: "exactly one of tripId, groupId or conversationId (uuid) is required",
+      });
       return;
     }
+    const kind = String(req.body?.kind ?? "").trim();
+    const what =
+      kind === "photo"
+        ? "shared a photo"
+        : kind === "location"
+          ? "shared a location"
+          : kind === "trip"
+            ? "shared a trip"
+            : "sent a message";
 
     let recipientIds: string[];
     let label: string;
     const data: Record<string, string> = { type: "chat_message" };
+
+    if (hasConversation) {
+      const { data: conversation } = await supabaseAdmin
+        .from("direct_conversations")
+        .select("user_a, user_b")
+        .eq("id", conversationId)
+        .maybeSingle();
+      const members = conversation
+        ? [conversation.user_a as string, conversation.user_b as string]
+        : [];
+      if (!members.includes(req.userId)) {
+        res.status(403).json({ error: "You're not in that conversation." });
+        return;
+      }
+      const otherId = members.find((id) => id !== req.userId);
+      const { data: me } = await supabaseAdmin
+        .from("profiles")
+        .select("username")
+        .eq("id", req.userId)
+        .maybeSingle();
+      const handle = me?.username ? `@${me.username}` : "Someone";
+      if (otherId) {
+        await notifyUsers(
+          [otherId],
+          {
+            title: `New message from ${handle}`,
+            body: `${handle} ${what}`,
+            data: { type: "chat_message", conversationId },
+          },
+          "chat_messages",
+        );
+      }
+      res.json({ ok: true, push: pushConfigured() });
+      return;
+    }
 
     if (hasTrip) {
       // The sender must actually be on the trip — otherwise this endpoint could
@@ -446,7 +497,7 @@ notificationsRouter.post(
       recipientIds,
       {
         title: `New message in ${label}`,
-        body: `${handle} sent a message`,
+        body: `${handle} ${what}`,
         data,
       },
       "chat_messages",

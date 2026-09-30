@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:forui/forui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 // `Position` is geolocator's own type; the map engine exports the GeoJSON
@@ -37,6 +38,7 @@ import '../../data/models/trip.dart';
 import '../../data/models/trip_leg.dart';
 import '../../data/models/trip_stop.dart';
 import '../../data/services/google_maps_api_service.dart';
+import '../chat/chat_share.dart';
 import '../notifications/notifications_providers.dart';
 import '../notifications/notifications_screen.dart';
 import '../social/social_providers.dart';
@@ -61,9 +63,13 @@ typedef _Teammate = ({
   String userId,
   String? username,
   String avatarId,
+  String vehicleType,
   double lat,
   double lng,
 });
+
+/// Photos within this distance of each other share one map pin (with a count).
+const double _photoStackRadiusMeters = 10;
 
 /// Initial great-circle bearing (radians, clockwise from true north) from
 /// (`lat1`,`lng1`) to (`lat2`,`lng2`) — the standard "initial bearing" formula.
@@ -123,6 +129,17 @@ class _MapScreenState extends ConsumerState<MapScreen>
   PointAnnotationManager? _photoPoints;
   PointAnnotationManager? _placePoints;
   PointAnnotationManager? _savedPlacePoints;
+
+  /// Avatar pins floating over each live teammate's vehicle.
+  PointAnnotationManager? _teammatePoints;
+  Cancelable? _teammateTapCancel;
+  final Map<String, PointAnnotation> _teammateAnnotations = {};
+  final Map<String, String> _userByAnnotationId = {};
+  final Map<String, (double, double)> _teammateLast = {};
+  String? _renderedTeammateKey;
+  List<_Teammate> _latestTeammates = const [];
+  bool _teammateSyncBusy = false;
+  bool _teammateSyncQueued = false;
   final _routeRenderer = RouteLines();
 
   /// Directions preview for [_selectedPlace]: candidate routes from the user's
@@ -139,14 +156,14 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
   /// Maps a created annotation back to its post for tap handling (annotation
   /// ids are assigned by the SDK, so this is the reliable link).
-  final Map<String, MapPost> _postByAnnotationId = {};
+  /// Photos behind each map pin. Posts at (nearly) the same spot share one pin.
+  final Map<String, List<MapPost>> _postByAnnotationId = {};
 
   NearbyPlace? _selectedPlace;
   late RanmapMapStyle _style;
   late bool _threeD;
   late bool _terrain;
 
-  Uint8List? _photoPin;
   Uint8List? _placePin;
   Uint8List? _savedPlacePin;
 
@@ -265,6 +282,13 @@ class _MapScreenState extends ConsumerState<MapScreen>
     _photoPoints = null;
     _placePoints = null;
     _savedPlacePoints = null;
+    _teammateTapCancel?.cancel();
+    _teammateTapCancel = null;
+    _teammatePoints = null;
+    _teammateAnnotations.clear();
+    _userByAnnotationId.clear();
+    _teammateLast.clear();
+    _renderedTeammateKey = null;
   }
 
   Future<void> _onStyleReady(MapboxMap map) async {
@@ -286,19 +310,25 @@ class _MapScreenState extends ConsumerState<MapScreen>
     final photoPoints = await map.annotations.createPointAnnotationManager();
     final savedPlacePoints = await map.annotations
         .createPointAnnotationManager();
+    // Created last so teammate pins draw above the other markers.
+    final teammatePoints = await map.annotations.createPointAnnotationManager();
     if (generation != _styleGeneration || !mounted) return;
 
     _photoTapCancel = photoPoints.tapEvents(onTap: _onPhotoTap);
+    _teammateTapCancel = teammatePoints.tapEvents(onTap: _onTeammateTap);
     _addMapInteractions(map);
     setState(() {
       _photoPoints = photoPoints;
       _savedPlacePoints = savedPlacePoints;
+      _teammatePoints = teammatePoints;
     });
   }
 
   void _onPhotoTap(PointAnnotation annotation) {
-    final post = _postByAnnotationId[annotation.id];
-    if (post != null) showMapPostViewerSheet(context, post);
+    final stack = _postByAnnotationId[annotation.id];
+    if (stack != null && stack.isNotEmpty) {
+      showMapPostViewerSheet(context, stack.first, stack: stack);
+    }
   }
 
   Future<void> _setStyle(RanmapMapStyle style) async {
@@ -570,6 +600,8 @@ class _MapScreenState extends ConsumerState<MapScreen>
     try {
       map.addInteraction(
         LongTapInteraction.onMap((gesture) {
+          // A light buzz confirms the hold registered and the pin dropped.
+          HapticFeedback.mediumImpact();
           final location = gesture.point.coordinates;
           unawaited(
             _selectPlace(
@@ -1083,6 +1115,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
         userId: entry.key,
         username: username,
         avatarId: profile?['avatar_id'] as String? ?? kDefaultAvatarSeed,
+        vehicleType: vehicleType,
         lat: loc.lat,
         lng: loc.lng,
       ));
@@ -1173,6 +1206,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
           slot: _style.isStandard ? 'top' : null,
         ),
       );
+      unawaited(_syncTeammatePins(teammates, devicePixelRatio));
       unawaited(_syncPhotoPins(mapPosts, devicePixelRatio));
       unawaited(_syncSavedPlacePins(savedPlaces, devicePixelRatio));
       unawaited(_syncRoute(routePolyline));
@@ -1587,6 +1621,34 @@ class _MapScreenState extends ConsumerState<MapScreen>
     );
   }
 
+  /// Pins a photo at the selected place (a dropped pin or tapped POI) on the
+  /// active trip's map. Photos belong to a trip, so without one there's nowhere
+  /// for it to live.
+  Future<void> _pinPhotoAt(NearbyPlace place) async {
+    // Await the provider so a still-loading active trip isn't misread as none.
+    Trip? trip;
+    try {
+      trip = await ref.read(activeTripProvider.future);
+    } catch (_) {
+      trip = null;
+    }
+    if (!mounted) return;
+    final activeTrip = trip;
+    if (activeTrip == null) {
+      showAppToast(context, 'Start a trip to pin photos on the map.');
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AddMapPostScreen(
+          tripId: activeTrip.id,
+          lat: place.location.lat.toDouble(),
+          lng: place.location.lng.toDouble(),
+        ),
+      ),
+    );
+  }
+
   /// The card for [_selectedPlace]: name, a Directions button, and — once
   /// routes are loaded — the ETA, alternatives, and a hand-off to Maps.
   Widget _buildPlaceCard(double lat, double lng) {
@@ -1642,6 +1704,21 @@ class _MapScreenState extends ConsumerState<MapScreen>
               ),
             ),
             IconButton(
+              tooltip: 'Send in chat',
+              visualDensity: VisualDensity.compact,
+              icon: Icon(Icons.send_rounded, color: BrandColors.textMuted),
+              onPressed: () => showShareToSheet(
+                context,
+                ref,
+                title: 'Share place',
+                share: ChatShare.location(
+                  lat: place.location.lat.toDouble(),
+                  lng: place.location.lng.toDouble(),
+                  name: place.name,
+                ),
+              ),
+            ),
+            IconButton(
               tooltip: 'Close',
               visualDensity: VisualDensity.compact,
               icon: Icon(Icons.close_rounded, color: BrandColors.textMuted),
@@ -1667,17 +1744,34 @@ class _MapScreenState extends ConsumerState<MapScreen>
         ],
         const SizedBox(height: BrandSpace.sm),
         if (chosen == null)
-          BrandPrimaryButton(
-            label: _previewLoading
-                ? 'Finding route…'
-                : (_previewError != null ? 'Try again' : 'Directions'),
-            leadingIcon: Icons.directions_rounded,
-            loading: _previewLoading,
-            // Tapping again while loading would double-fire; cancelling is the
-            // close button (or the route-cancel row below).
-            onPressed: _previewLoading
-                ? null
-                : () => _previewDirections(lat, lng),
+          Row(
+            children: [
+              Expanded(
+                child: BrandPrimaryButton(
+                  label: _previewLoading
+                      ? 'Finding route…'
+                      : (_previewError != null ? 'Try again' : 'Directions'),
+                  leadingIcon: Icons.directions_rounded,
+                  loading: _previewLoading,
+                  // Tapping again while loading would double-fire; cancelling
+                  // is the close button (or the route-cancel row below).
+                  onPressed: _previewLoading
+                      ? null
+                      : () => _previewDirections(lat, lng),
+                ),
+              ),
+              const SizedBox(width: BrandSpace.sm),
+              BrandSecondaryButton(
+                label: 'Photo',
+                expand: false,
+                leading: Icon(
+                  Icons.add_a_photo_outlined,
+                  size: 18,
+                  color: BrandColors.textHeadlineAlt,
+                ),
+                onPressed: () => _pinPhotoAt(place),
+              ),
+            ],
           )
         else ...[
           BrandPrimaryButton(
@@ -1871,6 +1965,121 @@ class _MapScreenState extends ConsumerState<MapScreen>
     }
   }
 
+  /// Keeps one avatar pin above each live teammate's vehicle. Positions arrive
+  /// about once a second, so existing pins are moved in place; the pins are only
+  /// rebuilt when the set of teammates (or an avatar) changes. Overlapping calls
+  /// collapse to "run once more with the latest data".
+  Future<void> _syncTeammatePins(
+    List<_Teammate> teammates,
+    double devicePixelRatio,
+  ) async {
+    _latestTeammates = teammates;
+    final manager = _teammatePoints;
+    if (manager == null) return;
+    if (_teammateSyncBusy) {
+      _teammateSyncQueued = true;
+      return;
+    }
+    _teammateSyncBusy = true;
+    // Read theme colours before any await.
+    final color = NavColors.of(context).activeRoute;
+    try {
+      do {
+        _teammateSyncQueued = false;
+        await _applyTeammatePins(
+          manager,
+          _latestTeammates,
+          color,
+          devicePixelRatio,
+        );
+      } while (_teammateSyncQueued &&
+          mounted &&
+          identical(manager, _teammatePoints));
+    } catch (error) {
+      _reportOverlaySyncFailure('teammate pins', error);
+    } finally {
+      _teammateSyncBusy = false;
+    }
+  }
+
+  Future<void> _applyTeammatePins(
+    PointAnnotationManager manager,
+    List<_Teammate> teammates,
+    Color color,
+    double devicePixelRatio,
+  ) async {
+    final key = [for (final t in teammates) '${t.userId}:${t.avatarId}']
+        .join('|');
+
+    if (key != _renderedTeammateKey) {
+      final images = <String, Uint8List>{};
+      for (final t in teammates) {
+        images[t.avatarId] ??= await MapMarkers.avatarPin(
+          t.avatarId,
+          color,
+          devicePixelRatio: devicePixelRatio,
+        );
+      }
+      if (!identical(manager, _teammatePoints)) return;
+      await manager.deleteAll();
+      _teammateAnnotations.clear();
+      _userByAnnotationId.clear();
+      _teammateLast.clear();
+      if (teammates.isNotEmpty) {
+        final created = await manager.createMulti([
+          for (final t in teammates)
+            PointAnnotationOptions(
+              geometry: Geo.point(t.lat, t.lng),
+              image: images[t.avatarId],
+              iconAnchor: IconAnchor.BOTTOM,
+              // Lift the pin's tip clear of the vehicle so it floats over it.
+              iconOffset: [0, -8],
+            ),
+        ]);
+        for (var i = 0; i < created.length && i < teammates.length; i++) {
+          final annotation = created[i];
+          if (annotation == null) continue;
+          final t = teammates[i];
+          _teammateAnnotations[t.userId] = annotation;
+          _userByAnnotationId[annotation.id] = t.userId;
+          _teammateLast[t.userId] = (t.lat, t.lng);
+        }
+      }
+      _renderedTeammateKey = key;
+      return;
+    }
+
+    for (final t in teammates) {
+      final annotation = _teammateAnnotations[t.userId];
+      final last = _teammateLast[t.userId];
+      if (annotation == null) continue;
+      if (last != null && last.$1 == t.lat && last.$2 == t.lng) continue;
+      annotation.geometry = Geo.point(t.lat, t.lng);
+      await manager.update(annotation);
+      _teammateLast[t.userId] = (t.lat, t.lng);
+    }
+  }
+
+  /// Tapping a teammate's avatar pin opens their details (and directions).
+  void _onTeammateTap(PointAnnotation annotation) {
+    final userId = _userByAnnotationId[annotation.id];
+    if (userId == null) return;
+    final teammate = _latestTeammates
+        .where((t) => t.userId == userId)
+        .firstOrNull;
+    if (teammate != null) unawaited(_openTeammate(teammate));
+  }
+
+  Future<void> _openTeammate(_Teammate teammate) async {
+    if (!mounted) return;
+    await showNavigateToMemberSheet(
+      context,
+      destination: Geo.pos(teammate.lat, teammate.lng),
+      username: teammate.username,
+      vehicleType: teammate.vehicleType,
+    );
+  }
+
   Future<void> _syncPhotoPins(
     List<MapPost> posts,
     double devicePixelRatio,
@@ -1881,29 +2090,62 @@ class _MapScreenState extends ConsumerState<MapScreen>
     if (listEquals(ids, _renderedPostIds)) return;
 
     try {
-      _photoPin ??= await MapMarkers.pin(
-        NavColors.of(context).highway,
-        Icons.photo_camera_rounded,
-        devicePixelRatio: devicePixelRatio,
-      );
-      final image = _photoPin!;
+      final color = NavColors.of(context).highway;
+
+      // Photos pinned at nearly the same spot stack under one pin that carries a
+      // count, instead of hiding behind each other. Clustering by real distance
+      // (not rounded coordinates) keeps two close-together photos in one stack
+      // wherever the rounding boundary would otherwise fall.
+      final stacks = <List<MapPost>>[];
+      for (final post in posts) {
+        List<MapPost>? stack;
+        for (final candidate in stacks) {
+          final anchor = candidate.first;
+          if (haversineMeters(
+                anchor.lat,
+                anchor.lng,
+                post.lat,
+                post.lng,
+              ) <=
+              _photoStackRadiusMeters) {
+            stack = candidate;
+            break;
+          }
+        }
+        (stack ?? (stacks..add(<MapPost>[]))).add(post);
+      }
+      for (final stack in stacks) {
+        // Oldest first, so the swipe order matches the order they were taken.
+        stack.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      }
+      final images = <int, Uint8List>{};
+      for (final stack in stacks) {
+        images[stack.length] ??= await MapMarkers.pin(
+          color,
+          Icons.photo_camera_rounded,
+          devicePixelRatio: devicePixelRatio,
+          count: stack.length,
+        );
+      }
 
       await manager.deleteAll();
       _postByAnnotationId.clear();
-      if (posts.isNotEmpty) {
+      if (stacks.isNotEmpty) {
         final created = await manager.createMulti([
-          for (final post in posts)
+          for (final stack in stacks)
             PointAnnotationOptions(
-              geometry: Geo.point(post.lat, post.lng),
-              image: image,
+              geometry: Geo.point(stack.first.lat, stack.first.lng),
+              image: images[stack.length],
               iconAnchor: IconAnchor.BOTTOM,
             ),
         ]);
         // `createMulti` preserves the input order, so the returned annotations
-        // line up index-for-index with `posts`.
-        for (var i = 0; i < created.length && i < posts.length; i++) {
+        // line up index-for-index with `stacks`.
+        for (var i = 0; i < created.length && i < stacks.length; i++) {
           final annotation = created[i];
-          if (annotation != null) _postByAnnotationId[annotation.id] = posts[i];
+          if (annotation != null) {
+            _postByAnnotationId[annotation.id] = stacks[i];
+          }
         }
       }
       // Commit the guard only after the work succeeded, so a failure is retried
@@ -2042,12 +2284,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
       ),
     );
     if (selected == null || !mounted) return;
-    await showNavigateToMemberSheet(
-      context,
-      destination: Geo.pos(selected.lat, selected.lng),
-      username: selected.username,
-      vehicleType: ref.read(myProfileProvider).valueOrNull?.vehicleType,
-    );
+    await _openTeammate(selected);
   }
 }
 

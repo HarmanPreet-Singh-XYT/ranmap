@@ -25,6 +25,9 @@ dependencies:
 
   # Camera / photo sharing
   image_picker: ^1.1.2
+  # Disk-cached network images, so signed-URL photos aren't re-downloaded on
+  # every screen entry (the signed URL rotates, so tiles key the cache by path).
+  cached_network_image: ^3.4.1
 
   # Voice channels
   livekit_client: ^2.13.0

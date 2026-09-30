@@ -6,6 +6,7 @@ import 'package:forui/forui.dart';
 
 import '../../core/theme/brand_palette.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/app_action_sheet.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
@@ -14,6 +15,7 @@ import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/brand/brand_text_field.dart';
 import '../../core/widgets/error_retry.dart';
+import '../chat/direct_messages_screen.dart';
 import '../../data/models/profile.dart';
 import '../../data/services/supabase_service.dart';
 import 'invite_share.dart';
@@ -60,8 +62,7 @@ class _FriendsTab extends ConsumerWidget {
                 imageAsset: 'assets/images/scenic/friends_crew_scenic.jpg',
                 icon: Icons.person_add_alt_1_rounded,
                 title: 'Build your road trip crew',
-                message:
-                    'Connect with friends to invite them to live convoys, share routes, and sync pitstops. Share your invite link, or search by username in the Find People tab.',
+                message: 'Connect with friends to invite them to live convoys, share routes, and sync pitstops. Share your invite link, or search by username in the Find People tab.',
                 action: BrandPrimaryButton(
                   label: 'Invite friends',
                   leadingIcon: Icons.ios_share_rounded,
@@ -75,35 +76,74 @@ class _FriendsTab extends ConsumerWidget {
 
         Widget friendRow(Map<String, dynamic> row) {
           final other = _otherProfile(row);
+          Future<void> removeFriend() async {
+            final confirmed = await showAppConfirmDialog(
+              context,
+              title: 'Remove friend?',
+              message:
+                  'Remove @${other?['username'] ?? 'this user'} from your friends?',
+              confirmLabel: 'Remove',
+              destructive: true,
+            );
+            if (!confirmed) return;
+            try {
+              await ref
+                  .read(friendRepositoryProvider)
+                  .remove(row['id'] as String);
+              ref.invalidate(friendsProvider);
+            } catch (e) {
+              if (context.mounted) {
+                showAppToast(context, friendlyError(e), error: true);
+              }
+            }
+          }
+
           return BrandListRow(
             icon: Icons.person_rounded,
             title: '@${other?['username'] ?? 'unknown'}',
+            subtitle: 'Tap to message · hold for options',
             showChevron: false,
-            trailing: BrandFieldAction(
-              icon: Icons.person_remove_outlined,
-              color: BrandColors.error,
-              semanticLabel: 'Remove friend',
-              onTap: () async {
-                final confirmed = await showAppConfirmDialog(
-                  context,
-                  title: 'Remove friend?',
-                  message:
-                      'Remove @${other?['username'] ?? 'this user'} from your friends?',
-                  confirmLabel: 'Remove',
+            trailing: Icon(
+              Icons.chat_bubble_outline_rounded,
+              size: 20,
+              color: BrandColors.textMuted,
+            ),
+            onTap: other?['id'] == null
+                ? null
+                : () => openDirectChat(
+                    context,
+                    ref,
+                    otherUserId: other!['id'] as String,
+                    title:
+                        (other['display_name'] as String?)?.isNotEmpty == true
+                        ? other['display_name'] as String
+                        : '@${other['username']}',
+                  ),
+            onLongPress: () => showAppActionSheet(
+              context,
+              title: '@${other?['username'] ?? 'friend'}',
+              actions: [
+                if (other?['id'] != null)
+                  AppSheetAction(
+                    label: 'Message',
+                    icon: Icons.chat_bubble_outline_rounded,
+                    onSelected: () => openDirectChat(
+                      context,
+                      ref,
+                      otherUserId: other!['id'] as String,
+                      title:
+                          (other['display_name'] as String?)?.isNotEmpty == true
+                          ? other['display_name'] as String
+                          : '@${other['username']}',
+                    ),
+                  ),
+                AppSheetAction(
+                  label: 'Remove friend',
+                  icon: Icons.person_remove_outlined,
                   destructive: true,
-                );
-                if (!confirmed) return;
-                try {
-                  await ref
-                      .read(friendRepositoryProvider)
-                      .remove(row['id'] as String);
-                  ref.invalidate(friendsProvider);
-                } catch (e) {
-                  if (context.mounted) {
-                    showAppToast(context, friendlyError(e), error: true);
-                  }
-                }
-              },
+                  onSelected: removeFriend,
+                ),
+              ],
             ),
           );
         }

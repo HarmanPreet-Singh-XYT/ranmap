@@ -40,6 +40,35 @@ void main() {
     expect(point.toGeoJson()['coordinates'], [12.5, 41.9]);
   });
 
+  test('LatLngPoint.fromPostgrest decodes PostGIS EWKB hex', () {
+    // A real value as PostgREST returns a `geography(point)` column.
+    final point = LatLngPoint.fromPostgrest(
+      '0101000020E610000076E272BC029A5EC0DD0A613596E44240',
+    );
+
+    expect(point?.lng, closeTo(-122.406417, 1e-6));
+    expect(point?.lat, closeTo(37.785834, 1e-6));
+  });
+
+  test('LatLngPoint.fromPostgrest also accepts GeoJSON and null', () {
+    expect(
+      LatLngPoint.fromPostgrest({
+        'type': 'Point',
+        'coordinates': [12.5, 41.9],
+      })?.lat,
+      41.9,
+    );
+    expect(LatLngPoint.fromPostgrest(null), isNull);
+    expect(LatLngPoint.fromPostgrest('not-a-point'), isNull);
+  });
+
+  test('LatLngPoint.toEwkt emits PostGIS EWKT (lng lat order)', () {
+    // The write format PostGIS accepts; a GeoJSON object is rejected with
+    // "parse error - invalid geometry".
+    const point = LatLngPoint(37.785834, -122.406417);
+    expect(point.toEwkt(), 'SRID=4326;POINT(-122.406417 37.785834)');
+  });
+
   test('Trip.fromJson parses status and nullable points', () {
     final trip = Trip.fromJson({
       'id': 't1',

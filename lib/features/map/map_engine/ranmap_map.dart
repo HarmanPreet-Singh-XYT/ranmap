@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -99,6 +100,7 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
 
   void _onMapCreated(MapboxMap map) {
     _map = map;
+    unawaited(_applyOrnaments(map));
     widget.onMapReady?.call(map);
   }
 
@@ -112,8 +114,34 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
       dark: _dark,
     );
     await _applyLocationPuck(map);
+    await _applyOrnaments(map);
     if (!mounted) return;
     widget.onStyleReady?.call(map);
+  }
+
+  /// The live top system inset (status bar / notch), in logical pixels. The map
+  /// is full-bleed under it and FScaffold adds no header here, so Mapbox's own
+  /// ornaments must be pushed below it or the scale bar draws over the status
+  /// bar. MediaQuery's padding can be zeroed by an ancestor scaffold, so the
+  /// real window inset is also read from the view.
+  double _topSafeInset() {
+    final view = View.of(context);
+    return math.max(
+      MediaQuery.paddingOf(context).top,
+      view.padding.top / view.devicePixelRatio,
+    );
+  }
+
+  /// Nudges Mapbox's built-in ornaments clear of the system bars. Applied on
+  /// every (re)load, since a style change recreates them.
+  Future<void> _applyOrnaments(MapboxMap map) async {
+    try {
+      await map.scaleBar.updateSettings(
+        ScaleBarSettings(marginTop: _topSafeInset() + 8, marginLeft: 12),
+      );
+    } catch (_) {
+      // Ornaments are decorative; a failure here must not take the map down.
+    }
   }
 
   /// The old hand-rolled vehicle models crashed Mapbox's model parser (null

@@ -40,7 +40,8 @@ const toolDeclarations: Omit<FunctionTool, "type">[] = [
         trip_title: { type: "string", description: "Exact title of the existing trip to schedule." },
         scheduled_for: {
           type: "string",
-          description: "ISO 8601 timestamp for when the trip should start.",
+          description:
+            "ISO 8601 timestamp WITH a UTC offset (e.g. 2026-10-02T09:00:00-04:00 or ...Z) for when the trip should start.",
         },
       },
       required: ["trip_title", "scheduled_for"],
@@ -56,7 +57,8 @@ const toolDeclarations: Omit<FunctionTool, "type">[] = [
         title: { type: "string", description: "Title for the new trip." },
         scheduled_for: {
           type: "string",
-          description: "Optional ISO 8601 timestamp to also schedule the trip to auto-start.",
+          description:
+            "Optional ISO 8601 timestamp WITH a UTC offset (e.g. 2026-10-02T09:00:00-04:00 or ...Z) to also schedule the trip to auto-start.",
         },
       },
       required: ["title"],
@@ -205,7 +207,7 @@ export async function runTool(
     const title = clamp(String(args.trip_title ?? "").trim(), MAX_NAME_CHARS);
     const scheduledFor = validFutureIso(args.scheduled_for);
     if (!title || !scheduledFor) {
-      return JSON.stringify({ error: "Missing trip_title or a valid future scheduled_for" });
+      return JSON.stringify({ error: "Missing trip_title or a valid future scheduled_for (ISO 8601 with a UTC offset, e.g. 2026-10-02T09:00:00-04:00)" });
     }
 
     const found = await findMyTripByTitle(userId, title);
@@ -412,10 +414,17 @@ function validLongitude(value: unknown): number | null {
     : null;
 }
 
-/** Parses an ISO timestamp, returning it only when it's a valid future time. */
+/**
+ * Parses an ISO timestamp, returning it only when it carries an explicit UTC
+ * offset (`Z` / `+05:30`) and is in the future. An offset-less value would be
+ * read in the server's timezone, silently scheduling the trip at the wrong
+ * moment, so it's rejected and the model is told to include the offset.
+ */
 function validFutureIso(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const parsed = new Date(value);
+  const text = value.trim();
+  if (!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)) return null;
+  const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) return null;
   if (parsed.getTime() <= Date.now()) return null;
   return parsed.toISOString();

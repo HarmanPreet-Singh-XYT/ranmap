@@ -12,10 +12,9 @@ import '../../core/widgets/brand/brand_data.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/brand/brand_skeleton.dart';
 import '../../core/widgets/error_retry.dart';
-import '../../data/models/map_post.dart';
 import '../premium/premium_providers.dart';
+import 'map_photo_tile.dart';
 import 'map_post_providers.dart';
-import 'map_post_viewer_sheet.dart';
 
 /// A grid of every photo pinned to a trip, an alternative to hunting for the
 /// pins on the map. Tapping a tile opens the same viewer sheet the map uses
@@ -78,7 +77,7 @@ class TripPhotosScreen extends ConsumerWidget {
                                 ),
                             itemCount: posts.length,
                             itemBuilder: (context, i) =>
-                                _PhotoTile(post: posts[i]),
+                                MapPhotoTile(post: posts[i], stack: posts),
                           ),
                   ),
                 ],
@@ -153,46 +152,6 @@ class _PhotoQuotaHeader extends ConsumerWidget {
             ],
           ],
         ],
-      ),
-    );
-  }
-}
-
-class _PhotoTile extends ConsumerWidget {
-  const _PhotoTile({required this.post});
-
-  final MapPost post;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final urlAsync = ref.watch(mapPostSignedUrlProvider(post.storagePath));
-    final label = post.caption?.trim().isNotEmpty == true
-        ? 'Photo: ${post.caption}'
-        : post.posterUsername != null
-        ? 'Photo by @${post.posterUsername}'
-        : 'Trip photo';
-    return Semantics(
-      label: label,
-      button: true,
-      image: true,
-      child: GestureDetector(
-        onTap: () => showMapPostViewerSheet(context, post),
-        child: ClipRRect(
-          borderRadius: BrandRadii.cardRadius,
-          child: urlAsync.when(
-            loading: () => ColoredBox(color: BrandColors.surfaceContainerLow),
-            error: (_, _) =>
-                Icon(Icons.broken_image_outlined, color: BrandColors.textMuted),
-            data: (url) => Image.network(
-              url,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => Icon(
-                Icons.broken_image_outlined,
-                color: BrandColors.textMuted,
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }

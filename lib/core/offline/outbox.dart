@@ -8,6 +8,8 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../data/services/supabase_service.dart';
+
 /// The kinds of writes the outbox knows how to replay. Each maps to a table
 /// whose primary key is client-supplied, so the *same* id is used on the online
 /// attempt and any queued replay — replay is then idempotent
@@ -37,6 +39,7 @@ class OutboxEntry {
     required this.payload,
     required this.createdAt,
     this.attempts = 0,
+    this.userId,
   });
 
   /// Client-generated UUID, used as the row's primary key on both the online
@@ -51,12 +54,27 @@ class OutboxEntry {
   /// otherwise block the queue forever, so attempts are bounded.
   final int attempts;
 
+  /// The account that queued the write (stamped on enqueue). A queued write is
+  /// only ever replayed by that same account — never re-attributed to whoever
+  /// signs in next on the device. Null for entries queued before this existed.
+  final String? userId;
+
   OutboxEntry withAttempts(int value) => OutboxEntry(
         id: id,
         type: type,
         payload: payload,
         createdAt: createdAt,
         attempts: value,
+        userId: userId,
+      );
+
+  OutboxEntry withUser(String? value) => OutboxEntry(
+        id: id,
+        type: type,
+        payload: payload,
+        createdAt: createdAt,
+        attempts: attempts,
+        userId: value,
       );
 
   Map<String, dynamic> toJson() => {
@@ -65,6 +83,7 @@ class OutboxEntry {
         'payload': payload,
         'created_at': createdAt.toIso8601String(),
         'attempts': attempts,
+        if (userId != null) 'user_id': userId,
       };
 
   static OutboxEntry? fromJson(Map<String, dynamic> json) {
@@ -80,7 +99,18 @@ class OutboxEntry {
       payload: payload.cast<String, dynamic>(),
       createdAt: DateTime.parse(createdAt),
       attempts: json['attempts'] is int ? json['attempts'] as int : 0,
+      userId: json['user_id'] is String ? json['user_id'] as String : null,
     );
+  }
+}
+
+/// The signed-in user's id, or null when there's no session (or Supabase isn't
+/// initialised, as in unit tests).
+String? _currentUid() {
+  try {
+    return SupabaseService.currentUser?.id;
+  } catch (_) {
+    return null;
   }
 }
 
@@ -219,9 +249,25 @@ class Outbox {
         ...failed.value,
         dropped,
       ].take(_maxFailed).toList();
+      unawaited(_persistFailures());
     }
-    _entries.add(entry);
+    _entries.add(entry.userId == null
+        ? entry.withUser(_currentUid())
+        : entry);
     await _persist();
+  }
+
+  /// Entries the signed-in account may replay: its own, plus legacy ones with no
+  /// owner recorded. Another account's queued writes stay put (untouched) until
+  /// that account signs back in.
+  Future<List<OutboxEntry>> allForCurrentUser() async {
+    await _ensureLoaded();
+    final uid = _currentUid();
+    if (uid == null) return const [];
+    return [
+      for (final e in _entries)
+        if (e.userId == null || e.userId == uid) e,
+    ];
   }
 
   Future<List<OutboxEntry>> all() async {
