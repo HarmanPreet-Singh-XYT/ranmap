@@ -3,18 +3,12 @@ import Link from "next/link";
 import { Plus, Sparkles, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { listAiConversations } from "@/lib/data/ai";
-import { getPlanUsage } from "@/lib/data/usage";
+import { formatUsage, getPlanUsage } from "@/lib/data/usage";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { deleteAiConversation } from "./actions";
 
 export const metadata: Metadata = { title: "AI Assistant" };
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
-  return String(n);
-}
 
 export default async function AiAssistantPage() {
   const supabase = await createClient();
@@ -48,8 +42,7 @@ export default async function AiAssistantPage() {
             <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
               <span>AI usage this period</span>
               <span>
-                {formatTokens(aiUsage.used)} / {formatTokens(aiUsage.limit)}{" "}
-                {aiUsage.unit}
+                {formatUsage(aiUsage)}
               </span>
             </div>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">

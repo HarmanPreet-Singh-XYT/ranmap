@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft, Check } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getPlanUsage } from "@/lib/data/usage";
+import { formatUsage, getPlanUsage, meterLabel } from "@/lib/data/usage";
 import { UpgradeButton } from "@/app/(account)/_components/upgrade-button";
 import { SyncPlanButton } from "@/app/(account)/account/billing/sync-button";
 import { Badge } from "@/components/ui/badge";
@@ -14,21 +14,15 @@ const PRO_FEATURES = [
   "Unlimited trips & stops",
   "Convoys up to 12 members",
   "Full photo library + downloads",
-  "AI assistant (5M tokens / month)",
+  "AI assistant (10× the free allowance)",
   "Map search (2,000 / day)",
 ];
 const EXTREME_FEATURES = [
   "Everything in Pro",
-  "AI assistant (15M tokens / month)",
+  "AI assistant (30× the free allowance)",
   "Map search (5,000 / day)",
   "Priority support",
 ];
-
-function formatNumber(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
-  return String(n);
-}
 
 export default async function UpgradePage() {
   const supabase = await createClient();
@@ -76,9 +70,9 @@ export default async function UpgradePage() {
               return (
                 <div key={meter.feature} className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
-                    <span>{meter.label}</span>
+                    <span>{meterLabel(meter)}</span>
                     <span>
-                      {formatNumber(meter.used)} / {formatNumber(meter.limit)} {meter.unit}
+                      {formatUsage(meter)}
                     </span>
                   </div>
                   <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">

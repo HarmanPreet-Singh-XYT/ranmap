@@ -13,12 +13,13 @@ import {
   Wrench,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getPlanUsage } from "@/lib/data/usage";
+import { formatUsage, getPlanUsage, meterLabel } from "@/lib/data/usage";
 import { signOut } from "@/app/(account)/actions";
 import { AvatarView } from "@/app/(account)/_components/avatar-view";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { RidesCard } from "./rides-card";
 
 export const metadata: Metadata = { title: "Profile" };
 
@@ -29,12 +30,6 @@ const VEHICLE_LABELS: Record<string, string> = {
   suv: "SUV",
   other: "Other",
 };
-
-function formatNumber(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
-  return String(n);
-}
 
 const LINKS = [
   { href: "/app/settings", label: "Settings", description: "Notifications, blocked accounts, linked socials", icon: Settings },
@@ -92,6 +87,8 @@ export default async function ProfilePage() {
         </Button>
       </div>
 
+      <RidesCard supabase={supabase} userId={user.id} />
+
       <Card>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
@@ -109,9 +106,9 @@ export default async function ProfilePage() {
                 return (
                   <div key={meter.feature} className="space-y-1.5">
                     <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
-                      <span>{meter.label}</span>
+                      <span>{meterLabel(meter)}</span>
                       <span>
-                        {formatNumber(meter.used)} / {formatNumber(meter.limit)} {meter.unit}
+                        {formatUsage(meter)}
                       </span>
                     </div>
                     <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">

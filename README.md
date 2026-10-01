@@ -22,6 +22,33 @@ Standard's extruded buildings, trees, landmarks, and terrain, with each
 teammate's vehicle drawn as a bundled 3D model. What's left of the product
 vision is tracked in "Roadmap" below.
 
+## Product focus
+
+**Promise: ride together, stay in sync.** Ranmap is for people travelling as a
+group: everyone on one live map, talking over voice, planning stops and sharing
+the trip. That is what we sell, and what the app, the website and the store
+listings lead with.
+
+Solo features exist, but only as the on-ramp: search and navigation, recording
+a ride, saved places, Home/Work. They give someone value on day one and a reason
+to open the app before they have a crew. They are never the headline.
+
+How to apply it when adding or changing something:
+
+- **Copy leads with the crew.** Welcome, website hero, store text and empty
+  states talk about riding together. A solo path is a quiet secondary line
+  ("Just ride solo"), not a second pitch.
+- **Primary action is crew-first.** "Plan a trip with your crew" is the main
+  button; solo options sit below it.
+- **Solo must never change what a crew trip does.** A trip with two or more
+  people behaves exactly as designed, including voice and live location.
+- **Prefer features that get better with more people** (shared stops, voting,
+  live location, group chat, shared expenses) over features a single user could
+  get from a general maps or fitness app.
+- **Do not compete on generic navigation or fitness tracking.** Navigation and
+  ride stats are there so a trip works end to end, not to out-feature Google
+  Maps or Strava.
+
 ## Stack
 
 - **Flutter** (Dart 3.13 / Flutter 3.47) with **ForUI** widgets (`forui`) over a

@@ -33,6 +33,7 @@ class AppSettings {
     this.soundEffects = true,
     this.haptics = true,
     this.mapMinimal = false,
+    this.suggestRides = true,
   });
 
   final ThemeMode themeMode;
@@ -70,6 +71,10 @@ class AppSettings {
   /// active route) still appear.
   final bool mapMinimal;
 
+  /// Offer to record a ride when the device starts moving at driving speed
+  /// outside of any trip.
+  final bool suggestRides;
+
   AppSettings copyWith({
     ThemeMode? themeMode,
     DistanceUnit? distanceUnit,
@@ -83,6 +88,7 @@ class AppSettings {
     bool? soundEffects,
     bool? haptics,
     bool? mapMinimal,
+    bool? suggestRides,
   }) => AppSettings(
     themeMode: themeMode ?? this.themeMode,
     distanceUnit: distanceUnit ?? this.distanceUnit,
@@ -96,6 +102,7 @@ class AppSettings {
     soundEffects: soundEffects ?? this.soundEffects,
     haptics: haptics ?? this.haptics,
     mapMinimal: mapMinimal ?? this.mapMinimal,
+    suggestRides: suggestRides ?? this.suggestRides,
   );
 }
 
@@ -111,6 +118,7 @@ const _kKeepScreenOn = 'settings_keep_screen_on';
 const _kSoundEffects = 'settings_sound_effects';
 const _kHaptics = 'settings_haptics';
 const _kMapMinimal = 'settings_map_minimal';
+const _kSuggestRides = 'settings_suggest_rides';
 
 /// Owns [AppSettings]; every setter persists immediately and updates state so
 /// the UI (including the app's theme) reacts at once.
@@ -133,6 +141,7 @@ class AppSettingsNotifier extends Notifier<AppSettings> {
       soundEffects: prefs.getBool(_kSoundEffects) ?? true,
       haptics: prefs.getBool(_kHaptics) ?? true,
       mapMinimal: prefs.getBool(_kMapMinimal) ?? false,
+      suggestRides: prefs.getBool(_kSuggestRides) ?? true,
     );
     AppFeedback.configure(sound: settings.soundEffects, haptics: settings.haptics);
     return settings;
@@ -184,6 +193,11 @@ class AppSettingsNotifier extends Notifier<AppSettings> {
     AppFeedback.configure(sound: enabled, haptics: state.haptics);
     // Confirm the toggle by playing the sound it just enabled.
     if (enabled) AppFeedback.play(Sfx.success);
+  }
+
+  void setSuggestRides(bool enabled) {
+    unawaited(_prefs.setBool(_kSuggestRides, enabled));
+    state = state.copyWith(suggestRides: enabled);
   }
 
   void setMapMinimal(bool enabled) {

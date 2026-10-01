@@ -363,6 +363,17 @@ class SettingsScreen extends ConsumerWidget {
               ),
               const BrandRowDivider(),
               BrandListRow(
+                icon: Icons.sensors_rounded,
+                title: 'Suggest recording rides',
+                subtitle: 'Offer to record when you start driving',
+                onTap: null,
+                trailing: HapticSwitch(
+                  value: settings.suggestRides,
+                  onChange: notifier.setSuggestRides,
+                ),
+              ),
+              const BrandRowDivider(),
+              BrandListRow(
                 icon: Icons.screen_lock_portrait_rounded,
                 title: 'Keep screen on during trips',
                 subtitle: 'Stops the screen sleeping while a trip is active',

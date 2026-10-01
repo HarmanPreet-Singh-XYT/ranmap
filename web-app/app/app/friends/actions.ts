@@ -51,6 +51,7 @@ export async function sendFriendRequest(formData: FormData): Promise<void> {
     status: "pending",
   });
   revalidatePath("/app/friends");
+  revalidatePath("/app/people/[id]", "page");
 }
 
 export async function respondFriendRequest(formData: FormData): Promise<void> {
@@ -66,6 +67,7 @@ export async function respondFriendRequest(formData: FormData): Promise<void> {
     await supabase.from("friendships").delete().eq("id", id);
   }
   revalidatePath("/app/friends");
+  revalidatePath("/app/people/[id]", "page");
 }
 
 export async function removeFriend(formData: FormData): Promise<void> {
@@ -75,6 +77,7 @@ export async function removeFriend(formData: FormData): Promise<void> {
   if (!(await currentUserId(supabase))) return;
   await supabase.from("friendships").delete().eq("id", id);
   revalidatePath("/app/friends");
+  revalidatePath("/app/people/[id]", "page");
 }
 
 export async function blockUser(formData: FormData): Promise<void> {
@@ -84,6 +87,7 @@ export async function blockUser(formData: FormData): Promise<void> {
   if (!(await currentUserId(supabase))) return;
   await supabase.rpc("block_user", { p_target: targetId });
   revalidatePath("/app/friends");
+  revalidatePath("/app/people/[id]", "page");
 }
 
 export async function unblockUser(formData: FormData): Promise<void> {
@@ -93,6 +97,7 @@ export async function unblockUser(formData: FormData): Promise<void> {
   if (!(await currentUserId(supabase))) return;
   await supabase.rpc("unblock_user", { p_target: targetId });
   revalidatePath("/app/friends");
+  revalidatePath("/app/people/[id]", "page");
 }
 
 export async function reportUser(formData: FormData): Promise<void> {
@@ -108,4 +113,5 @@ export async function reportUser(formData: FormData): Promise<void> {
     p_details: str(formData.get("details")),
   });
   revalidatePath("/app/friends");
+  revalidatePath("/app/people/[id]", "page");
 }

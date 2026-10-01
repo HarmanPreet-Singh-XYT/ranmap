@@ -67,8 +67,9 @@ class TripRecapScreen extends ConsumerWidget {
   static String? _routeLabel(Trip trip) {
     final origin = trip.originName;
     final destination = trip.destinationName;
-    if (origin == null && destination == null) return null;
-    return '${origin ?? 'Start'} → ${destination ?? 'Finish'}';
+    // A ride with no destination has no route to describe.
+    if (destination == null) return null;
+    return '${origin ?? 'Start'} → $destination';
   }
 
   @override
@@ -131,8 +132,12 @@ class TripRecapScreen extends ConsumerWidget {
                       const SizedBox(width: BrandSpace.sm),
                     ],
                     BrandPill(
-                      icon: Icons.groups_rounded,
-                      label: '${members.length} crew',
+                      icon: members.length > 1
+                          ? Icons.groups_rounded
+                          : Icons.person_rounded,
+                      label: members.length > 1
+                          ? '${members.length} crew'
+                          : 'Solo ride',
                     ),
                   ],
                 ),
@@ -140,78 +145,39 @@ class TripRecapScreen extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: BrandSpace.md),
-          // Trip stats are marketed as Pro (see the paywall comparison), and the
-          // trip's Stats tab gates them the same way. Gate the recap too, rather
-          // than render placeholder zeros as if they were real.
-          if (isPro)
-            BrandCard(
-              padding: const EdgeInsets.all(BrandSpace.md),
-              child: BrandStatGrid(
-                tiles: [
-                  BrandStatTile(
-                    label: 'Distance',
-                    value: formatDistance(
-                      stats?.totalDistanceKm ?? 0,
-                      unit,
-                      decimals: 0,
-                    ),
-                    icon: Icons.straighten_rounded,
+          // The headline numbers for the ride are free: they are the point of
+          // recording one. The speed profile and spend analysis below stay Pro.
+          BrandCard(
+            padding: const EdgeInsets.all(BrandSpace.md),
+            child: BrandStatGrid(
+              tiles: [
+                BrandStatTile(
+                  label: 'Distance',
+                  value: formatDistance(
+                    stats?.totalDistanceKm ?? 0,
+                    unit,
+                    decimals: 0,
                   ),
-                  BrandStatTile(
-                    label: 'Moving time',
-                    value: _duration(stats?.durationSeconds ?? 0),
-                    icon: Icons.schedule_rounded,
-                  ),
-                  BrandStatTile(
-                    label: 'Top speed',
-                    value: formatSpeed(stats?.maxSpeedKmh ?? 0, unit),
-                    icon: Icons.speed_rounded,
-                  ),
-                  BrandStatTile(
-                    label: 'Average',
-                    value: formatSpeed(stats?.avgSpeedKmh ?? 0, unit),
-                    icon: Icons.trending_flat_rounded,
-                  ),
-                ],
-              ),
-            )
-          else
-            BrandCard(
-              padding: const EdgeInsets.all(BrandSpace.md),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.workspace_premium_rounded,
-                    color: BrandColors.primary,
-                  ),
-                  const SizedBox(height: BrandSpace.sm),
-                  Text(
-                    'Trip stats are a Ranmap Pro feature.',
-                    textAlign: TextAlign.center,
-                    style: BrandText.titleSm.copyWith(
-                      color: BrandColors.textHeadline,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Unlock distance, speed, duration and spend analysis for '
-                    'every trip.',
-                    textAlign: TextAlign.center,
-                    style: BrandText.bodySm.copyWith(
-                      color: BrandColors.textMuted,
-                    ),
-                  ),
-                  const SizedBox(height: BrandSpace.md),
-                  BrandPrimaryButton(
-                    label: 'Upgrade to Pro',
-                    trailingIcon: null,
-                    expand: false,
-                    onPressed: () =>
-                        showPaywall(context, feature: PremiumFeature.history),
-                  ),
-                ],
-              ),
+                  icon: Icons.straighten_rounded,
+                ),
+                BrandStatTile(
+                  label: 'Moving time',
+                  value: _duration(stats?.durationSeconds ?? 0),
+                  icon: Icons.schedule_rounded,
+                ),
+                BrandStatTile(
+                  label: 'Top speed',
+                  value: formatSpeed(stats?.maxSpeedKmh ?? 0, unit),
+                  icon: Icons.speed_rounded,
+                ),
+                BrandStatTile(
+                  label: 'Average',
+                  value: formatSpeed(stats?.avgSpeedKmh ?? 0, unit),
+                  icon: Icons.trending_flat_rounded,
+                ),
+              ],
             ),
+          ),
           if (isPro && speeds.length >= 2) ...[
             const SizedBox(height: BrandSpace.md),
             BrandCard(

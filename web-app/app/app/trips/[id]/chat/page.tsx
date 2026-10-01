@@ -32,6 +32,9 @@ export default async function TripChatPage({
         currentUserId={user.id}
         title={trip.title}
         subtitle="Trip chat"
+        tripIcon
+        infoHref={`/app/trips/${id}`}
+        backHref={`/app/trips/${id}`}
       />
     </div>
   );

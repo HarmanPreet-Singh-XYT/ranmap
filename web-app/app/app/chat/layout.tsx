@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { SquarePen } from "lucide-react";
 import type { ReactNode } from "react";
 import { ActiveLink } from "@/app/_components/active-link";
 
@@ -10,7 +12,7 @@ const tabs = [
 export default function ChatLayout({ children }: { children: ReactNode }) {
   return (
     <div className="space-y-4">
-      <nav className="flex gap-2 border-b border-[#E6E3DA] pb-3">
+      <nav className="flex items-center gap-2 border-b border-[#E6E3DA] pb-3">
         {tabs.map((tab) => (
           <ActiveLink
             key={tab.href}
@@ -21,6 +23,13 @@ export default function ChatLayout({ children }: { children: ReactNode }) {
             activeClassName="bg-emerald-700 text-white hover:bg-emerald-700 hover:text-white"
           />
         ))}
+        <Link
+          href="/app/chat/new"
+          className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-emerald-700 px-4 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-800"
+        >
+          <SquarePen className="size-4" aria-hidden />
+          New chat
+        </Link>
       </nav>
       {children}
     </div>

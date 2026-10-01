@@ -41,7 +41,7 @@ export default async function AppAreaLayout({
   };
 
   return (
-    <AppShell profile={shellProfile} unreadCount={unreadCount}>
+    <AppShell profile={shellProfile} userId={user.id} unreadCount={unreadCount}>
       {children}
     </AppShell>
   );

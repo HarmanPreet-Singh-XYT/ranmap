@@ -21,8 +21,23 @@ import 'new_chat_screen.dart';
 /// affordance and leaves the bottom inset to the home nav bar. The header "+"
 /// is the shortcut to everything people-related: message, add a friend, answer
 /// requests, invite.
-class ChatHubScreen extends ConsumerWidget {
+class ChatHubScreen extends ConsumerStatefulWidget {
   const ChatHubScreen({super.key});
+
+  @override
+  ConsumerState<ChatHubScreen> createState() => _ChatHubScreenState();
+}
+
+class _ChatHubScreenState extends ConsumerState<ChatHubScreen> {
+  /// Someone with no friends and no groups has nobody to message yet: open on
+  /// the AI assistant, which works on its own, instead of an empty inbox.
+  late final int _initialTab = () {
+    final friends = ref.read(friendsProvider).valueOrNull;
+    final groups = ref.read(myGroupsProvider).valueOrNull;
+    final alone =
+        friends != null && groups != null && friends.isEmpty && groups.isEmpty;
+    return alone ? 2 : 0;
+  }();
 
   void _openFriends(BuildContext context, int tab) {
     Navigator.of(
@@ -69,7 +84,7 @@ class ChatHubScreen extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final requests =
         ref.watch(incomingRequestsProvider).valueOrNull?.length ?? 0;
     return BrandScaffold(
@@ -89,6 +104,7 @@ class ChatHubScreen extends ConsumerWidget {
       ),
       child: FTabs(
         expands: true,
+        control: FTabControl.managed(initial: _initialTab),
         children: const [
           FTabEntry(label: Text('Direct'), child: DirectMessagesScreen()),
           FTabEntry(label: Text('Groups'), child: ChatChannelsScreen()),

@@ -32,6 +32,9 @@ export default async function GroupChatPage({
         currentUserId={user.id}
         title={group.name}
         subtitle="Group chat"
+        avatarSeed={group.avatar_id}
+        infoHref={`/app/groups/${id}`}
+        backHref="/app/chat/groups"
       />
     </div>
   );

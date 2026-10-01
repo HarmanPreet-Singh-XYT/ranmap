@@ -51,6 +51,7 @@ Future<NearbySelection?> showNearbyPlacesSheet(
   BuildContext context, {
   required Position center,
   String? routePolyline,
+  String? initialType,
 }) {
   return showFSheet<NearbySelection>(
     context: context,
@@ -62,7 +63,11 @@ Future<NearbySelection?> showNearbyPlacesSheet(
     builder: (_) => BrandSheetSurface(
       handle: false,
       padding: EdgeInsets.zero,
-      child: _NearbyPlacesSheet(center: center, routePolyline: routePolyline),
+      child: _NearbyPlacesSheet(
+        center: center,
+        routePolyline: routePolyline,
+        initialType: initialType,
+      ),
     ),
   );
 }
@@ -70,8 +75,13 @@ Future<NearbySelection?> showNearbyPlacesSheet(
 class _NearbyPlacesSheet extends ConsumerStatefulWidget {
   final Position center;
   final String? routePolyline;
+  final String? initialType;
 
-  const _NearbyPlacesSheet({required this.center, this.routePolyline});
+  const _NearbyPlacesSheet({
+    required this.center,
+    this.routePolyline,
+    this.initialType,
+  });
 
   @override
   ConsumerState<_NearbyPlacesSheet> createState() => _NearbyPlacesSheetState();
@@ -98,6 +108,8 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
   @override
   void initState() {
     super.initState();
+    final start = widget.initialType;
+    if (start != null && _kPlaceTypes.any((t) => t.$1 == start)) _type = start;
     _search();
   }
 

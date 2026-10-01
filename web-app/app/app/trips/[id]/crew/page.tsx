@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { listTripMembers } from "@/lib/data/trips";
 import { AvatarView } from "@/app/(account)/_components/avatar-view";
@@ -35,17 +36,22 @@ export default async function TripCrewPage({
             <li key={member.user_id}>
               <Card size="sm">
                 <CardContent className="flex items-center gap-3">
-                  <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-50">
-                    <AvatarView seed={member.profile?.avatar_id ?? "default"} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">
-                      {member.profile?.display_name || member.profile?.username || "Member"}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      @{member.profile?.username ?? "unknown"}
-                    </p>
-                  </div>
+                  <Link
+                    href={`/app/people/${member.user_id}`}
+                    className="flex min-w-0 flex-1 items-center gap-3 rounded-lg hover:bg-emerald-50/50"
+                  >
+                    <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-50">
+                      <AvatarView seed={member.profile?.avatar_id ?? "default"} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium">
+                        {member.profile?.display_name || member.profile?.username || "Member"}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        @{member.profile?.username ?? "unknown"}
+                      </p>
+                    </div>
+                  </Link>
                   <span className="shrink-0 text-xs font-semibold text-slate-500">
                     {STATUS_LABEL[member.invite_status]}
                   </span>

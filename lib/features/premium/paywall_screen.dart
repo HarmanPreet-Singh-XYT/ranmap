@@ -804,9 +804,9 @@ class _ComparisonTable extends StatelessWidget {
     ),
     _ComparisonRow(
       'AI assistant',
-      _n(kFreeAiTokens),
-      _n(kProAiTokens),
-      _n(kExtremeAiTokens),
+      'Basic',
+      '${kProAiTokens ~/ kFreeAiTokens}× more',
+      '${kExtremeAiTokens ~/ kFreeAiTokens}× more',
     ),
     _ComparisonRow(
       'Route & place search',
@@ -899,7 +899,7 @@ class _ComparisonTable extends StatelessWidget {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                'AI assistant is metered in tokens per 30 days.',
+                'AI assistant allowance resets every 30 days; Pro and Extreme multiples are relative to Free.',
                 style: BrandText.labelSm.copyWith(color: BrandColors.textMuted),
               ),
             ),

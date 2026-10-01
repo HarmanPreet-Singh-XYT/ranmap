@@ -659,7 +659,7 @@ class TripRepository {
         .from('trip_stats')
         .select(
           'total_distance_km, max_speed_kmh, avg_speed_kmh, duration_seconds, updated_at, '
-          'trips(title, status)',
+          'trips(title, status, started_at)',
         )
         .eq('user_id', uid)
         .order('updated_at', ascending: false)

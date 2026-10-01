@@ -49,6 +49,19 @@ class UsageQuota {
   String get usedLabel => _abbreviate(used);
   String get limitLabel => _abbreviate(limit);
 
+  /// Whole-percent share consumed, rounded up so any use reads as at least 1%
+  /// and only a truly exhausted allowance reads 100%.
+  int get percentUsed {
+    if (limit <= 0 || used <= 0) return 0;
+    if (exhausted) return 100;
+    return (used * 100 / limit).ceil().clamp(1, 99);
+  }
+
+  /// What the meter shows: a percentage for tokens (a raw token count means
+  /// nothing to a rider), `used / limit` for plain request counts.
+  String get valueLabel =>
+      unit == 'tokens' ? '$percentUsed% used' : '$usedLabel / $limitLabel';
+
   /// ` tokens` for a token meter, otherwise empty (requests read better bare).
   String get unitSuffix => unit == 'tokens' ? ' tokens' : '';
 }

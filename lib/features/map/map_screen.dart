@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:forui/forui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -24,6 +25,7 @@ import '../../core/util/geo_distance.dart';
 import '../../core/util/units.dart';
 import '../../core/util/validation.dart';
 import '../../core/providers/app_prefs_provider.dart';
+import '../../core/widgets/app_action_sheet.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/avatar_view.dart';
@@ -33,6 +35,7 @@ import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_sheet_surface.dart';
 import '../../core/widgets/nav_surface.dart';
 import '../../data/models/group.dart';
+import '../../data/services/supabase_service.dart';
 import '../../data/models/map_post.dart';
 import '../../data/models/route_option.dart';
 import '../../data/models/saved_place.dart';
@@ -47,6 +50,7 @@ import '../social/social_providers.dart';
 import '../trip/new_trip_screen.dart';
 import '../trip/plan_route_screen.dart' show PlannedRoute;
 import '../trip/trip_providers.dart';
+import '../trip/trip_recap_screen.dart';
 import 'add_map_post_screen.dart';
 import 'group_convoy_screen.dart';
 import 'live_sync_providers.dart';
@@ -61,6 +65,7 @@ import 'place_details_sheet.dart';
 import 'map_navigation.dart';
 import 'navigation/nav_engine.dart';
 import 'navigation/nav_widgets.dart';
+import 'pick_location_screen.dart';
 import 'saved_place_providers.dart';
 import 'saved_places_screen.dart';
 
@@ -554,13 +559,14 @@ class _MapScreenState extends ConsumerState<MapScreen>
     );
   }
 
-  Future<void> _searchNearby(Position center) async {
+  Future<void> _searchNearby(Position center, {String? type}) async {
     // Offer "search along the route" when the active trip has a planned route.
     final polyline = ref.read(activeTripProvider).valueOrNull?.routePolyline;
     final selection = await showNearbyPlacesSheet(
       context,
       center: center,
       routePolyline: (polyline == null || polyline.isEmpty) ? null : polyline,
+      initialType: type,
     );
     if (selection == null || !mounted) return;
     await _selectPlace(selection.place);
@@ -1245,6 +1251,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
           ? deviceHeadingDegrees
           : (_compass ?? _lastCourse),
     );
+    _watchForDrive(
+      deviceSpeedMps,
+      eligible: activeTrip == null && convoyGroupId == null,
+    );
     _trackFollowedTeammate(teammates);
     _refreshMemberRoute(teammates);
 
@@ -1564,49 +1574,53 @@ class _MapScreenState extends ConsumerState<MapScreen>
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: BrandColors.surface.withValues(
-                                alpha: 0.92,
+                          if (hasLiveScope)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
                               ),
-                              borderRadius: BrandRadii.pill,
-                              boxShadow: BrandShadows.subtle,
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  height: 8,
-                                  width: 8,
-                                  decoration: BoxDecoration(
-                                    color: (!hasLiveScope || !shareLocation)
-                                        ? BrandColors.textMuted
-                                        : BrandColors.primaryContainer,
-                                    shape: BoxShape.circle,
-                                  ),
+                              decoration: BoxDecoration(
+                                color: BrandColors.surface.withValues(
+                                  alpha: 0.92,
                                 ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  !hasLiveScope
-                                      ? 'No active convoy'
-                                      : shareLocation
-                                      ? 'Convoy live · ${memberLocations.length}'
-                                      : 'Location sharing paused',
-                                  style: BrandText.labelSm.copyWith(
-                                    color: BrandColors.textHeadline,
+                                borderRadius: BrandRadii.pill,
+                                boxShadow: BrandShadows.subtle,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    height: 8,
+                                    width: 8,
+                                    decoration: BoxDecoration(
+                                      color: (!hasLiveScope || !shareLocation)
+                                          ? BrandColors.textMuted
+                                          : BrandColors.primaryContainer,
+                                      shape: BoxShape.circle,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    !hasLiveScope
+                                        ? ''
+                                        : !shareLocation
+                                        ? 'Location sharing paused'
+                                        : memberLocations.isEmpty
+                                        ? 'Trip live'
+                                        : 'Convoy live · ${memberLocations.length}',
+                                    style: BrandText.labelSm.copyWith(
+                                      color: BrandColors.textHeadline,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
                           // Own live speed, straight from the device's Position — shown
                           // only when the platform actually reported one.
                           if (liveSpeedMps != null) ...[
-                            const SizedBox(width: BrandSpace.sm),
+                            if (hasLiveScope)
+                              const SizedBox(width: BrandSpace.sm),
                             BrandPill(
                               label: formatSpeed(liveSpeedMps * 3.6, unit),
                               icon: Icons.speed_rounded,
@@ -1777,7 +1791,11 @@ class _MapScreenState extends ConsumerState<MapScreen>
                                               ),
                                         ),
                                         Text(
-                                          '${memberLocations.length} teammate${memberLocations.length == 1 ? '' : 's'} live now',
+                                          memberLocations.isEmpty
+                                              ? (activeTrip != null
+                                                    ? 'Riding solo'
+                                                    : 'Waiting for your crew')
+                                              : '${memberLocations.length} teammate${memberLocations.length == 1 ? '' : 's'} live now',
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: BrandText.bodySm.copyWith(
@@ -1787,6 +1805,19 @@ class _MapScreenState extends ConsumerState<MapScreen>
                                       ],
                                     ),
                                   ),
+                                  if (activeTrip != null &&
+                                      activeTrip.createdBy ==
+                                          SupabaseService.currentUser?.id &&
+                                      memberLocations.isEmpty)
+                                    IconButton(
+                                      tooltip: 'End ride',
+                                      visualDensity: VisualDensity.compact,
+                                      icon: Icon(
+                                        Icons.stop_circle_rounded,
+                                        color: BrandColors.error,
+                                      ),
+                                      onPressed: () => _endRide(activeTrip),
+                                    ),
                                   if (_navDestination != null)
                                     IconButton(
                                       tooltip: 'Navigate to destination',
@@ -2122,50 +2153,116 @@ class _MapScreenState extends ConsumerState<MapScreen>
     DistanceUnit unit,
     List<SavedPlace> savedPlaces,
   ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
+    final here = Geo.pos(deviceLat, deviceLng);
+
+    Widget chip(
+      IconData icon,
+      String label,
+      VoidCallback onTap, {
+      VoidCallback? onLongPress,
+    }) => InkWell(
+      borderRadius: BrandRadii.pill,
+      onTap: onTap,
+      onLongPress: onLongPress,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        decoration: BoxDecoration(
+          color: BrandColors.surfaceContainerLow,
+          borderRadius: BrandRadii.pill,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              height: 38,
-              width: 38,
-              decoration: BoxDecoration(
-                color: BrandColors.secondaryFixed.withValues(alpha: 0.5),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.groups_rounded,
-                color: BrandColors.primary,
-                size: 20,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'No convoy yet',
-                    style: BrandText.weight(
-                      BrandText.titleSm,
-                      700,
-                    ).copyWith(color: BrandColors.textHeadline),
-                  ),
-                  Text(
-                    'Plan a trip and your crew rolls together — live location, voice and shared stops.',
-                    style: BrandText.bodySm.copyWith(
-                      color: BrandColors.textMuted,
-                    ),
-                  ),
-                ],
+            Icon(icon, size: 18, color: BrandColors.primary),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: BrandText.labelMd.copyWith(
+                color: BrandColors.textHeadline,
               ),
             ),
           ],
         ),
-        const SizedBox(height: BrandSpace.md),
-        // The copilot's real saved places, when there are any. With none, the
-        // card renders exactly as the plain empty state it's always been.
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // The map's front door: where to? Works for any trip, with or without a
+        // crew.
+        InkWell(
+          borderRadius: BorderRadius.circular(24),
+          onTap: () => _searchNearby(here),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: BrandColors.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.search_rounded, color: BrandColors.textMuted),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Where to?',
+                    style: BrandText.bodyMd.copyWith(
+                      color: BrandColors.textMuted,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: BrandSpace.sm),
+        SizedBox(
+          height: 40,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: [
+              for (final label in const ['Home', 'Work']) ...[
+                chip(
+                  label == 'Home' ? Icons.home_rounded : Icons.work_rounded,
+                  _shortcut(savedPlaces, label) == null ? 'Add $label' : label,
+                  () => _onShortcutTap(label, savedPlaces, here),
+                  onLongPress: _shortcut(savedPlaces, label) == null
+                      ? null
+                      : () => _shortcutMenu(label, savedPlaces, here),
+                ),
+                const SizedBox(width: BrandSpace.sm),
+              ],
+              chip(
+                Icons.local_gas_station_rounded,
+                'Fuel',
+                () => _searchNearby(here, type: 'gas_station'),
+              ),
+              const SizedBox(width: BrandSpace.sm),
+              chip(
+                Icons.restaurant_rounded,
+                'Food',
+                () => _searchNearby(here, type: 'restaurant'),
+              ),
+              const SizedBox(width: BrandSpace.sm),
+              chip(
+                Icons.landscape_rounded,
+                'Sights',
+                () => _searchNearby(here, type: 'tourist_attraction'),
+              ),
+              const SizedBox(width: BrandSpace.sm),
+              chip(
+                Icons.bookmark_rounded,
+                'Saved',
+                () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SavedPlacesScreen()),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Places the user (or the AI copilot) saved, when there are any.
         if (savedPlaces.isNotEmpty) ...[
           const SizedBox(height: BrandSpace.md),
           _SavedPlacesList(
@@ -2177,14 +2274,218 @@ class _MapScreenState extends ConsumerState<MapScreen>
           ),
         ],
         const SizedBox(height: BrandSpace.md),
+        // The app is about riding together: planning a trip with a crew is the
+        // main action. Recording a solo ride stays one tap away, but quieter.
         BrandPrimaryButton(
-          label: 'Plan your first trip',
-          leadingIcon: Icons.add_rounded,
+          label: 'Plan a trip with your crew',
+          leadingIcon: Icons.groups_rounded,
+          trailingIcon: null,
           onPressed: () => Navigator.of(context)
               .push(MaterialPageRoute(builder: (_) => const NewTripScreen())),
         ),
+        const SizedBox(height: BrandSpace.sm),
+        BrandSecondaryButton(
+          label: _startingRide ? 'Starting…' : 'Just ride solo',
+          leading: Icon(
+            Icons.play_arrow_rounded,
+            size: 18,
+            color: BrandColors.textHeadlineAlt,
+          ),
+          onPressed: _startingRide
+              ? null
+              : () => _startQuickRide(deviceLat, deviceLng),
+        ),
       ],
     );
+  }
+
+  /// The saved place named [name] (Home / Work), if the user has set one.
+  SavedPlace? _shortcut(List<SavedPlace> places, String name) {
+    for (final p in places) {
+      if (p.hasLocation && p.name.trim().toLowerCase() == name.toLowerCase()) {
+        return p;
+      }
+    }
+    return null;
+  }
+
+  void _onShortcutTap(String name, List<SavedPlace> places, Position here) {
+    final place = _shortcut(places, name);
+    if (place == null) {
+      unawaited(_setShortcut(name, places, here));
+      return;
+    }
+    final point = place.point!;
+    unawaited(
+      _navigateTo(
+        NearbyPlace(
+          name: name,
+          placeId: 'pin:${name.toLowerCase()}',
+          category: name,
+          location: Geo.pos(point.lat, point.lng),
+        ),
+      ),
+    );
+  }
+
+  void _shortcutMenu(String name, List<SavedPlace> places, Position here) {
+    showAppActionSheet(
+      context,
+      title: name,
+      actions: [
+        AppSheetAction(
+          label: 'Change $name',
+          icon: Icons.edit_location_alt_rounded,
+          onSelected: () => _setShortcut(name, places, here),
+        ),
+        AppSheetAction(
+          label: 'Remove $name',
+          icon: Icons.delete_outline_rounded,
+          destructive: true,
+          onSelected: () async {
+            final existing = _shortcut(places, name);
+            if (existing == null) return;
+            try {
+              await ref
+                  .read(savedPlaceRepositoryProvider)
+                  .deletePlace(existing.id);
+              ref.invalidate(savedPlacesProvider);
+            } catch (e) {
+              if (mounted) showAppToast(context, friendlyError(e), error: true);
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  /// Lets the user pick where Home / Work is, replacing any previous one.
+  Future<void> _setShortcut(
+    String name,
+    List<SavedPlace> places,
+    Position here,
+  ) async {
+    final picked = await Navigator.of(context).push<PickedLocation>(
+      MaterialPageRoute(
+        builder: (_) =>
+            PickLocationScreen(initialCenter: here, title: 'Set $name'),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    try {
+      final repo = ref.read(savedPlaceRepositoryProvider);
+      final old = _shortcut(places, name);
+      await repo.createPlace(
+        name: name,
+        lat: picked.position.lat.toDouble(),
+        lng: picked.position.lng.toDouble(),
+      );
+      if (old != null) await repo.deletePlace(old.id);
+      ref.invalidate(savedPlacesProvider);
+      if (mounted) showAppToast(context, '$name saved.');
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
+
+  // --- drive detection -------------------------------------------------------
+
+  DateTime? _fastSince;
+  DateTime? _suggestCooldownUntil;
+
+  /// Offers to record a ride once the device has moved at driving speed for a
+  /// while with no trip running. Sustained speed (not one noisy fix) triggers
+  /// it, and a dismissal is respected for 45 minutes.
+  void _watchForDrive(double speedMps, {required bool eligible}) {
+    if (!eligible || !ref.read(appSettingsProvider).suggestRides) {
+      _fastSince = null;
+      return;
+    }
+    if (speedMps < 4) {
+      _fastSince = null;
+      return;
+    }
+    if (speedMps < 7) return; // walking-to-driving grey zone: keep the clock
+    final now = DateTime.now();
+    _fastSince ??= now;
+    if (now.difference(_fastSince!) < const Duration(seconds: 20)) return;
+    final until = _suggestCooldownUntil;
+    if (until != null && now.isBefore(until)) return;
+    _suggestCooldownUntil = now.add(const Duration(minutes: 45));
+    _fastSince = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showFToast(
+        context: context,
+        title: const Text('Looks like you are on the move'),
+        description: const Text('Record this ride?'),
+        icon: const Icon(Icons.speed_rounded),
+        alignment: FToastAlignment.bottomCenter,
+        duration: const Duration(seconds: 10),
+        suffixBuilder: (context, entry) => FButton(
+          variant: FButtonVariant.outline,
+          size: FButtonSizeVariant.sm,
+          onPress: () {
+            entry.dismiss();
+            final lat = _deviceLat;
+            final lng = _deviceLng;
+            if (lat != null && lng != null) {
+              unawaited(_startQuickRide(lat, lng));
+            }
+          },
+          child: const Text('Record'),
+        ),
+      );
+    });
+  }
+
+  bool _startingRide = false;
+
+  /// Starts a solo ride in one tap: creates a trip with just the user in it and
+  /// activates it, so stats, history, odometer and photo pins all work with no
+  /// planning and no crew. Others can still be invited to it later.
+  Future<void> _startQuickRide(double lat, double lng) async {
+    if (_startingRide) return;
+    setState(() => _startingRide = true);
+    try {
+      final repo = ref.read(tripRepositoryProvider);
+      final stamp = DateFormat.MMMd().add_jm().format(DateTime.now());
+      final trip = await repo.createTrip(
+        Trip.draft(
+          createdBy: SupabaseService.currentUserId,
+          title: 'Ride · $stamp',
+          originName: 'Current location',
+          originPoint: LatLngPoint(lat, lng),
+        ),
+      );
+      await repo.startTrip(trip.id);
+      refreshTripData(ref, tripId: trip.id);
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _startingRide = false);
+    }
+  }
+
+  /// Ends a solo ride and shows its recap.
+  Future<void> _endRide(Trip trip) async {
+    final confirmed = await showAppConfirmDialog(
+      context,
+      title: 'End ride?',
+      message: 'This finishes the ride and saves your stats.',
+      confirmLabel: 'End ride',
+    );
+    if (!confirmed || !mounted) return;
+    try {
+      await ref.read(tripRepositoryProvider).completeTrip(trip.id);
+      refreshTripData(ref, tripId: trip.id);
+      ref.invalidate(tripStatsProvider(trip.id));
+      if (!mounted) return;
+      await Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => TripRecapScreen(trip: trip)));
+    } catch (e) {
+      if (mounted) showAppToast(context, friendlyError(e), error: true);
+    }
   }
 
   /// Moves the camera to a saved place's stored coordinates. A place without

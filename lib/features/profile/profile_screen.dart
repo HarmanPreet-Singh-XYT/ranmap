@@ -47,6 +47,7 @@ import 'documents_screen.dart';
 import 'linked_socials_screen.dart';
 import 'profile_extras_providers.dart';
 import 'profile_providers.dart';
+import 'ride_stats.dart';
 import 'service_screen.dart';
 import 'trip_history_screen.dart';
 
@@ -158,6 +159,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   onSelect: (id) => setState(() => _pendingVehicle = id),
                   onSwitch: () => _switchVehicle(profile, _pendingVehicle!),
                 ),
+                const SizedBox(height: BrandSpace.lg),
+                const _RidesCard(),
                 const SizedBox(height: BrandSpace.lg),
                 const _PilotRollup(),
                 const SizedBox(height: BrandSpace.lg),
@@ -742,8 +745,7 @@ class _PlanUsageCard extends ConsumerWidget {
                     BrandBreakdownRow(
                       label: '${q.label} · ${q.cadence}',
                       fraction: q.fraction,
-                      valueLabel:
-                          '${q.usedLabel} / ${q.limitLabel}${q.unitSuffix}',
+                      valueLabel: q.valueLabel,
                       color: _quotaColor(q.fraction),
                     ),
                   ],
@@ -1382,6 +1384,114 @@ class _SignOutFooter extends StatelessWidget {
           },
         ),
       ],
+    );
+  }
+}
+
+/// "Your rides": this week at a glance, free for everyone. It is the solo
+/// rider's home base — distance, ride count, streak and a 7-day chart — and
+/// links through to the full (Pro) history.
+class _RidesCard extends ConsumerWidget {
+  const _RidesCard();
+
+  static const _weekdays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unit = ref.watch(appSettingsProvider.select((s) => s.distanceUnit));
+    final rows =
+        ref.watch(myTripStatsProvider).valueOrNull ??
+        const <Map<String, dynamic>>[];
+    final summary = computeRideSummary(rows, DateTime.now());
+
+    if (summary.isEmpty) {
+      return BrandCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const BrandSectionHeader(
+              icon: Icons.two_wheeler_rounded,
+              title: 'Your rides',
+              subtitle: 'Distance, speed and streaks, just for you',
+            ),
+            const SizedBox(height: BrandSpace.sm),
+            Text(
+              'Tap Start a ride on the map and your first ride lands here.',
+              style: BrandText.bodyMd.copyWith(color: BrandColors.textMuted),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final bars = <({String label, double value})>[
+      for (final d in summary.last7Days)
+        (
+          label: _weekdays[d.day.weekday - 1],
+          value: distanceInUnit(d.km, unit),
+        ),
+    ];
+
+    return BrandCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          BrandSectionHeader(
+            icon: Icons.two_wheeler_rounded,
+            title: 'Your rides',
+            subtitle: 'The last 7 days',
+            trailing: TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const TripHistoryScreen()),
+              ),
+              child: const Text('History'),
+            ),
+          ),
+          const SizedBox(height: BrandSpace.md),
+          Row(
+            children: [
+              Expanded(
+                child: BrandStatTile(
+                  label: 'This week',
+                  value: formatDistance(summary.weekKm, unit, decimals: 0),
+                  icon: Icons.straighten_rounded,
+                ),
+              ),
+              const SizedBox(width: BrandSpace.gutterSm),
+              Expanded(
+                child: BrandStatTile(
+                  label: 'Rides',
+                  value: '${summary.weekRides}',
+                  icon: Icons.route_rounded,
+                ),
+              ),
+              const SizedBox(width: BrandSpace.gutterSm),
+              Expanded(
+                child: BrandStatTile(
+                  label: 'Streak',
+                  value: summary.streakDays == 1
+                      ? '1 day'
+                      : '${summary.streakDays} days',
+                  icon: Icons.local_fire_department_rounded,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: BrandSpace.md),
+          BrandBarChart(
+            bars: bars,
+            height: 110,
+            valueFormatter: (v) => v < 0.5 ? '' : v.round().toString(),
+          ),
+          const SizedBox(height: BrandSpace.sm),
+          Text(
+            'Top speed ${formatSpeed(summary.topSpeedKmh, unit)} · '
+            '${summary.totalRides} ride${summary.totalRides == 1 ? '' : 's'} '
+            'all time',
+            style: BrandText.bodySm.copyWith(color: BrandColors.textMuted),
+          ),
+        ],
+      ),
     );
   }
 }

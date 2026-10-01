@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test lib/photos/photos.test.ts"
+    "test": "node --test lib/photos/photos.test.ts lib/chat/thread.test.ts lib/rides/summary.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

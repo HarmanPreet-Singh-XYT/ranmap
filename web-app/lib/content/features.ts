@@ -103,7 +103,7 @@ export const features: Feature[] = [
       "Create a trip, schedule it, or invite a friend — all from a message",
       "Add a geocoded stop, or propose one for the group to consider",
       "Grounded in current web results for opening hours and conditions",
-      "Free allowance included; 5M tokens / 30 days with Pro",
+      "Free allowance included; 10× larger with Pro",
     ],
   },
   {

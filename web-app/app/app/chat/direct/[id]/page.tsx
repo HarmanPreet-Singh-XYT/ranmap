@@ -28,6 +28,9 @@ export default async function DirectThreadPage({
       currentUserId={user.id}
       title={other?.display_name || other?.username || "Conversation"}
       subtitle={other ? `@${other.username}` : null}
+      avatarSeed={other?.avatar_id ?? null}
+      infoHref={other ? `/app/people/${other.id}` : null}
+      backHref="/app/chat"
     />
   );
 }

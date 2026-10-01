@@ -41,11 +41,14 @@ export default async function ChatDirectPage() {
           <MessagesSquare className="size-8 text-muted-foreground" aria-hidden />
           <p className="font-medium">No conversations yet</p>
           <p className="max-w-sm text-sm text-muted-foreground">
-            Message a friend from the{" "}
-            <Link href="/app/friends" className="font-semibold text-emerald-700">
-              Friends
+            <Link href="/app/chat/new" className="font-semibold text-emerald-700">
+              Start a chat
             </Link>{" "}
-            page to start a chat.
+            with a friend, a group or a trip, or{" "}
+            <Link href="/app/chat/ai" className="font-semibold text-emerald-700">
+              ask the AI assistant
+            </Link>
+            .
           </p>
         </CardContent>
       </Card>

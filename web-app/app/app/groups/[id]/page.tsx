@@ -264,18 +264,23 @@ export default async function GroupDetailPage({
             <li key={member.user_id}>
               <Card size="sm">
                 <CardContent className="flex items-center gap-3">
-                  <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-50">
-                    <AvatarView seed={member.profile?.avatar_id ?? "default"} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">
-                      {member.profile?.display_name || member.profile?.username || "Member"}
-                      {member.user_id === user.id ? " (you)" : ""}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground capitalize">
-                      {member.role}
-                    </p>
-                  </div>
+                  <Link
+                    href={member.user_id === user.id ? "/app/profile" : `/app/people/${member.user_id}`}
+                    className="flex min-w-0 flex-1 items-center gap-3 rounded-lg hover:bg-emerald-50/50"
+                  >
+                    <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-50">
+                      <AvatarView seed={member.profile?.avatar_id ?? "default"} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium">
+                        {member.profile?.display_name || member.profile?.username || "Member"}
+                        {member.user_id === user.id ? " (you)" : ""}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground capitalize">
+                        {member.role}
+                      </p>
+                    </div>
+                  </Link>
 
                   {isAdmin && member.role !== "owner" && (
                     <div className="flex shrink-0 items-center gap-2">

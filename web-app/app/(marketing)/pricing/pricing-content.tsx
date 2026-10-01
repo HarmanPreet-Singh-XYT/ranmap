@@ -30,7 +30,7 @@ const plans: PlanItem[] = [
       "Up to 3 active trips at once",
       "Up to 6 members per convoy",
       "25 pinned photos",
-      "500,000 AI assistant tokens per 30 days",
+      "AI assistant allowance, resets every 30 days",
       "Live 3D map with real-time vehicle tracking",
       "Group text chat, stops & expenses",
       "Route planning and nearby place search",
@@ -49,7 +49,7 @@ const plans: PlanItem[] = [
     features: [
       "Up to 100 trips, 100 crew & 5,000 photo pins",
       "Live push-to-talk voice channels — for the whole convoy",
-      "AI trip assistant — 5M tokens / 30 days",
+      "AI trip assistant — 10× the free allowance",
       "Route & place search — 2,000 / day",
       "Offline map downloads for your route area",
       "Documents vault: up to 100 documents",
@@ -71,7 +71,7 @@ const plans: PlanItem[] = [
     features: [
       "Up to 250 trips, 250 crew & 20,000 photo pins",
       "Live push-to-talk voice channels — for the whole convoy",
-      "AI trip assistant — 15M tokens / 30 days",
+      "AI trip assistant — 30× the free allowance",
       "Route & place search — 5,000 / day",
       "Offline map downloads for your route area",
       "Documents vault: up to 500 documents",
@@ -89,9 +89,9 @@ const comparison = [
   { feature: "Pinned photos", free: "25", pro: "Up to 5,000", extreme: "Up to 20,000" },
   {
     feature: "AI trip assistant",
-    free: "500k tokens / 30 days",
-    pro: "5M tokens / 30 days",
-    extreme: "15M tokens / 30 days",
+    free: "Basic, resets every 30 days",
+    pro: "10× Free",
+    extreme: "30× Free",
   },
   { feature: "Route & place search", free: "100 / day", pro: "2,000 / day", extreme: "5,000 / day" },
   { feature: "Live push-to-talk voice", free: "—", pro: "Whole convoy", extreme: "Whole convoy" },
@@ -110,7 +110,7 @@ const faqs = [
   },
   {
     q: "What's the difference between Pro and Extreme?",
-    a: "Extreme is a superset of Pro: the same features with much higher fair-use limits — 250 trips, 250 crew, 20,000 photo pins and a 15M-token AI allowance. Pick it if you run large or frequent convoys; otherwise Pro covers almost everyone.",
+    a: "Extreme is a superset of Pro: the same features with much higher fair-use limits — 250 trips, 250 crew, 20,000 photo pins and a 30× larger AI allowance. Pick it if you run large or frequent convoys; otherwise Pro covers almost everyone.",
   },
   {
     q: "Can I use Ranmap without cellular service?",
@@ -126,7 +126,7 @@ const faqs = [
   },
   {
     q: "Are the AI and search limits really enforced?",
-    a: "Yes, and they apply to every tier — including Pro and Extreme. AI is metered in tokens per 30 days and search per day, at a generous ceiling, so no single account can run up unbounded usage. Limits reset automatically.",
+    a: "Yes, and they apply to every tier — including Pro and Extreme. AI is metered per 30 days and search per day, at a generous ceiling, so no single account can run up unbounded usage. Limits reset automatically.",
   },
 ];
 

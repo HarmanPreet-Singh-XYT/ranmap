@@ -73,10 +73,19 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   /// Deferred a frame: it changes another provider, which isn't allowed while
   /// this widget is building.
   void _syncVoiceToActiveTrip(Trip? previous, Trip? next) {
-    Future.microtask(() {
+    Future.microtask(() async {
       if (!mounted) return;
       final voice = ref.read(voiceSessionProvider.notifier);
       if (next != null && next.id != previous?.id) {
+        // A voice channel is for a crew: a solo ride has nobody to talk to, so
+        // neither join nor offer it.
+        try {
+          final members = await ref.read(tripMembersProvider(next.id).future);
+          if (members.length < 2) return;
+        } catch (_) {
+          // Unknown crew size: fall through and let the usual rules decide.
+        }
+        if (!mounted) return;
         final channel = ChatChannel.trip(next.id);
         if (!ref.read(appSettingsProvider).voiceAutoJoin) {
           _offerVoice(channel, next.title);

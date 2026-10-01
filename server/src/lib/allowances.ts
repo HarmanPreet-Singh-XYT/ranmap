@@ -37,7 +37,7 @@ const DAY_MS = 24 * HOUR_MS;
 
 export const aiAssistantAllowance: MeteredAllowance = {
   feature: "ai_assistant",
-  label: "AI assistant tokens",
+  label: "AI assistant",
   unit: "tokens",
   // Tokens (input + output, summed across every model call in a turn), not
   // messages — a long conversation with tool use and search grounding costs

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { UserRoundPlus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -20,15 +21,17 @@ function PersonRow({
   name,
   username,
   avatarId,
+  profileId,
   children,
 }: {
   name: string;
   username: string;
   avatarId: string | null;
+  profileId?: string | null;
   children: ReactNode;
 }) {
-  return (
-    <div className="flex items-center gap-3 px-3 py-2">
+  const identity = (
+    <>
       <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-50">
         <AvatarView seed={avatarId ?? "default"} />
       </span>
@@ -36,6 +39,20 @@ function PersonRow({
         <span className="block truncate text-sm font-medium">{name}</span>
         <span className="block truncate text-xs text-muted-foreground">@{username}</span>
       </span>
+    </>
+  );
+  return (
+    <div className="flex items-center gap-3 px-3 py-2">
+      {profileId ? (
+        <Link
+          href={`/app/people/${profileId}`}
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-lg hover:bg-emerald-50/50"
+        >
+          {identity}
+        </Link>
+      ) : (
+        <span className="flex min-w-0 flex-1 items-center gap-3">{identity}</span>
+      )}
       <span className="flex shrink-0 gap-1.5">{children}</span>
     </div>
   );
@@ -79,6 +96,7 @@ export default async function FriendsPage() {
                   name={request.other?.display_name || request.other?.username || "Someone"}
                   username={request.other?.username ?? "unknown"}
                   avatarId={request.other?.avatar_id ?? null}
+                  profileId={request.other?.id}
                 >
                   <form action={respondFriendRequest}>
                     <input type="hidden" name="friendship_id" value={request.id} />
@@ -112,6 +130,7 @@ export default async function FriendsPage() {
                   name={request.other?.display_name || request.other?.username || "Someone"}
                   username={request.other?.username ?? "unknown"}
                   avatarId={request.other?.avatar_id ?? null}
+                  profileId={request.other?.id}
                 >
                   <form action={removeFriend}>
                     <input type="hidden" name="friendship_id" value={request.id} />
@@ -149,6 +168,7 @@ export default async function FriendsPage() {
                   name={friend.other?.display_name || friend.other?.username || "Friend"}
                   username={friend.other?.username ?? "unknown"}
                   avatarId={friend.other?.avatar_id ?? null}
+                  profileId={friend.other?.id}
                 >
                   <form action={startDirectConversation}>
                     <input type="hidden" name="user_id" value={friend.other?.id ?? ""} />

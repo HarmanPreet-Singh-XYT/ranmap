@@ -17,6 +17,8 @@ void main() {
     expect(quota.usedLabel, '12.3k');
     expect(quota.limitLabel, '500k');
     expect(quota.unitSuffix, ' tokens');
+    expect(quota.percentUsed, 3);
+    expect(quota.valueLabel, '3% used');
     expect(quota.cadence, 'monthly');
     expect(quota.exhausted, isFalse);
   });
