@@ -85,4 +85,19 @@ class FriendRepository {
         .or('requester_id.eq.$uid,addressee_id.eq.$uid');
     return (rows as List).cast<Map<String, dynamic>>();
   }
+
+  /// The friendship row (any status) between me and [otherId], or null.
+  Future<Map<String, dynamic>?> friendshipWith(String otherId) async {
+    final me = SupabaseService.currentUserId;
+    final rows = await _client
+        .from('friendships')
+        .select('id, requester_id, addressee_id, status')
+        .or(
+          'and(requester_id.eq.$me,addressee_id.eq.$otherId),'
+          'and(requester_id.eq.$otherId,addressee_id.eq.$me)',
+        )
+        .limit(1);
+    final list = rows as List;
+    return list.isEmpty ? null : list.first as Map<String, dynamic>;
+  }
 }

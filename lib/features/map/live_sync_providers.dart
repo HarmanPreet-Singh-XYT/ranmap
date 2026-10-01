@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/providers/app_prefs_provider.dart';
+import '../../core/router/auth_state_provider.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../data/models/group_alert.dart';
 import '../../data/models/trip.dart';
@@ -74,7 +75,14 @@ class MemberLocation {
 /// sharing (subject to the global [AppSettings.shareLocation] switch).
 class ConvoyGroupNotifier extends Notifier<String?> {
   @override
-  String? build() => ref.watch(appPrefsProvider).convoyGroupId;
+  String? build() {
+    // A convoy belongs to the account that joined it: drop it on sign-out or
+    // account switch so the next user doesn't inherit someone else's crew.
+    ref.listen(currentUserIdProvider, (previous, next) {
+      if (previous != null && previous != next) unawaited(disable());
+    });
+    return ref.watch(appPrefsProvider).convoyGroupId;
+  }
 
   Future<void> enable(String groupId) async {
     state = groupId;
@@ -231,10 +239,12 @@ final locationPermissionProvider = FutureProvider.autoDispose<LocationAccess>((
   };
 });
 
-/// Minimum gap between live broadcast messages. The GPS stream fires every
+/// Minimum gap between live broadcast messages. Kept at 2 s to stay inside the
+/// free Supabase Realtime quota (2M messages/month, fanned out per teammate).
+/// The GPS stream fires every
 /// ~5 m (≈6/s at highway speed) and every message fans out to every teammate,
 /// so this throttles the live feed to a rate the map still reads as smooth.
-const _minBroadcastInterval = Duration(seconds: 1);
+const _minBroadcastInterval = Duration(seconds: 2);
 
 /// How often a position is persisted to `location_pings`. Live positions no
 /// longer touch the database, so this is deliberately coarse — the persisted

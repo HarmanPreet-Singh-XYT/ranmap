@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/network/backend_client.dart';
+import '../../core/router/auth_state_provider.dart';
 import '../../data/models/usage_quota.dart';
 import '../../data/providers/repository_providers.dart';
 import '../../data/repositories/premium_repository.dart';
@@ -11,9 +12,11 @@ export '../../data/repositories/premium_repository.dart' show Entitlements;
 export '../../data/models/usage_quota.dart' show UsageQuota, UsageReport;
 
 /// The current user's plan, read once and cached.
-final entitlementsProvider = FutureProvider<Entitlements>(
-  (ref) => ref.watch(premiumRepositoryProvider).fetchMyPlan(),
-);
+final entitlementsProvider = FutureProvider<Entitlements>((ref) {
+  // Re-read on an account switch rather than serving the last user's plan.
+  ref.watch(currentUserIdProvider);
+  return ref.watch(premiumRepositoryProvider).fetchMyPlan();
+});
 
 /// Whether the current user is on a paid plan (Pro **or** Extreme): the
 /// server-side plan OR a live local RevenueCat entitlement. The local state
@@ -29,7 +32,8 @@ final isProProvider = Provider<bool>((ref) {
 /// Whether the current user is on the top (Extreme) tier — used only for
 /// labelling, since [isProProvider] already unlocks the features.
 final isExtremeProvider = Provider<bool>((ref) {
-  final dbExtreme = ref.watch(entitlementsProvider).valueOrNull?.isExtreme ?? false;
+  final dbExtreme =
+      ref.watch(entitlementsProvider).valueOrNull?.isExtreme ?? false;
   final rcExtreme = ref.watch(revenueCatExtremeProvider).valueOrNull ?? false;
   return dbExtreme || rcExtreme;
 });

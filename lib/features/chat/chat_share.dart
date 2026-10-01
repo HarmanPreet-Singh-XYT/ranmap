@@ -27,11 +27,7 @@ import 'chat_providers.dart';
 /// text [fallback] used as the message body (push previews, older app versions,
 /// and "copy text").
 class ChatShare {
-  const ChatShare({
-    required this.kind,
-    required this.fallback,
-    this.payload,
-  });
+  const ChatShare({required this.kind, required this.fallback, this.payload});
 
   final ChatMessageKind kind;
   final String fallback;
@@ -103,19 +99,18 @@ Future<void> sendChatShare(
 /// Tells the server to push a chat message to the channel's other members.
 /// Best-effort: the message is already stored, so a push failure isn't a send
 /// failure.
-Future<void> notifyChatPush(ChatChannel channel, {ChatMessageKind? kind}) async {
+Future<void> notifyChatPush(
+  ChatChannel channel, {
+  ChatMessageKind? kind,
+}) async {
   try {
-    await BackendClient.postJson(
-      '/notifications/chat-message',
-      {
-        if (channel.tripId != null) 'tripId': channel.tripId,
-        if (channel.groupId != null) 'groupId': channel.groupId,
-        if (channel.conversationId != null)
-          'conversationId': channel.conversationId,
-        if (kind != null && kind != ChatMessageKind.text) 'kind': kind.wire,
-      },
-      fallbackMessage: 'Could not notify the channel',
-    );
+    await BackendClient.postJson('/notifications/chat-message', {
+      if (channel.tripId != null) 'tripId': channel.tripId,
+      if (channel.groupId != null) 'groupId': channel.groupId,
+      if (channel.conversationId != null)
+        'conversationId': channel.conversationId,
+      if (kind != null && kind != ChatMessageKind.text) 'kind': kind.wire,
+    }, fallbackMessage: 'Could not notify the channel');
   } catch (_) {
     // Best-effort only.
   }
@@ -243,7 +238,9 @@ class _ShareToSheetState extends ConsumerState<_ShareToSheet> {
           children: [
             Text(
               widget.title,
-              style: BrandText.titleMd.copyWith(color: BrandColors.textHeadline),
+              style: BrandText.titleMd.copyWith(
+                color: BrandColors.textHeadline,
+              ),
             ),
             Text(
               widget.share.fallback,
@@ -266,7 +263,8 @@ class _ShareToSheetState extends ConsumerState<_ShareToSheet> {
                   BrandListRow(
                     icon: Icons.person_rounded,
                     iconColor: BrandColors.primary,
-                    title: (person['display_name'] as String?)?.isNotEmpty == true
+                    title:
+                        (person['display_name'] as String?)?.isNotEmpty == true
                         ? person['display_name'] as String
                         : '@${person['username']}',
                     subtitle: '@${person['username']}',
@@ -359,6 +357,7 @@ class _PhotoPickerSheetState extends ConsumerState<_PhotoPickerSheet> {
           const SizedBox(height: BrandSpace.sm),
           Expanded(
             child: photosAsync.when(
+              skipLoadingOnReload: true,
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => Center(child: Text(friendlyError(e))),
               data: (all) {
@@ -394,7 +393,10 @@ class _PhotoPickerSheetState extends ConsumerState<_PhotoPickerSheet> {
                           _picked.add(post);
                         }
                       }),
-                      child: _PickerThumb(post: post, order: index < 0 ? null : index + 1),
+                      child: _PickerThumb(
+                        post: post,
+                        order: index < 0 ? null : index + 1,
+                      ),
                     );
                   },
                 );
@@ -433,6 +435,7 @@ class _PickerThumb extends ConsumerWidget {
         fit: StackFit.expand,
         children: [
           urlAsync.when(
+            skipLoadingOnReload: true,
             loading: () => Container(color: BrandColors.surfaceContainerLow),
             error: (_, _) => Container(color: BrandColors.surfaceContainerLow),
             data: (url) => CachedNetworkImage(

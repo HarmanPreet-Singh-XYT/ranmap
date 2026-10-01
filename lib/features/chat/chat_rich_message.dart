@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/app_toast.dart';
+import '../map/map_navigation.dart';
 import '../../data/models/chat_message.dart';
 import '../../data/models/trip.dart';
 import '../map/map_post_viewer_sheet.dart';
@@ -15,7 +15,11 @@ import 'chat_providers.dart';
 /// The body of a photo / location / trip chat message: a compact, tappable card
 /// instead of raw text. [color] is the bubble's foreground colour.
 class RichMessageBody extends ConsumerWidget {
-  const RichMessageBody({super.key, required this.message, required this.color});
+  const RichMessageBody({
+    super.key,
+    required this.message,
+    required this.color,
+  });
 
   final ChatMessage message;
   final Color color;
@@ -27,7 +31,11 @@ class RichMessageBody extends ConsumerWidget {
           .postsByIds(message.photoPostIds);
       if (!context.mounted) return;
       if (posts.isEmpty) {
-        showAppToast(context, 'That photo is no longer available.', error: true);
+        showAppToast(
+          context,
+          'That photo is no longer available.',
+          error: true,
+        );
         return;
       }
       await showMapPostViewerSheet(context, posts.first, stack: posts);
@@ -36,21 +44,17 @@ class RichMessageBody extends ConsumerWidget {
     }
   }
 
-  Future<void> _openLocation(BuildContext context) async {
+  void _openLocation(BuildContext context, WidgetRef ref) {
     final lat = message.payloadLat;
     final lng = message.payloadLng;
     if (lat == null || lng == null) return;
-    final uri = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
+    navigateInApp(
+      context,
+      ref,
+      name: message.payloadName ?? 'Shared location',
+      lat: lat,
+      lng: lng,
     );
-    try {
-      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (!ok && context.mounted) {
-        showAppToast(context, 'Could not open Maps.', error: true);
-      }
-    } catch (_) {
-      if (context.mounted) showAppToast(context, 'Could not open Maps.', error: true);
-    }
   }
 
   void _openTrip(BuildContext context, WidgetRef ref) {
@@ -61,42 +65,45 @@ class RichMessageBody extends ConsumerWidget {
       showAppToast(context, "You're not on this trip — ask to be invited.");
       return;
     }
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => TripDetailScreen(trip: trip)),
-    );
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => TripDetailScreen(trip: trip)));
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final (IconData icon, String title, String subtitle, VoidCallback onTap) =
-        switch (message.kind) {
-          ChatMessageKind.photo => (
-            Icons.push_pin_rounded,
-            message.photoPostIds.length > 1
-                ? 'Pinned images (${message.photoPostIds.length})'
-                : 'Pinned image',
-            'Tap to view',
-            () => _openPhotos(context, ref),
-          ),
-          ChatMessageKind.location => (
-            Icons.place_rounded,
-            message.payloadName ?? 'Shared location',
-            'Tap for directions',
-            () => _openLocation(context),
-          ),
-          ChatMessageKind.trip => (
-            Icons.directions_car_filled_rounded,
-            message.payloadTripTitle ?? 'Trip',
-            'Tap to open trip',
-            () => _openTrip(context, ref),
-          ),
-          ChatMessageKind.text => (
-            Icons.chat_bubble_outline_rounded,
-            message.body ?? '',
-            '',
-            () {},
-          ),
-        };
+    final (
+      IconData icon,
+      String title,
+      String subtitle,
+      VoidCallback onTap,
+    ) = switch (message.kind) {
+      ChatMessageKind.photo => (
+        Icons.push_pin_rounded,
+        message.photoPostIds.length > 1
+            ? 'Pinned images (${message.photoPostIds.length})'
+            : 'Pinned image',
+        'Tap to view',
+        () => _openPhotos(context, ref),
+      ),
+      ChatMessageKind.location => (
+        Icons.place_rounded,
+        message.payloadName ?? 'Shared location',
+        'Tap for directions',
+        () => _openLocation(context, ref),
+      ),
+      ChatMessageKind.trip => (
+        Icons.directions_car_filled_rounded,
+        message.payloadTripTitle ?? 'Trip',
+        'Tap to open trip',
+        () => _openTrip(context, ref),
+      ),
+      ChatMessageKind.text => (
+        Icons.chat_bubble_outline_rounded,
+        message.body ?? '',
+        '',
+        () {},
+      ),
+    };
 
     return GestureDetector(
       onTap: onTap,

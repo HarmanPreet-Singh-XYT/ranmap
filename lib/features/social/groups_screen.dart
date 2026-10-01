@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../core/widgets/pull_to_refresh.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/brand_palette.dart';
@@ -118,101 +121,112 @@ class GroupsScreen extends ConsumerWidget {
       ),
       child: Stack(
         children: [
-          groupsAsync.when(
-            data: (groups) {
-              if (groups.isEmpty) {
-                return Center(
-                  child: SingleChildScrollView(
-                    child: BrandEmptyState(
-                      imageAsset: 'assets/images/scenic/convoy_pack_scenic.jpg',
-                      icon: Icons.groups_rounded,
-                      title: 'Build your convoy pack',
-                      message: 'Groups are persistent crews that roll together. Track live member GPS positions, send emergency SOS alerts, and voice chat on the open road.',
-                      tint: BrandColors.accentSky,
-                      quickChips: [
-                        BrandTag(
-                          icon: Icons.satellite_alt_rounded,
-                          label: 'Live Group Radar',
-                          background: BrandColors.surfaceContainerLow,
+          PullToRefresh(
+            onRefresh: () => ref.refresh(myGroupsProvider.future),
+            child: groupsAsync.when(
+              skipLoadingOnReload: true,
+              data: (groups) {
+                if (groups.isEmpty) {
+                  return Center(
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: BrandEmptyState(
+                        imageAsset:
+                            'assets/images/scenic/convoy_pack_scenic.jpg',
+                        icon: Icons.groups_rounded,
+                        title: 'Build your convoy pack',
+                        message: 'Groups are persistent crews that roll together. Track live member GPS positions, send emergency SOS alerts, and voice chat on the open road.',
+                        tint: BrandColors.accentSky,
+                        quickChips: [
+                          BrandTag(
+                            icon: Icons.satellite_alt_rounded,
+                            label: 'Live Group Radar',
+                            background: BrandColors.surfaceContainerLow,
+                          ),
+                          BrandTag(
+                            icon: Icons.cell_tower_rounded,
+                            label: 'PTT Voice Mesh',
+                            background: BrandColors.surfaceContainerLow,
+                          ),
+                          BrandTag(
+                            icon: Icons.campaign_rounded,
+                            label: 'Instant SOS Alerts',
+                            background: BrandColors.surfaceContainerLow,
+                          ),
+                        ],
+                        action: Column(
+                          children: [
+                            BrandPrimaryButton(
+                              label: 'Create a group',
+                              leadingIcon: Icons.add_rounded,
+                              trailingIcon: null,
+                              expand: false,
+                              onPressed: () => _createGroup(context, ref),
+                            ),
+                            const SizedBox(height: BrandSpace.sm),
+                            BrandSecondaryButton(
+                              label: 'Join with invite code',
+                              expand: false,
+                              onPressed: () => _joinWithCode(context, ref),
+                            ),
+                          ],
                         ),
-                        BrandTag(
-                          icon: Icons.cell_tower_rounded,
-                          label: 'PTT Voice Mesh',
-                          background: BrandColors.surfaceContainerLow,
-                        ),
-                        BrandTag(
-                          icon: Icons.campaign_rounded,
-                          label: 'Instant SOS Alerts',
-                          background: BrandColors.surfaceContainerLow,
-                        ),
-                      ],
-                      action: Column(
+                      ),
+                    ),
+                  );
+                }
+                return ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.only(
+                    top: BrandSpace.sm,
+                    bottom: 96,
+                  ),
+                  children: [
+                    BrandCard(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: BrandSpace.md,
+                        vertical: BrandSpace.xs,
+                      ),
+                      child: Column(
                         children: [
-                          BrandPrimaryButton(
-                            label: 'Create a group',
-                            leadingIcon: Icons.add_rounded,
-                            trailingIcon: null,
-                            expand: false,
-                            onPressed: () => _createGroup(context, ref),
-                          ),
-                          const SizedBox(height: BrandSpace.sm),
-                          BrandSecondaryButton(
-                            label: 'Join with invite code',
-                            expand: false,
-                            onPressed: () => _joinWithCode(context, ref),
-                          ),
+                          for (final (i, group) in groups.indexed) ...[
+                            if (i > 0) const BrandRowDivider(),
+                            _GroupRow(
+                              group: group,
+                              isOwner: group.ownerId == myUid,
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      GroupDetailScreen(group: group),
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
-                  ),
+                    const SizedBox(height: BrandSpace.lg),
+                    BrandCard(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: BrandSpace.md,
+                        vertical: BrandSpace.xs,
+                      ),
+                      child: BrandListRow(
+                        icon: Icons.qr_code_rounded,
+                        iconColor: BrandColors.primary,
+                        title: 'Join with a code',
+                        subtitle: 'Enter an invite code from a friend',
+                        onTap: () => _joinWithCode(context, ref),
+                      ),
+                    ),
+                  ],
                 );
-              }
-              return ListView(
-                padding: const EdgeInsets.only(top: BrandSpace.sm, bottom: 96),
-                children: [
-                  BrandCard(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: BrandSpace.md,
-                      vertical: BrandSpace.xs,
-                    ),
-                    child: Column(
-                      children: [
-                        for (final (i, group) in groups.indexed) ...[
-                          if (i > 0) const BrandRowDivider(),
-                          _GroupRow(
-                            group: group,
-                            isOwner: group.ownerId == myUid,
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => GroupDetailScreen(group: group),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: BrandSpace.lg),
-                  BrandCard(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: BrandSpace.md,
-                      vertical: BrandSpace.xs,
-                    ),
-                    child: BrandListRow(
-                      icon: Icons.qr_code_rounded,
-                      iconColor: BrandColors.primary,
-                      title: 'Join with a code',
-                      subtitle: 'Enter an invite code from a friend',
-                      onTap: () => _joinWithCode(context, ref),
-                    ),
-                  ),
-                ],
-              );
-            },
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) => ErrorRetry(
-              error: e,
-              onRetry: () => ref.invalidate(myGroupsProvider),
+              },
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => ErrorRetry(
+                error: e,
+                onRetry: () => ref.invalidate(myGroupsProvider),
+              ),
             ),
           ),
           Positioned(

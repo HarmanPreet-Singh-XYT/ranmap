@@ -33,6 +33,8 @@ class RanmapMapView extends ConsumerStatefulWidget {
     this.onMapReady,
     this.onStyleReady,
     this.onCameraChanged,
+    this.onUserPan,
+    this.onStyleReloading,
   });
 
   /// Initial camera center. Null leaves the camera at Mapbox's default position
@@ -68,6 +70,15 @@ class RanmapMapView extends ConsumerStatefulWidget {
 
   /// Fired continuously while the camera moves (pan/zoom/animation).
   final ValueChanged<CameraChangedEventData>? onCameraChanged;
+
+  /// Fired synchronously just before the style is reloaded (a basemap switch or
+  /// a token refresh), when the SDK drops every annotation manager — so callers
+  /// stop using theirs before the native side starts throwing on them.
+  final VoidCallback? onStyleReloading;
+
+  /// Fired when the user drags the map (not for programmatic camera moves), so
+  /// a "follow" mode can release instead of fighting the gesture.
+  final VoidCallback? onUserPan;
 
   @override
   ConsumerState<RanmapMapView> createState() => RanmapMapViewState();
@@ -137,7 +148,13 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
   Future<void> _applyOrnaments(MapboxMap map) async {
     try {
       await map.scaleBar.updateSettings(
-        ScaleBarSettings(marginTop: _topSafeInset() + 8, marginLeft: 12),
+        // Hidden: it collided with the status pill at the top of the screen and
+        // the map is read by landmarks, not by measuring.
+        ScaleBarSettings(
+          enabled: false,
+          marginTop: _topSafeInset() + 8,
+          marginLeft: 12,
+        ),
       );
     } catch (_) {
       // Ornaments are decorative; a failure here must not take the map down.
@@ -189,6 +206,34 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
     }
   }
 
+  /// Drives the navigation camera: centred on the traveller, rotated to their
+  /// heading, tilted and zoomed in like a driving view.
+  Future<void> followCamera(
+    Position center, {
+    double? bearing,
+    double zoom = 17,
+    double pitch = 55,
+  }) async {
+    await _map?.easeTo(
+      CameraOptions(
+        center: Point(coordinates: center),
+        bearing: bearing,
+        zoom: zoom,
+        pitch: pitch,
+      ),
+      MapAnimationOptions(duration: 900),
+    );
+  }
+
+  /// Smoothly glides the camera to [center] keeping the current zoom, tilt and
+  /// bearing — for continuously tracking a moving target.
+  Future<void> easeTo(Position center, {int durationMs = 1000}) async {
+    await _map?.easeTo(
+      CameraOptions(center: Point(coordinates: center)),
+      MapAnimationOptions(duration: durationMs),
+    );
+  }
+
   /// Animates the camera to [center], optionally changing zoom.
   Future<void> flyTo(Position center, {double? zoom, double? pitch}) async {
     await _map?.flyTo(
@@ -206,6 +251,7 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
   Future<void> setStyle(RanmapMapStyle style) async {
     if (style == _style) return;
     setState(() => _style = style);
+    widget.onStyleReloading?.call();
     await _map?.loadStyleURI(style.uri);
   }
 
@@ -293,6 +339,9 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
     return ref
         .watch(mapboxTokenProvider)
         .when(
+          // A token refresh reloads the provider; showing the spinner then would
+          // tear the native map down and rebuild it mid-session.
+          skipLoadingOnReload: true,
           loading: () => const Center(child: FCircularProgress()),
           error: (_, _) => _MapTokenError(
             onRetry: () => ref.invalidate(mapboxTokenProvider),
@@ -305,6 +354,7 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
               // style so tile requests pick up the new token. On first load the map
               // is still null, and the token was already installed by the provider.
               WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (_map != null) widget.onStyleReloading?.call();
                 _map?.loadStyleURI(widget.style.uri);
               });
             }
@@ -316,6 +366,7 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
               onStyleLoadedListener: _onStyleLoaded,
               onCameraChangeListener: (data) =>
                   widget.onCameraChanged?.call(data),
+              onScrollListener: (_) => widget.onUserPan?.call(),
             );
           },
         );

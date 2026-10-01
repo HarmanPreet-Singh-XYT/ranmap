@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/router/auth_state_provider.dart';
 import '../../data/models/checklist_item.dart';
 import '../../data/models/route_template.dart';
 import '../../data/models/stop_proposal.dart';
@@ -38,7 +39,10 @@ final activeTripsProvider = FutureProvider.autoDispose<List<Trip>>((ref) async {
 
 /// Which active trip the map follows when there are several. Null (or a trip
 /// that's no longer active) falls back to the first active one.
-final selectedMapTripIdProvider = StateProvider<String?>((ref) => null);
+final selectedMapTripIdProvider = StateProvider<String?>((ref) {
+  ref.watch(currentUserIdProvider); // a new account starts with no selection
+  return null;
+});
 
 /// The trip currently being driven, if any: the one chosen in
 /// [selectedMapTripIdProvider] when it's still active, otherwise the first

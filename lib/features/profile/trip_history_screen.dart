@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../core/widgets/pull_to_refresh.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -87,141 +90,148 @@ class TripHistoryScreen extends ConsumerWidget {
         title: 'Trip stats & history',
         onBack: () => Navigator.of(context).maybePop(),
       ),
-      child: statsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => ErrorRetry(
-          error: e,
-          onRetry: () => ref.invalidate(myTripStatsProvider),
-        ),
-        data: (rows) {
-          if (rows.isEmpty) {
-            return Center(
-              child: SingleChildScrollView(
-                child: BrandEmptyState(
-                  imageAsset:
-                      'assets/images/scenic/passport_journal_scenic.jpg',
-                  icon: Icons.auto_stories_rounded,
-                  title: 'Your road trip passport',
-                  message:
-                      'Completed trips automatically record odometer distance, elevation milestones, and top speeds in your personal pilot logbook.',
-                  action: BrandPrimaryButton(
-                    label: 'Plan your first trip',
-                    trailingIcon: Icons.add_rounded,
-                    expand: false,
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const NewTripScreen()),
+      child: PullToRefresh(
+        onRefresh: () => ref.refresh(myTripStatsProvider.future),
+        child: statsAsync.when(
+          skipLoadingOnReload: true,
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => ErrorRetry(
+            error: e,
+            onRetry: () => ref.invalidate(myTripStatsProvider),
+          ),
+          data: (rows) {
+            if (rows.isEmpty) {
+              return Center(
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  child: BrandEmptyState(
+                    imageAsset:
+                        'assets/images/scenic/passport_journal_scenic.jpg',
+                    icon: Icons.auto_stories_rounded,
+                    title: 'Your road trip passport',
+                    message: 'Completed trips automatically record odometer distance, elevation milestones, and top speeds in your personal pilot logbook.',
+                    action: BrandPrimaryButton(
+                      label: 'Plan your first trip',
+                      trailingIcon: Icons.add_rounded,
+                      expand: false,
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const NewTripScreen(),
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
+              );
+            }
+
+            final totalKm = rows.fold<double>(
+              0,
+              (sum, r) =>
+                  sum + ((r['total_distance_km'] as num?)?.toDouble() ?? 0),
             );
-          }
+            final totalSeconds = rows.fold<int>(
+              0,
+              (sum, r) => sum + ((r['duration_seconds'] as num?)?.toInt() ?? 0),
+            );
 
-          final totalKm = rows.fold<double>(
-            0,
-            (sum, r) =>
-                sum + ((r['total_distance_km'] as num?)?.toDouble() ?? 0),
-          );
-          final totalSeconds = rows.fold<int>(
-            0,
-            (sum, r) => sum + ((r['duration_seconds'] as num?)?.toInt() ?? 0),
-          );
-
-          // Distance per trip, oldest→newest and capped so the chart stays
-          // legible. `rows` is newest-first (updated_at desc), so reverse it.
-          final chronological = rows.reversed.toList();
-          final charted = chronological.length > 8
-              ? chronological.sublist(chronological.length - 8)
-              : chronological;
-          final distanceBars = <({String label, double value})>[
-            for (final r in charted)
-              (
-                label: _chartLabel(r['updated_at'] as String?),
-                value: distanceInUnit(
-                  (r['total_distance_km'] as num?)?.toDouble() ?? 0,
-                  unit,
+            // Distance per trip, oldest→newest and capped so the chart stays
+            // legible. `rows` is newest-first (updated_at desc), so reverse it.
+            final chronological = rows.reversed.toList();
+            final charted = chronological.length > 8
+                ? chronological.sublist(chronological.length - 8)
+                : chronological;
+            final distanceBars = <({String label, double value})>[
+              for (final r in charted)
+                (
+                  label: _chartLabel(r['updated_at'] as String?),
+                  value: distanceInUnit(
+                    (r['total_distance_km'] as num?)?.toDouble() ?? 0,
+                    unit,
+                  ),
                 ),
-              ),
-          ];
+            ];
 
-          return ListView(
-            padding: const EdgeInsets.only(
-              top: BrandSpace.md,
-              bottom: BrandSpace.xl,
-            ),
-            children: [
-              BrandCard(
-                padding: const EdgeInsets.all(BrandSpace.md),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: BrandStatTile(
-                        label: 'Trips',
-                        value: '${rows.length}',
-                        icon: Icons.route_rounded,
-                      ),
-                    ),
-                    const SizedBox(width: BrandSpace.gutterSm),
-                    Expanded(
-                      child: BrandStatTile(
-                        label: 'Distance',
-                        value: formatDistance(totalKm, unit, decimals: 0),
-                        icon: Icons.straighten_rounded,
-                      ),
-                    ),
-                    const SizedBox(width: BrandSpace.gutterSm),
-                    Expanded(
-                      child: BrandStatTile(
-                        label: 'Time',
-                        value: _formatDuration(totalSeconds),
-                        icon: Icons.schedule_rounded,
-                      ),
-                    ),
-                  ],
-                ),
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.only(
+                top: BrandSpace.md,
+                bottom: BrandSpace.xl,
               ),
-              if (distanceBars.length >= 2) ...[
-                const SizedBox(height: BrandSpace.md),
+              children: [
                 BrandCard(
                   padding: const EdgeInsets.all(BrandSpace.md),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Row(
                     children: [
-                      const BrandSectionHeader(
-                        icon: Icons.bar_chart_rounded,
-                        title: 'Distance per trip',
+                      Expanded(
+                        child: BrandStatTile(
+                          label: 'Trips',
+                          value: '${rows.length}',
+                          icon: Icons.route_rounded,
+                        ),
                       ),
-                      const SizedBox(height: BrandSpace.md),
-                      BrandBarChart(bars: distanceBars),
-                      const SizedBox(height: BrandSpace.xs),
-                      Text(
-                        'Last ${distanceBars.length} trips · ${distanceUnitSymbol(unit)}',
-                        style: BrandText.bodySm.copyWith(
-                          color: BrandColors.textMuted,
+                      const SizedBox(width: BrandSpace.gutterSm),
+                      Expanded(
+                        child: BrandStatTile(
+                          label: 'Distance',
+                          value: formatDistance(totalKm, unit, decimals: 0),
+                          icon: Icons.straighten_rounded,
+                        ),
+                      ),
+                      const SizedBox(width: BrandSpace.gutterSm),
+                      Expanded(
+                        child: BrandStatTile(
+                          label: 'Time',
+                          value: _formatDuration(totalSeconds),
+                          icon: Icons.schedule_rounded,
                         ),
                       ),
                     ],
                   ),
                 ),
-              ],
-              const SizedBox(height: BrandSpace.md),
-              BrandCard(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: BrandSpace.md,
-                  vertical: BrandSpace.xs,
-                ),
-                child: Column(
-                  children: [
-                    for (final (i, r) in rows.indexed) ...[
-                      if (i > 0) const BrandRowDivider(),
-                      _historyTile(r, unit),
+                if (distanceBars.length >= 2) ...[
+                  const SizedBox(height: BrandSpace.md),
+                  BrandCard(
+                    padding: const EdgeInsets.all(BrandSpace.md),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const BrandSectionHeader(
+                          icon: Icons.bar_chart_rounded,
+                          title: 'Distance per trip',
+                        ),
+                        const SizedBox(height: BrandSpace.md),
+                        BrandBarChart(bars: distanceBars),
+                        const SizedBox(height: BrandSpace.xs),
+                        Text(
+                          'Last ${distanceBars.length} trips · ${distanceUnitSymbol(unit)}',
+                          style: BrandText.bodySm.copyWith(
+                            color: BrandColors.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: BrandSpace.md),
+                BrandCard(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: BrandSpace.md,
+                    vertical: BrandSpace.xs,
+                  ),
+                  child: Column(
+                    children: [
+                      for (final (i, r) in rows.indexed) ...[
+                        if (i > 0) const BrandRowDivider(),
+                        _historyTile(r, unit),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            ],
-          );
-        },
+              ],
+            );
+          },
+        ),
       ),
     );
   }

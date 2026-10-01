@@ -23,6 +23,62 @@ test("mapboxProfileForMode maps our modes to Mapbox profiles", () => {
   assert.equal(DEFAULT_MAPBOX_PROFILE, "driving");
 });
 
+test("normalizeDirections returns maneuvers only when steps are requested", () => {
+  const body = {
+    code: "Ok",
+    routes: [
+      {
+        distance: 500,
+        duration: 60,
+        geometry: "abc",
+        legs: [
+          {
+            summary: "Main St",
+            steps: [
+              {
+                distance: 300,
+                duration: 40,
+                name: "Main Street",
+                maneuver: { type: "depart", instruction: "Head north", location: [-79.1, 43.9] },
+              },
+              {
+                distance: 200,
+                duration: 20,
+                name: "Oak Avenue",
+                maneuver: {
+                  type: "turn",
+                  modifier: "left",
+                  instruction: "Turn left onto Oak Avenue",
+                  location: [-79.2, 43.95],
+                },
+              },
+              { distance: 0, duration: 0, name: "bad", maneuver: { type: "arrive" } },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  // Not requested: the planning payload stays small.
+  assert.equal(normalizeDirections(body)?.[0]?.steps, undefined);
+
+  const steps = normalizeDirections(body, true)?.[0]?.steps;
+  // A step without a usable location is dropped.
+  assert.equal(steps?.length, 2);
+  assert.deepEqual(steps?.[1], {
+    instruction: "Turn left onto Oak Avenue",
+    type: "turn",
+    modifier: "left",
+    name: "Oak Avenue",
+    distanceMeters: 200,
+    durationSeconds: 20,
+    lat: 43.95,
+    lng: -79.2,
+  });
+  assert.equal(steps?.[0]?.modifier, null);
+});
+
 test("normalizeDirections maps the Mapbox Directions shape", () => {
   const routes = normalizeDirections({
     code: "Ok",

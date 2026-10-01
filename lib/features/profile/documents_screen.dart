@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import '../../core/widgets/pull_to_refresh.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
@@ -162,87 +164,95 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
       ),
       child: Stack(
         children: [
-          docsAsync.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) => ErrorRetry(
-              error: e,
-              onRetry: () => ref.invalidate(userDocumentsProvider),
-            ),
-            data: (docs) {
-              if (docs.isEmpty) {
-                return const Center(
-                  child: BrandEmptyState(
-                    icon: Icons.folder_copy_outlined,
-                    title: 'No documents yet',
-                    message:
-                        'Keep your licence, insurance and tickets here — '
-                        'available offline when you need them.',
-                  ),
-                );
-              }
-              return ListView(
-                padding: const EdgeInsets.only(top: BrandSpace.md, bottom: 96),
-                children: [
-                  BrandCard(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: BrandSpace.md,
-                      vertical: BrandSpace.xs,
+          PullToRefresh(
+            onRefresh: () => ref.refresh(userDocumentsProvider.future),
+            child: docsAsync.when(
+              skipLoadingOnReload: true,
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => ErrorRetry(
+                error: e,
+                onRetry: () => ref.invalidate(userDocumentsProvider),
+              ),
+              data: (docs) {
+                if (docs.isEmpty) {
+                  return const Center(
+                    child: BrandEmptyState(
+                      icon: Icons.folder_copy_outlined,
+                      title: 'No documents yet',
+                      message:
+                          'Keep your licence, insurance and tickets here — '
+                          'available offline when you need them.',
                     ),
-                    child: Column(
-                      children: [
-                        for (final (i, doc) in docs.indexed) ...[
-                          if (i > 0) const BrandRowDivider(),
-                          BrandListRow(
-                            icon: _kindIcon(doc.kind),
-                            iconColor: BrandColors.primary,
-                            title: doc.name,
-                            subtitle:
-                                '${_kindLabel(doc.kind)} · ${DateFormat.yMMMd().format(doc.createdAt.toLocal())}',
-                            showChevron: false,
-                            onTap: () => _open(doc),
-                            onLongPress: () => showAppActionSheet(
-                              context,
-                              title: doc.name,
-                              actions: [
-                                AppSheetAction(
-                                  label: 'Open',
-                                  icon: Icons.open_in_new_rounded,
-                                  onSelected: () => _open(doc),
-                                ),
-                                AppSheetAction(
-                                  label: 'Delete document',
-                                  icon: Icons.delete_outline_rounded,
-                                  destructive: true,
-                                  onSelected: () => _delete(doc),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
+                  );
+                }
+                return ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.only(
+                    top: BrandSpace.md,
+                    bottom: 96,
                   ),
-                  const LongPressHint(),
-                  if (!isPro)
-                    Padding(
-                      padding: const EdgeInsets.only(
-                        top: BrandSpace.md,
-                        left: 4,
-                        right: 4,
+                  children: [
+                    BrandCard(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: BrandSpace.md,
+                        vertical: BrandSpace.xs,
                       ),
-                      child: Text(
-                        docs.length >= kFreeDocumentLimit
-                            ? 'Free plan: $kFreeDocumentLimit of $kFreeDocumentLimit '
-                                  'document used. Upgrade to Pro for up to $kProDocumentLimit.'
-                            : 'Free plan: $kFreeDocumentLimit document included.',
-                        style: BrandText.bodySm.copyWith(
-                          color: BrandColors.textMuted,
+                      child: Column(
+                        children: [
+                          for (final (i, doc) in docs.indexed) ...[
+                            if (i > 0) const BrandRowDivider(),
+                            BrandListRow(
+                              icon: _kindIcon(doc.kind),
+                              iconColor: BrandColors.primary,
+                              title: doc.name,
+                              subtitle:
+                                  '${_kindLabel(doc.kind)} · ${DateFormat.yMMMd().format(doc.createdAt.toLocal())}',
+                              showChevron: false,
+                              onTap: () => _open(doc),
+                              onLongPress: () => showAppActionSheet(
+                                context,
+                                title: doc.name,
+                                actions: [
+                                  AppSheetAction(
+                                    label: 'Open',
+                                    icon: Icons.open_in_new_rounded,
+                                    onSelected: () => _open(doc),
+                                  ),
+                                  AppSheetAction(
+                                    label: 'Delete document',
+                                    icon: Icons.delete_outline_rounded,
+                                    destructive: true,
+                                    onSelected: () => _delete(doc),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const LongPressHint(),
+                    if (!isPro)
+                      Padding(
+                        padding: const EdgeInsets.only(
+                          top: BrandSpace.md,
+                          left: 4,
+                          right: 4,
+                        ),
+                        child: Text(
+                          docs.length >= kFreeDocumentLimit
+                              ? 'Free plan: $kFreeDocumentLimit of $kFreeDocumentLimit '
+                                    'document used. Upgrade to Pro for up to $kProDocumentLimit.'
+                              : 'Free plan: $kFreeDocumentLimit document included.',
+                          style: BrandText.bodySm.copyWith(
+                            color: BrandColors.textMuted,
+                          ),
                         ),
                       ),
-                    ),
-                ],
-              );
-            },
+                  ],
+                );
+              },
+            ),
           ),
           Positioned(
             right: BrandSpace.md,

@@ -243,7 +243,8 @@ mapsRouter.get(
 );
 
 // GET /maps/directions?origin=lat,lng&destination=lat,lng[&profile=car]
-// -> { routes: [{ summary, distanceMeters, durationSeconds, polyline }] }
+// -> { routes: [{ summary, distanceMeters, durationSeconds, polyline, steps? }] }
+// `steps=1` also returns the turn-by-turn maneuvers for in-app navigation.
 // `profile` is one of our vehicle modes (car|bike|scooter|suv|other); it maps
 // to the Mapbox travel profile. Omitted defaults to driving, so existing
 // callers are unchanged.
@@ -281,11 +282,15 @@ mapsRouter.get(
 
     // Mapbox takes lng,lat order.
     const coordinates = `${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}`;
+    // `steps=1` adds turn-by-turn maneuvers for in-app navigation; planning
+    // callers omit it to keep the payload small.
+    const wantSteps = String(req.query.steps ?? "") === "1";
     const params = new URLSearchParams({
       alternatives: "true",
       geometries: "polyline",
       overview: "full",
       access_token: mapboxAccessToken,
+      ...(wantSteps ? { steps: "true" } : {}),
     });
 
     try {
@@ -297,7 +302,7 @@ mapsRouter.get(
         return;
       }
 
-      const routes = normalizeDirections(response.body);
+      const routes = normalizeDirections(response.body, wantSteps);
       if (routes === null) {
         console.error("maps: directions: unexpected response shape");
         res.status(502).json({ error: "Could not fetch directions. Please try again." });

@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../core/widgets/pull_to_refresh.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/brand_palette.dart';
@@ -29,47 +32,53 @@ class SavedRoutesScreen extends ConsumerWidget {
         title: 'Saved routes',
         onBack: () => Navigator.of(context).maybePop(),
       ),
-      child: templatesAsync.when(
-        data: (templates) {
-          if (templates.isEmpty) {
-            return const Center(
-              child: BrandEmptyState(
-                icon: Icons.alt_route_rounded,
-                title: 'No saved routes yet',
-                message:
-                    'Plan a route on a trip, then open its menu and choose "Save route" to reuse that drive later.',
-              ),
-            );
-          }
-          return ListView(
-            padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
-            children: [
-              BrandCard(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: BrandSpace.md,
-                  vertical: BrandSpace.xs,
+      child: PullToRefresh(
+        onRefresh: () => ref.refresh(routeTemplatesProvider.future),
+        child: templatesAsync.when(
+          skipLoadingOnReload: true,
+          data: (templates) {
+            if (templates.isEmpty) {
+              return const Center(
+                child: BrandEmptyState(
+                  icon: Icons.alt_route_rounded,
+                  title: 'No saved routes yet',
+                  message: 'Plan a route on a trip, then open its menu and choose "Save route" to reuse that drive later.',
                 ),
-                child: Column(
-                  children: [
-                    for (final (i, template) in templates.indexed) ...[
-                      if (i > 0) const BrandRowDivider(),
-                      _RouteTemplateRow(
-                        template: template,
-                        onRename: () => _rename(context, ref, template),
-                        onDelete: () => _delete(context, ref, template),
-                      ),
+              );
+            }
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
+              children: [
+                BrandCard(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: BrandSpace.md,
+                    vertical: BrandSpace.xs,
+                  ),
+                  child: Column(
+                    children: [
+                      for (final (i, template) in templates.indexed) ...[
+                        if (i > 0) const BrandRowDivider(),
+                        _RouteTemplateRow(
+                          template: template,
+                          onRename: () => _rename(context, ref, template),
+                          onDelete: () => _delete(context, ref, template),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-              const LongPressHint(text: 'Press and hold a route to rename or delete it.'),
-            ],
-          );
-        },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => ErrorRetry(
-          error: e,
-          onRetry: () => ref.invalidate(routeTemplatesProvider),
+                const LongPressHint(
+                  text: 'Press and hold a route to rename or delete it.',
+                ),
+              ],
+            );
+          },
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => ErrorRetry(
+            error: e,
+            onRetry: () => ref.invalidate(routeTemplatesProvider),
+          ),
         ),
       ),
     );
@@ -141,10 +150,10 @@ class _RouteTemplateRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final route = [template.originName, template.destinationName]
-        .whereType<String>()
-        .where((s) => s.isNotEmpty)
-        .join(' → ');
+    final route = [
+      template.originName,
+      template.destinationName,
+    ].whereType<String>().where((s) => s.isNotEmpty).join(' → ');
 
     return BrandListRow(
       icon: Icons.alt_route_rounded,

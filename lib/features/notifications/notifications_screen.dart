@@ -38,14 +38,14 @@ class NotificationsScreen extends ConsumerWidget {
         onAction: unread == 0 ? null : () => _markAllRead(context, ref),
       ),
       child: feedAsync.when(
+        skipLoadingOnReload: true,
         data: (items) {
           if (items.isEmpty) {
             return const Center(
               child: BrandEmptyState(
                 icon: Icons.notifications_none_rounded,
                 title: 'No notifications yet',
-                message:
-                    'Trip invites, chat messages, group activity and convoy alerts show up here.',
+                message: 'Trip invites, chat messages, group activity and convoy alerts show up here.',
               ),
             );
           }
@@ -73,8 +73,10 @@ class NotificationsScreen extends ConsumerWidget {
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) =>
-            ErrorRetry(error: e, onRetry: () => ref.invalidate(notificationsProvider)),
+        error: (e, _) => ErrorRetry(
+          error: e,
+          onRetry: () => ref.invalidate(notificationsProvider),
+        ),
       ),
     );
   }
@@ -162,9 +164,8 @@ class NotificationsScreen extends ConsumerWidget {
       showAppToast(context, 'Open Trips to view this.');
       return;
     }
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => TripDetailScreen(trip: trip!)),
-    );
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => TripDetailScreen(trip: trip!)));
   }
 
   Future<void> _openGroup(
@@ -223,69 +224,69 @@ class _NotificationCard extends StatelessWidget {
         child: BrandCard(
           padding: const EdgeInsets.all(BrandSpace.md),
           child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              height: 38,
-              width: 38,
-              decoration: BoxDecoration(
-                color: _iconBackground(notification.kind),
-                shape: BoxShape.circle,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                height: 38,
+                width: 38,
+                decoration: BoxDecoration(
+                  color: _iconBackground(notification.kind),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  _icon(notification.kind),
+                  size: 20,
+                  color: _iconColor(notification.kind),
+                ),
               ),
-              child: Icon(
-                _icon(notification.kind),
-                size: 20,
-                color: _iconColor(notification.kind),
-              ),
-            ),
-            const SizedBox(width: BrandSpace.gutterSm),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          notification.title,
-                          style: BrandText.weight(
-                            BrandText.titleSm,
-                            700,
-                          ).copyWith(color: BrandColors.textHeadline),
-                        ),
-                      ),
-                      if (unread)
-                        Container(
-                          height: 8,
-                          width: 8,
-                          decoration: BoxDecoration(
-                            color: BrandColors.primaryContainer,
-                            shape: BoxShape.circle,
+              const SizedBox(width: BrandSpace.gutterSm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            notification.title,
+                            style: BrandText.weight(
+                              BrandText.titleSm,
+                              700,
+                            ).copyWith(color: BrandColors.textHeadline),
                           ),
                         ),
+                        if (unread)
+                          Container(
+                            height: 8,
+                            width: 8,
+                            decoration: BoxDecoration(
+                              color: BrandColors.primaryContainer,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                      ],
+                    ),
+                    if (notification.body != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        notification.body!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: BrandText.bodySm.copyWith(
+                          color: BrandColors.textBody,
+                        ),
+                      ),
                     ],
-                  ),
-                  if (notification.body != null) ...[
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 4),
                     Text(
-                      notification.body!,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: BrandText.bodySm.copyWith(
-                        color: BrandColors.textBody,
+                      _relativeTime(notification.createdAt),
+                      style: BrandText.labelSm.copyWith(
+                        color: BrandColors.textMuted,
                       ),
                     ),
                   ],
-                  const SizedBox(height: 4),
-                  Text(
-                    _relativeTime(notification.createdAt),
-                    style: BrandText.labelSm.copyWith(
-                      color: BrandColors.textMuted,
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
             ],
           ),
         ),

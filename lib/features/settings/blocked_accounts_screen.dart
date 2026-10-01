@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../core/widgets/pull_to_refresh.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/brand_palette.dart';
@@ -25,44 +28,49 @@ class BlockedAccountsScreen extends ConsumerWidget {
         title: 'Blocked accounts',
         onBack: () => Navigator.of(context).maybePop(),
       ),
-      child: blockedAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => ErrorRetry(
-          error: e,
-          onRetry: () => ref.invalidate(blockedUsersProvider),
-        ),
-        data: (rows) {
-          if (rows.isEmpty) {
-            return const Center(
-              child: BrandEmptyState(
-                icon: Icons.block_rounded,
-                title: 'No blocked accounts',
-                message:
-                    'When you block someone they stop being able to message you '
-                    'or send friend requests. They show up here.',
-              ),
-            );
-          }
-          return ListView(
-            padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
-            children: [
-              BrandCard(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: BrandSpace.md,
-                  vertical: BrandSpace.xs,
+      child: PullToRefresh(
+        onRefresh: () => ref.refresh(blockedUsersProvider.future),
+        child: blockedAsync.when(
+          skipLoadingOnReload: true,
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => ErrorRetry(
+            error: e,
+            onRetry: () => ref.invalidate(blockedUsersProvider),
+          ),
+          data: (rows) {
+            if (rows.isEmpty) {
+              return const Center(
+                child: BrandEmptyState(
+                  icon: Icons.block_rounded,
+                  title: 'No blocked accounts',
+                  message:
+                      'When you block someone they stop being able to message you '
+                      'or send friend requests. They show up here.',
                 ),
-                child: Column(
-                  children: [
-                    for (final (i, row) in rows.indexed) ...[
-                      if (i > 0) const BrandRowDivider(),
-                      _BlockedRow(row: row),
+              );
+            }
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
+              children: [
+                BrandCard(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: BrandSpace.md,
+                    vertical: BrandSpace.xs,
+                  ),
+                  child: Column(
+                    children: [
+                      for (final (i, row) in rows.indexed) ...[
+                        if (i > 0) const BrandRowDivider(),
+                        _BlockedRow(row: row),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            ],
-          );
-        },
+              ],
+            );
+          },
+        ),
       ),
     );
   }

@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import '../../core/widgets/pull_to_refresh.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
@@ -9,6 +11,8 @@ import '../../core/util/error_text.dart';
 import '../../core/widgets/app_action_sheet.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/feedback/app_feedback.dart';
+import '../../core/widgets/avatar_view.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_list_row.dart';
@@ -19,11 +23,15 @@ import '../chat/direct_messages_screen.dart';
 import '../../data/models/profile.dart';
 import '../../data/services/supabase_service.dart';
 import 'invite_share.dart';
+import 'user_profile_screen.dart';
 import 'moderation_actions.dart';
 import 'social_providers.dart';
 
 class FriendsScreen extends ConsumerWidget {
-  const FriendsScreen({super.key});
+  /// [initialTab]: 0 Friends, 1 Requests, 2 Find.
+  const FriendsScreen({super.key, this.initialTab = 0});
+
+  final int initialTab;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -37,6 +45,7 @@ class FriendsScreen extends ConsumerWidget {
       ),
       child: FTabs(
         expands: true,
+        control: FTabControl.managed(initial: initialTab),
         children: const [
           FTabEntry(label: Text('Friends'), child: _FriendsTab()),
           FTabEntry(label: Text('Requests'), child: _RequestsTab()),
@@ -47,6 +56,14 @@ class FriendsScreen extends ConsumerWidget {
   }
 }
 
+/// A person's avatar for list rows (their real photo or generated identicon).
+Widget _personAvatar(Map<String, dynamic>? person) => AvatarView(
+  seed: person?['avatar_id'] as String? ?? 'default',
+  size: 40,
+  background: BrandColors.surfaceContainerLow,
+  accentColor: BrandColors.primary,
+);
+
 class _FriendsTab extends ConsumerWidget {
   const _FriendsTab();
 
@@ -54,147 +71,175 @@ class _FriendsTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final friendsAsync = ref.watch(friendsProvider);
 
-    return friendsAsync.when(
-      data: (rows) {
-        if (rows.isEmpty) {
-          return Center(
-            child: SingleChildScrollView(
-              child: BrandEmptyState(
-                imageAsset: 'assets/images/scenic/friends_crew_scenic.jpg',
-                icon: Icons.person_add_alt_1_rounded,
-                title: 'Build your road trip crew',
-                message: 'Connect with friends to invite them to live convoys, share routes, and sync pitstops. Share your invite link, or search by username in the Find People tab.',
-                action: BrandPrimaryButton(
-                  label: 'Invite friends',
-                  leadingIcon: Icons.ios_share_rounded,
-                  expand: false,
-                  onPressed: () => shareMyInviteLink(context, ref),
+    return PullToRefresh(
+      onRefresh: () => ref.refresh(friendsProvider.future),
+      child: friendsAsync.when(
+        skipLoadingOnReload: true,
+        data: (rows) {
+          if (rows.isEmpty) {
+            return Center(
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: BrandEmptyState(
+                  imageAsset: 'assets/images/scenic/friends_crew_scenic.jpg',
+                  icon: Icons.person_add_alt_1_rounded,
+                  title: 'Build your road trip crew',
+                  message: 'Connect with friends to invite them to live convoys, share routes, and sync pitstops. Share your invite link, or search by username in the Find People tab.',
+                  action: BrandPrimaryButton(
+                    label: 'Invite friends',
+                    leadingIcon: Icons.ios_share_rounded,
+                    expand: false,
+                    onPressed: () => shareMyInviteLink(context, ref),
+                  ),
                 ),
               ),
-            ),
-          );
-        }
-
-        Widget friendRow(Map<String, dynamic> row) {
-          final other = _otherProfile(row);
-          Future<void> removeFriend() async {
-            final confirmed = await showAppConfirmDialog(
-              context,
-              title: 'Remove friend?',
-              message:
-                  'Remove @${other?['username'] ?? 'this user'} from your friends?',
-              confirmLabel: 'Remove',
-              destructive: true,
             );
-            if (!confirmed) return;
-            try {
-              await ref
-                  .read(friendRepositoryProvider)
-                  .remove(row['id'] as String);
-              ref.invalidate(friendsProvider);
-            } catch (e) {
-              if (context.mounted) {
-                showAppToast(context, friendlyError(e), error: true);
-              }
-            }
           }
 
-          return BrandListRow(
-            icon: Icons.person_rounded,
-            title: '@${other?['username'] ?? 'unknown'}',
-            subtitle: 'Tap to message · hold for options',
-            showChevron: false,
-            trailing: Icon(
-              Icons.chat_bubble_outline_rounded,
-              size: 20,
-              color: BrandColors.textMuted,
-            ),
-            onTap: other?['id'] == null
-                ? null
-                : () => openDirectChat(
-                    context,
-                    ref,
-                    otherUserId: other!['id'] as String,
-                    title:
-                        (other['display_name'] as String?)?.isNotEmpty == true
-                        ? other['display_name'] as String
-                        : '@${other['username']}',
-                  ),
-            onLongPress: () => showAppActionSheet(
-              context,
-              title: '@${other?['username'] ?? 'friend'}',
-              actions: [
-                if (other?['id'] != null)
-                  AppSheetAction(
-                    label: 'Message',
-                    icon: Icons.chat_bubble_outline_rounded,
-                    onSelected: () => openDirectChat(
-                      context,
-                      ref,
-                      otherUserId: other!['id'] as String,
-                      title:
-                          (other['display_name'] as String?)?.isNotEmpty == true
-                          ? other['display_name'] as String
-                          : '@${other['username']}',
-                    ),
-                  ),
-                AppSheetAction(
-                  label: 'Remove friend',
-                  icon: Icons.person_remove_outlined,
-                  destructive: true,
-                  onSelected: removeFriend,
-                ),
-                if (other?['id'] != null)
-                  AppSheetAction(
-                    label: 'Report',
-                    icon: Icons.flag_outlined,
-                    onSelected: () => showReportSheet(
-                      context,
-                      ref,
-                      targetType: 'user',
-                      targetId: other!['id'] as String,
-                    ),
-                  ),
-                if (other?['id'] != null)
-                  AppSheetAction(
-                    label: 'Block',
-                    icon: Icons.block_rounded,
-                    destructive: true,
-                    onSelected: () => showBlockUserConfirm(
-                      context,
-                      ref,
-                      userId: other!['id'] as String,
-                      username: other['username'] as String? ?? 'this user',
-                    ),
-                  ),
-              ],
-            ),
-          );
-        }
+          Widget friendRow(Map<String, dynamic> row) {
+            final other = _otherProfile(row);
+            Future<void> removeFriend() async {
+              final confirmed = await showAppConfirmDialog(
+                context,
+                title: 'Remove friend?',
+                message:
+                    'Remove @${other?['username'] ?? 'this user'} from your friends?',
+                confirmLabel: 'Remove',
+                destructive: true,
+              );
+              if (!confirmed) return;
+              try {
+                await ref
+                    .read(friendRepositoryProvider)
+                    .remove(row['id'] as String);
+                ref.invalidate(friendsProvider);
+              } catch (e) {
+                if (context.mounted) {
+                  showAppToast(context, friendlyError(e), error: true);
+                }
+              }
+            }
 
-        return ListView(
-          padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
-          children: [
-            BrandCard(
-              padding: const EdgeInsets.symmetric(
-                horizontal: BrandSpace.md,
-                vertical: BrandSpace.xs,
+            return BrandListRow(
+              icon: Icons.person_rounded,
+              leading: _personAvatar(other),
+              title: (other?['display_name'] as String?)?.isNotEmpty == true
+                  ? other!['display_name'] as String
+                  : '@${other?['username'] ?? 'unknown'}',
+              subtitle: (other?['display_name'] as String?)?.isNotEmpty == true
+                  ? '@${other?['username']}'
+                  : 'Tap to view profile',
+              showChevron: false,
+              trailing: IconButton(
+                tooltip: 'Message',
+                icon: Icon(
+                  Icons.chat_bubble_outline_rounded,
+                  size: 22,
+                  color: BrandColors.primary,
+                ),
+                onPressed: other?['id'] == null
+                    ? null
+                    : () => openDirectChat(
+                        context,
+                        ref,
+                        otherUserId: other!['id'] as String,
+                        title:
+                            (other['display_name'] as String?)?.isNotEmpty ==
+                                true
+                            ? other['display_name'] as String
+                            : '@${other['username']}',
+                      ),
               ),
-              child: Column(
-                children: [
-                  for (final (i, row) in rows.indexed) ...[
-                    if (i > 0) const BrandRowDivider(),
-                    friendRow(row),
-                  ],
+              onTap: other?['id'] == null
+                  ? null
+                  : () => openUserProfile(context, other!['id'] as String),
+              onLongPress: () => showAppActionSheet(
+                context,
+                title: '@${other?['username'] ?? 'friend'}',
+                actions: [
+                  if (other?['id'] != null)
+                    AppSheetAction(
+                      label: 'View profile',
+                      icon: Icons.person_outline_rounded,
+                      onSelected: () =>
+                          openUserProfile(context, other!['id'] as String),
+                    ),
+                  if (other?['id'] != null)
+                    AppSheetAction(
+                      label: 'Message',
+                      icon: Icons.chat_bubble_outline_rounded,
+                      onSelected: () => openDirectChat(
+                        context,
+                        ref,
+                        otherUserId: other!['id'] as String,
+                        title:
+                            (other['display_name'] as String?)?.isNotEmpty ==
+                                true
+                            ? other['display_name'] as String
+                            : '@${other['username']}',
+                      ),
+                    ),
+                  AppSheetAction(
+                    label: 'Remove friend',
+                    icon: Icons.person_remove_outlined,
+                    destructive: true,
+                    onSelected: removeFriend,
+                  ),
+                  if (other?['id'] != null)
+                    AppSheetAction(
+                      label: 'Report',
+                      icon: Icons.flag_outlined,
+                      onSelected: () => showReportSheet(
+                        context,
+                        ref,
+                        targetType: 'user',
+                        targetId: other!['id'] as String,
+                      ),
+                    ),
+                  if (other?['id'] != null)
+                    AppSheetAction(
+                      label: 'Block',
+                      icon: Icons.block_rounded,
+                      destructive: true,
+                      onSelected: () => showBlockUserConfirm(
+                        context,
+                        ref,
+                        userId: other!['id'] as String,
+                        username: other['username'] as String? ?? 'this user',
+                      ),
+                    ),
                 ],
               ),
-            ),
-          ],
-        );
-      },
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) =>
-          ErrorRetry(error: e, onRetry: () => ref.invalidate(friendsProvider)),
+            );
+          }
+
+          return ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
+            children: [
+              BrandCard(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: BrandSpace.md,
+                  vertical: BrandSpace.xs,
+                ),
+                child: Column(
+                  children: [
+                    for (final (i, row) in rows.indexed) ...[
+                      if (i > 0) const BrandRowDivider(),
+                      friendRow(row),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => ErrorRetry(
+          error: e,
+          onRetry: () => ref.invalidate(friendsProvider),
+        ),
+      ),
     );
   }
 
@@ -228,6 +273,7 @@ class _RequestsTabState extends ConsumerState<_RequestsTab> {
           .respond(friendshipId: friendshipId, accept: accept);
       ref.invalidate(incomingRequestsProvider);
       ref.invalidate(friendsProvider);
+      if (accept) AppFeedback.success();
     } catch (e) {
       if (mounted) showAppToast(context, friendlyError(e), error: true);
     } finally {
@@ -263,8 +309,13 @@ class _RequestsTabState extends ConsumerState<_RequestsTab> {
           children: [
             BrandListRow(
               icon: Icons.person_rounded,
+              leading: _personAvatar(requester),
               title: '@${requester?['username'] ?? 'unknown'}',
+              subtitle: 'Wants to be your friend',
               showChevron: false,
+              onTap: requester?['id'] == null
+                  ? null
+                  : () => openUserProfile(context, requester!['id'] as String),
             ),
             const SizedBox(height: BrandSpace.xs),
             Row(
@@ -298,8 +349,13 @@ class _RequestsTabState extends ConsumerState<_RequestsTab> {
       final addressee = row['addressee'] as Map<String, dynamic>?;
       return BrandListRow(
         icon: Icons.person_rounded,
+        leading: _personAvatar(addressee),
         title: '@${addressee?['username'] ?? 'unknown'}',
+        subtitle: 'Request sent',
         showChevron: false,
+        onTap: addressee?['id'] == null
+            ? null
+            : () => openUserProfile(context, addressee!['id'] as String),
         trailing: BrandSecondaryButton(
           label: 'Cancel',
           expand: false,
@@ -308,73 +364,82 @@ class _RequestsTabState extends ConsumerState<_RequestsTab> {
       );
     }
 
-    return ListView(
-      padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
-      children: [
-        const BrandSectionHeader(
-          icon: Icons.mark_email_unread_rounded,
-          title: 'Incoming',
-        ),
-        const SizedBox(height: BrandSpace.sm),
-        incomingAsync.when(
-          data: (rows) {
-            if (rows.isEmpty) {
-              return const BrandEmptyState(
-                icon: Icons.inbox_rounded,
-                title: 'No pending requests',
-                message: 'When someone asks to be your friend, their request lands here to accept or decline.',
-              );
-            }
-            return Column(
-              children: [
-                for (final (i, row) in rows.indexed) ...[
-                  if (i > 0) const SizedBox(height: BrandSpace.sm),
-                  incomingCard(row),
-                ],
-              ],
-            );
-          },
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => ErrorRetry(
-            error: e,
-            onRetry: () => ref.invalidate(incomingRequestsProvider),
+    return PullToRefresh(
+      onRefresh: () => Future.wait([
+        ref.refresh(incomingRequestsProvider.future),
+        ref.refresh(outgoingRequestsProvider.future),
+      ]),
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
+        children: [
+          const BrandSectionHeader(
+            icon: Icons.mark_email_unread_rounded,
+            title: 'Incoming',
           ),
-        ),
-        const SizedBox(height: BrandSpace.lg),
-        const BrandSectionHeader(icon: Icons.outbox_rounded, title: 'Sent'),
-        const SizedBox(height: BrandSpace.sm),
-        outgoingAsync.when(
-          data: (rows) {
-            if (rows.isEmpty) {
-              return const BrandEmptyState(
-                icon: Icons.outbox_rounded,
-                title: 'No outgoing requests',
-                message:
-                    'Friend requests you send stay here until they accept.',
-              );
-            }
-            return BrandCard(
-              padding: const EdgeInsets.symmetric(
-                horizontal: BrandSpace.md,
-                vertical: BrandSpace.xs,
-              ),
-              child: Column(
+          const SizedBox(height: BrandSpace.sm),
+          incomingAsync.when(
+            skipLoadingOnReload: true,
+            data: (rows) {
+              if (rows.isEmpty) {
+                return const BrandEmptyState(
+                  icon: Icons.inbox_rounded,
+                  title: 'No pending requests',
+                  message: 'When someone asks to be your friend, their request lands here to accept or decline.',
+                );
+              }
+              return Column(
                 children: [
                   for (final (i, row) in rows.indexed) ...[
-                    if (i > 0) const BrandRowDivider(),
-                    outgoingRow(row),
+                    if (i > 0) const SizedBox(height: BrandSpace.sm),
+                    incomingCard(row),
                   ],
                 ],
-              ),
-            );
-          },
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => ErrorRetry(
-            error: e,
-            onRetry: () => ref.invalidate(outgoingRequestsProvider),
+              );
+            },
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => ErrorRetry(
+              error: e,
+              onRetry: () => ref.invalidate(incomingRequestsProvider),
+            ),
           ),
-        ),
-      ],
+          const SizedBox(height: BrandSpace.lg),
+          const BrandSectionHeader(icon: Icons.outbox_rounded, title: 'Sent'),
+          const SizedBox(height: BrandSpace.sm),
+          outgoingAsync.when(
+            skipLoadingOnReload: true,
+            data: (rows) {
+              if (rows.isEmpty) {
+                return const BrandEmptyState(
+                  icon: Icons.outbox_rounded,
+                  title: 'No outgoing requests',
+                  message:
+                      'Friend requests you send stay here until they accept.',
+                );
+              }
+              return BrandCard(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: BrandSpace.md,
+                  vertical: BrandSpace.xs,
+                ),
+                child: Column(
+                  children: [
+                    for (final (i, row) in rows.indexed) ...[
+                      if (i > 0) const BrandRowDivider(),
+                      outgoingRow(row),
+                    ],
+                  ],
+                ),
+              );
+            },
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => ErrorRetry(
+              error: e,
+              onRetry: () => ref.invalidate(outgoingRequestsProvider),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -434,8 +499,20 @@ class _FindPeopleTabState extends ConsumerState<_FindPeopleTab> {
       final busy = _submitting.contains(profile.id);
       return BrandListRow(
         icon: Icons.person_rounded,
-        title: '@${profile.username}',
+        leading: AvatarView(
+          seed: profile.avatarId,
+          size: 40,
+          background: BrandColors.surfaceContainerLow,
+          accentColor: BrandColors.primary,
+        ),
+        title: profile.displayName?.isNotEmpty == true
+            ? profile.displayName!
+            : '@${profile.username}',
+        subtitle: profile.displayName?.isNotEmpty == true
+            ? '@${profile.username}'
+            : null,
         showChevron: false,
+        onTap: () => openUserProfile(context, profile.id),
         trailing: alreadyRequested
             ? const BrandPill(label: 'Requested')
             : BrandPrimaryButton(
@@ -462,6 +539,7 @@ class _FindPeopleTabState extends ConsumerState<_FindPeopleTab> {
         ),
         Expanded(
           child: resultsAsync.when(
+            skipLoadingOnReload: true,
             data: (results) {
               if (_query.trim().length < 2) {
                 return const Center(
@@ -483,6 +561,7 @@ class _FindPeopleTabState extends ConsumerState<_FindPeopleTab> {
                 );
               }
               return ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.only(bottom: BrandSpace.lg),
                 children: [
                   BrandCard(

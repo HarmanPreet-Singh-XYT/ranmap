@@ -172,6 +172,7 @@ class _LinkedSocialsScreenState extends ConsumerState<LinkedSocialsScreen> {
         onBack: () => Navigator.of(context).maybePop(),
       ),
       child: privateAsync.when(
+        skipLoadingOnReload: true,
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => ErrorRetry(
           error: e,

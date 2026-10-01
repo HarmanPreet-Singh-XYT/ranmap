@@ -22,17 +22,19 @@ import '../trip/trip_providers.dart';
 import '../premium/premium_providers.dart';
 import 'map_post_providers.dart';
 
-/// Capture or pick a photo and pin it to the current location on the trip's
-/// map. Visibility defaults to 'group' (visible to trip participants) — see
-/// can_view_map_post in 0002_rls_hardening.sql.
+/// Capture or pick photos and pin them to a spot on the map. A trip is
+/// optional: with one, the pin joins the trip (visible to its crew per the
+/// user default visibility); without one it is a personal pin, private until
+/// shared. See can_view_map_post in 0002_rls_hardening.sql.
 class AddMapPostScreen extends ConsumerStatefulWidget {
-  final String tripId;
+  /// The trip to pin into, or null for a personal pin.
+  final String? tripId;
   final double lat;
   final double lng;
 
   const AddMapPostScreen({
     super.key,
-    required this.tripId,
+    this.tripId,
     required this.lat,
     required this.lng,
   });
@@ -104,7 +106,12 @@ class _AddMapPostScreenState extends ConsumerState<AddMapPostScreen> {
     var saved = 0;
     final createdIds = <String>[];
     final caption = _captionController.text.trim();
-    final visibility = ref.read(appSettingsProvider).photoVisibility;
+    // 'group' means the trip crew; a pin with no trip has no crew, so keep it
+    // private rather than promising a visibility it cannot deliver.
+    final chosen = ref.read(appSettingsProvider).photoVisibility;
+    final visibility = widget.tripId == null && chosen == 'group'
+        ? 'private'
+        : chosen;
     try {
       // Sequential, oldest first, so they stack in the order they were picked
       // and a mid-batch failure leaves a clean "saved N of M" state.
@@ -125,13 +132,13 @@ class _AddMapPostScreenState extends ConsumerState<AddMapPostScreen> {
         createdIds.add(created.id);
         if (mounted) setState(() => _picked.remove(file));
       }
-      ref.invalidate(tripMapPostsProvider(widget.tripId));
+      _refreshPins();
       await _announceInTripChat(createdIds, visibility);
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       debugPrint('pin photo: save failed after $saved/$total: $e');
       if (saved > 0) {
-        ref.invalidate(tripMapPostsProvider(widget.tripId));
+        _refreshPins();
         await _announceInTripChat(createdIds, visibility);
       }
       if (!mounted) return;
@@ -155,19 +162,30 @@ class _AddMapPostScreenState extends ConsumerState<AddMapPostScreen> {
     }
   }
 
+  void _refreshPins() {
+    final tripId = widget.tripId;
+    if (tripId != null) ref.invalidate(tripMapPostsProvider(tripId));
+    ref.invalidate(myMapPostsProvider);
+    ref.invalidate(allPhotosProvider);
+  }
+
   /// While the trip is running, drop a "Pinned image" card into its chat so the
   /// crew sees it straight away and can tap to open it. Skipped for private
   /// photos (the owner hasn't chosen to show them to the crew) and entirely
   /// best-effort: the photos are already pinned, so a chat failure is silent.
-  Future<void> _announceInTripChat(List<String> postIds, String visibility) async {
-    if (postIds.isEmpty || visibility == 'private') return;
+  Future<void> _announceInTripChat(
+    List<String> postIds,
+    String visibility,
+  ) async {
+    final tripId = widget.tripId;
+    if (tripId == null || postIds.isEmpty || visibility == 'private') return;
     try {
       final trips = await ref.read(myTripsProvider.future);
-      final trip = trips.where((t) => t.id == widget.tripId).firstOrNull;
+      final trip = trips.where((t) => t.id == tripId).firstOrNull;
       if (trip == null || trip.status != TripStatus.active) return;
       await sendChatShare(
         ref,
-        ChatChannel.trip(widget.tripId),
+        ChatChannel.trip(tripId),
         ChatShare.photos(postIds: postIds, lat: widget.lat, lng: widget.lng),
       );
     } catch (e) {
@@ -285,8 +303,9 @@ class _AddMapPostScreenState extends ConsumerState<AddMapPostScreen> {
                       child: BrandEmptyState(
                         icon: Icons.add_a_photo_outlined,
                         title: 'Add photos',
-                        message:
-                            'Shoot a new photo or pick several from your library to pin to this spot.',
+                        message: widget.tripId == null
+                            ? 'Pin photos to this spot on your map. They stay yours until you share them.'
+                            : 'Shoot a new photo or pick several from your library to pin to this spot.',
                         action: _sourceButtons(),
                       ),
                     )

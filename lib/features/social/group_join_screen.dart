@@ -106,6 +106,7 @@ class _GroupJoinScreenState extends ConsumerState<GroupJoinScreen> {
     return _Shell(
       onBack: _dismiss,
       child: previewAsync.when(
+        skipLoadingOnReload: true,
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => _Message(
           icon: Icons.link_off_rounded,

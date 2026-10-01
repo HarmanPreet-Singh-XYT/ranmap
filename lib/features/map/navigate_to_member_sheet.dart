@@ -4,17 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart' hide Position;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants/defaults.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/units.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_sheet_surface.dart';
 // `LocationSettings` collides with mapbox's; hide it so geolocator's is used.
+import '../social/user_profile_screen.dart';
 import 'map_engine/map_engine.dart' hide LocationSettings;
 
 /// Bottom sheet shown when choosing a teammate to navigate to: shows distance
@@ -24,7 +23,12 @@ Future<void> showNavigateToMemberSheet(
   BuildContext context, {
   required Position destination,
   String? username,
+  String? userId,
   String? vehicleType,
+  required VoidCallback onNavigate,
+  VoidCallback? onShow,
+  VoidCallback? onToggleFollow,
+  bool following = false,
 }) {
   return showFSheet(
     context: context,
@@ -32,7 +36,12 @@ Future<void> showNavigateToMemberSheet(
     builder: (context) => _NavigateToMemberSheet(
       destination: destination,
       username: username,
+      userId: userId,
       vehicleType: vehicleType,
+      onNavigate: onNavigate,
+      onShow: onShow,
+      onToggleFollow: onToggleFollow,
+      following: following,
     ),
   );
 }
@@ -41,13 +50,30 @@ class _NavigateToMemberSheet extends ConsumerStatefulWidget {
   const _NavigateToMemberSheet({
     required this.destination,
     this.username,
+    this.userId,
     this.vehicleType,
+    required this.onNavigate,
+    this.onShow,
+    this.onToggleFollow,
+    this.following = false,
   });
+
+  /// Routes to them on the in-app map.
+  final VoidCallback onNavigate;
+
+  /// Centres the map on them / locks the camera onto them. Null hides the
+  /// action (callers without a live map to drive).
+  final VoidCallback? onShow;
+  final VoidCallback? onToggleFollow;
+  final bool following;
 
   final Position destination;
   final String? username;
 
-  /// The current user's vehicle, used to pick a sensible hand-off mode.
+  /// When set, the header opens this person's profile.
+  final String? userId;
+
+  /// The current user's vehicle.
   final String? vehicleType;
 
   @override
@@ -97,37 +123,6 @@ class _NavigateToMemberSheetState
     }
   }
 
-  /// Google Maps understands driving/walking/bicycling/transit. A bicycle gets
-  /// directions that respect it; every other vehicle (including scooters, which
-  /// Google has no mode for) hands off as driving.
-  String get _travelMode => switch (widget.vehicleType) {
-    'bike' => 'bicycling',
-    _ => 'driving',
-  };
-
-  Future<void> _openTurnByTurn() async {
-    final uri = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1&destination='
-      '${widget.destination.lat},${widget.destination.lng}'
-      '&travelmode=$_travelMode',
-    );
-    // Tell the user when the hand-off doesn't work (no Google Maps handler),
-    // instead of a button that silently does nothing.
-    try {
-      final launched = await launchUrl(
-        uri,
-        mode: LaunchMode.externalApplication,
-      );
-      if (!launched && mounted) {
-        showAppToast(context, 'Could not open Google Maps.', error: true);
-      }
-    } catch (e) {
-      if (mounted) {
-        showAppToast(context, 'Could not open Google Maps.', error: true);
-      }
-    }
-  }
-
   String _distanceLabel(DistanceUnit unit) {
     final meters = _distanceMeters;
     if (meters == null) return 'Calculating…';
@@ -152,53 +147,98 @@ class _NavigateToMemberSheetState
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Container(
-                height: 52,
-                width: 52,
-                decoration: BoxDecoration(
-                  color: BrandColors.accentMint,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.directions_car_filled_rounded,
-                  color: BrandColors.primary,
-                ),
-              ),
-              const SizedBox(width: BrandSpace.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.username != null
-                          ? '@${widget.username}'
-                          : 'Teammate',
-                      style: BrandText.titleMd.copyWith(
-                        color: BrandColors.textHeadline,
+          InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: widget.userId == null
+                ? null
+                : () {
+                    final id = widget.userId!;
+                    final nav = Navigator.of(context);
+                    nav.pop();
+                    nav.push(
+                      MaterialPageRoute(
+                        builder: (_) => UserProfileScreen(userId: id),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _bearingDegrees == null
-                          ? _distanceLabel(unit)
-                          : '${_distanceLabel(unit)} · $_directionLabel',
-                      style: BrandText.bodyMd.copyWith(
-                        color: BrandColors.textMuted,
-                      ),
-                    ),
-                  ],
+                    );
+                  },
+            child: Row(
+              children: [
+                Container(
+                  height: 52,
+                  width: 52,
+                  decoration: BoxDecoration(
+                    color: BrandColors.accentMint,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.directions_car_filled_rounded,
+                    color: BrandColors.primary,
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(width: BrandSpace.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.username != null
+                            ? '@${widget.username}'
+                            : 'Teammate',
+                        style: BrandText.titleMd.copyWith(
+                          color: BrandColors.textHeadline,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _bearingDegrees == null
+                            ? _distanceLabel(unit)
+                            : '${_distanceLabel(unit)} · $_directionLabel',
+                        style: BrandText.bodyMd.copyWith(
+                          color: BrandColors.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: BrandSpace.lg),
           BrandPrimaryButton(
             label: 'Navigate to them',
             leadingIcon: Icons.navigation_rounded,
-            onPressed: _openTurnByTurn,
+            onPressed: () {
+              Navigator.of(context).pop();
+              widget.onNavigate();
+            },
           ),
+          if (widget.onToggleFollow != null) ...[
+            const SizedBox(height: BrandSpace.sm),
+            BrandSecondaryButton(
+              label: widget.following ? 'Stop following' : 'Lock on',
+              leading: Icon(
+                widget.following
+                    ? Icons.location_disabled_rounded
+                    : Icons.my_location_rounded,
+                size: 18,
+                color: BrandColors.textHeadlineAlt,
+              ),
+              onPressed: () {
+                Navigator.of(context).pop();
+                widget.onToggleFollow!();
+              },
+            ),
+          ],
+          if (widget.onShow != null) ...[
+            const SizedBox(height: BrandSpace.sm),
+            BrandSecondaryButton(
+              label: 'Show on map',
+              onPressed: () {
+                Navigator.of(context).pop();
+                widget.onShow!();
+              },
+            ),
+          ],
         ],
       ),
     );

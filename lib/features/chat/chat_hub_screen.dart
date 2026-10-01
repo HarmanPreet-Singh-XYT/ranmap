@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 
+import '../../core/widgets/app_action_sheet.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
+import '../social/friends_screen.dart';
+import '../social/invite_share.dart';
+import '../social/social_providers.dart';
 import 'ai_conversations_screen.dart';
 import 'chat_channels_screen.dart';
 import 'direct_messages_screen.dart';
+import 'new_chat_screen.dart';
 
 /// Hub for direct messages, the AI trip assistant and group text/voice chat. Group Chat
 /// lists a channel per trip/group (ChatChannelsScreen); each channel's
@@ -12,22 +18,82 @@ import 'direct_messages_screen.dart';
 /// channel (VoiceChannelScreen) sharing the same channel identity as text.
 ///
 /// A bottom-nav tab root, so it wears the brand shell without a back
-/// affordance and leaves the bottom inset to the home nav bar.
-class ChatHubScreen extends StatelessWidget {
+/// affordance and leaves the bottom inset to the home nav bar. The header "+"
+/// is the shortcut to everything people-related: message, add a friend, answer
+/// requests, invite.
+class ChatHubScreen extends ConsumerWidget {
   const ChatHubScreen({super.key});
 
+  void _openFriends(BuildContext context, int tab) {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => FriendsScreen(initialTab: tab)));
+  }
+
+  void _showPeopleMenu(BuildContext context, WidgetRef ref) {
+    final requests =
+        ref.read(incomingRequestsProvider).valueOrNull?.length ?? 0;
+    showAppActionSheet(
+      context,
+      title: 'People',
+      actions: [
+        AppSheetAction(
+          label: 'New message',
+          icon: Icons.edit_outlined,
+          onSelected: () => showNewChat(context),
+        ),
+        AppSheetAction(
+          label: 'Add a friend',
+          icon: Icons.person_add_alt_1_rounded,
+          onSelected: () => _openFriends(context, 2),
+        ),
+        AppSheetAction(
+          label: requests > 0
+              ? 'Friend requests ($requests)'
+              : 'Friend requests',
+          icon: Icons.mark_email_unread_outlined,
+          onSelected: () => _openFriends(context, 1),
+        ),
+        AppSheetAction(
+          label: 'Your friends',
+          icon: Icons.people_alt_outlined,
+          onSelected: () => _openFriends(context, 0),
+        ),
+        AppSheetAction(
+          label: 'Share invite link',
+          icon: Icons.ios_share_rounded,
+          onSelected: () => shareMyInviteLink(context, ref),
+        ),
+      ],
+    );
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final requests =
+        ref.watch(incomingRequestsProvider).valueOrNull?.length ?? 0;
     return BrandScaffold(
       bottomSafeArea: false,
-      header: const BrandHeader(title: 'Chat & Voice', showBack: false),
+      header: BrandHeader(
+        title: 'Chat & Voice',
+        showBack: false,
+        action: Badge(
+          isLabelVisible: requests > 0,
+          label: Text('$requests'),
+          child: IconButton(
+            tooltip: 'Friends & messages',
+            icon: const Icon(Icons.add_rounded),
+            onPressed: () => _showPeopleMenu(context, ref),
+          ),
+        ),
+      ),
       child: FTabs(
         expands: true,
         children: const [
           FTabEntry(label: Text('Direct'), child: DirectMessagesScreen()),
           FTabEntry(label: Text('Groups'), child: ChatChannelsScreen()),
           FTabEntry(
-            label: Text('AI Assistant'),
+            label: Text('AI'),
             child: AiConversationsScreen(showAppBar: false),
           ),
         ],

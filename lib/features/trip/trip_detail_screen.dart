@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import '../../core/widgets/pull_to_refresh.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
@@ -48,6 +50,7 @@ import '../premium/premium_providers.dart';
 import '../social/group_detail_screen.dart';
 import '../social/invite_share.dart';
 import '../social/social_providers.dart';
+import '../social/user_profile_screen.dart';
 import 'add_expense_screen.dart';
 import '../map/pick_location_screen.dart';
 import 'add_stop_screen.dart';
@@ -710,6 +713,7 @@ class _StatsTab extends ConsumerWidget {
         ref.invalidate(tripStatsProvider(tripId));
       },
       child: statsAsync.when(
+        skipLoadingOnReload: true,
         data: (stats) {
           final s = stats ?? TripStats(tripId: tripId, userId: '');
           final fuelAvg = expensesAsync.valueOrNull == null
@@ -1197,154 +1201,166 @@ class _StopsTabState extends ConsumerState<_StopsTab> {
 
     return Stack(
       children: [
-        stopsAsync.when(
-          data: (fetched) {
-            final voteCards = _convoyVoteCards(openProposals);
-            if (fetched.isEmpty) {
-              // Nothing to reorder yet — still surface any open votes.
-              if (voteCards.isEmpty) {
-                return Center(
-                  child: SingleChildScrollView(
-                    child: BrandEmptyState(
+        PullToRefresh(
+          onRefresh: () => ref.refresh(tripStopsProvider(widget.tripId).future),
+          child: stopsAsync.when(
+            skipLoadingOnReload: true,
+            data: (fetched) {
+              final voteCards = _convoyVoteCards(openProposals);
+              if (fetched.isEmpty) {
+                // Nothing to reorder yet — still surface any open votes.
+                if (voteCards.isEmpty) {
+                  return Center(
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: BrandEmptyState(
+                        imageAsset:
+                            'assets/images/onboarding/welcome_pitstop.jpg',
+                        icon: Icons.place_rounded,
+                        title: 'Map your route stops',
+                        message: 'Add scenic overlooks, coffee spots, and fuel stops. Your convoy will vote on stops and sync route ETAs in real-time.',
+                      ),
+                    ),
+                  );
+                }
+                return ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.only(
+                    top: BrandSpace.md,
+                    bottom: BrandSpace.xl,
+                  ),
+                  children: [
+                    ...voteCards,
+                    const SizedBox(height: BrandSpace.xl),
+                    const BrandEmptyState(
                       imageAsset:
                           'assets/images/onboarding/welcome_pitstop.jpg',
                       icon: Icons.place_rounded,
                       title: 'Map your route stops',
                       message: 'Add scenic overlooks, coffee spots, and fuel stops. Your convoy will vote on stops and sync route ETAs in real-time.',
                     ),
-                  ),
+                  ],
                 );
               }
-              return ListView(
-                padding: const EdgeInsets.only(
-                  top: BrandSpace.md,
-                  bottom: BrandSpace.xl,
-                ),
+              final stops = _optimisticOrder ?? fetched;
+              TripStop? nextStop;
+              for (final s in stops) {
+                if (s.actualArrival == null) {
+                  nextStop = s;
+                  break;
+                }
+              }
+              return Column(
                 children: [
-                  ...voteCards,
-                  const SizedBox(height: BrandSpace.xl),
-                  const BrandEmptyState(
-                    imageAsset: 'assets/images/onboarding/welcome_pitstop.jpg',
-                    icon: Icons.place_rounded,
-                    title: 'Map your route stops',
-                    message: 'Add scenic overlooks, coffee spots, and fuel stops. Your convoy will vote on stops and sync route ETAs in real-time.',
+                  if (nextStop != null)
+                    _NextStopEta(tripId: widget.tripId, stop: nextStop),
+                  _StopWeatherCard(tripId: widget.tripId),
+                  if (voteCards.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        BrandSpace.md,
+                        BrandSpace.md,
+                        BrandSpace.md,
+                        0,
+                      ),
+                      child: Column(children: voteCards),
+                    ),
+                  Expanded(
+                    child: ReorderableListView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.only(
+                        top: BrandSpace.md,
+                        bottom: BrandSpace.xl,
+                      ),
+                      itemCount: stops.length,
+                      onReorderItem: (oldIndex, newIndex) =>
+                          _onReorder(stops, oldIndex, newIndex),
+                      itemBuilder: (context, i) {
+                        final stop = stops[i];
+                        // Arrived stops are done; the first not-yet-arrived stop is
+                        // the one you're heading to; the rest are upcoming.
+                        final state = stop.actualArrival != null
+                            ? BrandTimelineState.done
+                            : identical(stop, nextStop)
+                            ? BrandTimelineState.active
+                            : BrandTimelineState.upcoming;
+                        // The leg that arrives at this stop, when one was
+                        // recorded.
+                        final leg = legByStopId[stop.id];
+                        return BrandTimelineRow(
+                          key: ValueKey(stop.id),
+                          state: state,
+                          isLast: i == stops.length - 1,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (leg != null) ...[
+                                _LegIndicator(leg: leg),
+                                const SizedBox(height: BrandSpace.sm),
+                              ],
+                              Dismissible(
+                                key: ValueKey('dismiss-${stop.id}'),
+                                direction: DismissDirection.endToStart,
+                                confirmDismiss: (_) => _confirmDeleteDialog(
+                                  context,
+                                  'Delete stop?',
+                                ),
+                                onDismissed: (_) async {
+                                  // The chain that remains once this stop is gone,
+                                  // used to resync the survivors' legs below.
+                                  final remaining = stops
+                                      .where((s) => s.id != stop.id)
+                                      .toList();
+                                  try {
+                                    await ref
+                                        .read(tripRepositoryProvider)
+                                        .deleteStop(stop.id);
+                                  } catch (_) {
+                                    // Fall through to refresh the list below.
+                                  } finally {
+                                    // Refresh the itinerary straight away so the
+                                    // dismissed row doesn't linger while the (slower)
+                                    // leg resync below runs.
+                                    ref.invalidate(
+                                      tripStopsProvider(widget.tripId),
+                                    );
+                                  }
+                                  // Deleting the stop cascades its own leg away
+                                  // (0016_trip_legs.sql); resync the rest so each
+                                  // surviving leg describes its (now different)
+                                  // segment and the chain keeps a contiguous seq.
+                                  // Best-effort: the delete is already done, so a
+                                  // resync failure must not fail the dismissal.
+                                  if (remaining.isNotEmpty) {
+                                    try {
+                                      await _resyncLegs(remaining);
+                                    } catch (e) {
+                                      debugPrint(
+                                        'deleteStop: leg resync failed: $e',
+                                      );
+                                    }
+                                  }
+                                  ref.invalidate(
+                                    tripLegsProvider(widget.tripId),
+                                  );
+                                },
+                                background: _dismissBackground(),
+                                child: _StopCard(stop: stop),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ],
               );
-            }
-            final stops = _optimisticOrder ?? fetched;
-            TripStop? nextStop;
-            for (final s in stops) {
-              if (s.actualArrival == null) {
-                nextStop = s;
-                break;
-              }
-            }
-            return Column(
-              children: [
-                if (nextStop != null)
-                  _NextStopEta(tripId: widget.tripId, stop: nextStop),
-                _StopWeatherCard(tripId: widget.tripId),
-                if (voteCards.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      BrandSpace.md,
-                      BrandSpace.md,
-                      BrandSpace.md,
-                      0,
-                    ),
-                    child: Column(children: voteCards),
-                  ),
-                Expanded(
-                  child: ReorderableListView.builder(
-                    padding: const EdgeInsets.only(
-                      top: BrandSpace.md,
-                      bottom: BrandSpace.xl,
-                    ),
-                    itemCount: stops.length,
-                    onReorderItem: (oldIndex, newIndex) =>
-                        _onReorder(stops, oldIndex, newIndex),
-                    itemBuilder: (context, i) {
-                      final stop = stops[i];
-                      // Arrived stops are done; the first not-yet-arrived stop is
-                      // the one you're heading to; the rest are upcoming.
-                      final state = stop.actualArrival != null
-                          ? BrandTimelineState.done
-                          : identical(stop, nextStop)
-                          ? BrandTimelineState.active
-                          : BrandTimelineState.upcoming;
-                      // The leg that arrives at this stop, when one was
-                      // recorded.
-                      final leg = legByStopId[stop.id];
-                      return BrandTimelineRow(
-                        key: ValueKey(stop.id),
-                        state: state,
-                        isLast: i == stops.length - 1,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (leg != null) ...[
-                              _LegIndicator(leg: leg),
-                              const SizedBox(height: BrandSpace.sm),
-                            ],
-                            Dismissible(
-                              key: ValueKey('dismiss-${stop.id}'),
-                              direction: DismissDirection.endToStart,
-                              confirmDismiss: (_) =>
-                                  _confirmDeleteDialog(context, 'Delete stop?'),
-                              onDismissed: (_) async {
-                                // The chain that remains once this stop is gone,
-                                // used to resync the survivors' legs below.
-                                final remaining = stops
-                                    .where((s) => s.id != stop.id)
-                                    .toList();
-                                try {
-                                  await ref
-                                      .read(tripRepositoryProvider)
-                                      .deleteStop(stop.id);
-                                } catch (_) {
-                                  // Fall through to refresh the list below.
-                                } finally {
-                                  // Refresh the itinerary straight away so the
-                                  // dismissed row doesn't linger while the (slower)
-                                  // leg resync below runs.
-                                  ref.invalidate(
-                                    tripStopsProvider(widget.tripId),
-                                  );
-                                }
-                                // Deleting the stop cascades its own leg away
-                                // (0016_trip_legs.sql); resync the rest so each
-                                // surviving leg describes its (now different)
-                                // segment and the chain keeps a contiguous seq.
-                                // Best-effort: the delete is already done, so a
-                                // resync failure must not fail the dismissal.
-                                if (remaining.isNotEmpty) {
-                                  try {
-                                    await _resyncLegs(remaining);
-                                  } catch (e) {
-                                    debugPrint(
-                                      'deleteStop: leg resync failed: $e',
-                                    );
-                                  }
-                                }
-                                ref.invalidate(tripLegsProvider(widget.tripId));
-                              },
-                              background: _dismissBackground(),
-                              child: _StopCard(stop: stop),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            );
-          },
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => ErrorRetry(
-            error: e,
-            onRetry: () => ref.invalidate(tripStopsProvider(widget.tripId)),
+            },
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => ErrorRetry(
+              error: e,
+              onRetry: () => ref.invalidate(tripStopsProvider(widget.tripId)),
+            ),
           ),
         ),
         Positioned(
@@ -1780,6 +1796,7 @@ class _CrewTab extends ConsumerWidget {
     return Stack(
       children: [
         membersAsync.when(
+          skipLoadingOnReload: true,
           data: (fetched) {
             // Accepted members first; pending invites trail.
             final sorted = [...fetched]
@@ -1957,11 +1974,16 @@ class _CrewMemberRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 10),
         child: Row(
           children: [
-            AvatarView(
-              seed: seed,
-              size: 40,
-              background: BrandColors.surfaceContainerLow,
-              accentColor: BrandColors.primary,
+            GestureDetector(
+              onTap: member['user_id'] is String
+                  ? () => openUserProfile(context, member['user_id'] as String)
+                  : null,
+              child: AvatarView(
+                seed: seed,
+                size: 40,
+                background: BrandColors.surfaceContainerLow,
+                accentColor: BrandColors.primary,
+              ),
             ),
             const SizedBox(width: BrandSpace.gutterSm),
             Expanded(
@@ -2106,6 +2128,7 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
           ),
           const SizedBox(height: BrandSpace.lg),
           friendsAsync.when(
+            skipLoadingOnReload: true,
             data: (rows) {
               final myUid = SupabaseService.currentUser?.id;
               final friends = rows
@@ -2191,69 +2214,79 @@ class _ExpensesTab extends ConsumerWidget {
 
     return Stack(
       children: [
-        expensesAsync.when(
-          data: (expenses) {
-            if (expenses.isEmpty) {
-              return Center(
-                child: SingleChildScrollView(
-                  child: BrandEmptyState(
-                    imageAsset:
-                        'assets/images/scenic/passport_journal_scenic.jpg',
-                    icon: Icons.receipt_long_rounded,
-                    title: 'Shared Trip Ledger',
-                    message: 'Log fuel, park passes, tolls, and coffee. RanMap automatically balances the math and settles up evenly.',
+        PullToRefresh(
+          onRefresh: () => ref.refresh(tripExpensesProvider(tripId).future),
+          child: expensesAsync.when(
+            skipLoadingOnReload: true,
+            data: (expenses) {
+              if (expenses.isEmpty) {
+                return Center(
+                  child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: BrandEmptyState(
+                      imageAsset:
+                          'assets/images/scenic/passport_journal_scenic.jpg',
+                      icon: Icons.receipt_long_rounded,
+                      title: 'Shared Trip Ledger',
+                      message: 'Log fuel, park passes, tolls, and coffee. RanMap automatically balances the math and settles up evenly.',
+                    ),
                   ),
-                ),
+                );
+              }
+
+              final total = expenses.fold<double>(
+                0,
+                (sum, e) => sum + e.amount,
               );
-            }
+              final byCategory = <String, double>{};
+              for (final e in expenses) {
+                byCategory[e.category] =
+                    (byCategory[e.category] ?? 0) + e.amount;
+              }
 
-            final total = expenses.fold<double>(0, (sum, e) => sum + e.amount);
-            final byCategory = <String, double>{};
-            for (final e in expenses) {
-              byCategory[e.category] = (byCategory[e.category] ?? 0) + e.amount;
-            }
-
-            return ListView(
-              padding: const EdgeInsets.only(
-                top: BrandSpace.md,
-                bottom: BrandSpace.xl,
-              ),
-              children: [
-                _LedgerSummary(
-                  tripId: tripId,
-                  expenses: expenses,
-                  total: total,
-                  byCategory: byCategory,
-                  currency: currency,
+              return ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.only(
+                  top: BrandSpace.md,
+                  bottom: BrandSpace.xl,
                 ),
-                const SizedBox(height: BrandSpace.md),
-                ...expenses.map(
-                  (e) => Dismissible(
-                    key: ValueKey(e.id),
-                    direction: DismissDirection.endToStart,
-                    confirmDismiss: (_) =>
-                        _confirmDeleteDialog(context, 'Delete expense?'),
-                    onDismissed: (_) async {
-                      try {
-                        await ref
-                            .read(tripRepositoryProvider)
-                            .deleteExpense(e.id);
-                        ref.invalidate(tripExpensesProvider(tripId));
-                      } catch (_) {
-                        ref.invalidate(tripExpensesProvider(tripId));
-                      }
-                    },
-                    background: _dismissBackground(),
-                    child: _ExpenseCard(expense: e, currency: currency),
+                children: [
+                  _LedgerSummary(
+                    tripId: tripId,
+                    expenses: expenses,
+                    total: total,
+                    byCategory: byCategory,
+                    currency: currency,
                   ),
-                ),
-              ],
-            );
-          },
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => ErrorRetry(
-            error: e,
-            onRetry: () => ref.invalidate(tripExpensesProvider(tripId)),
+                  const SizedBox(height: BrandSpace.md),
+                  ...expenses.map(
+                    (e) => Dismissible(
+                      key: ValueKey(e.id),
+                      direction: DismissDirection.endToStart,
+                      confirmDismiss: (_) =>
+                          _confirmDeleteDialog(context, 'Delete expense?'),
+                      onDismissed: (_) async {
+                        try {
+                          await ref
+                              .read(tripRepositoryProvider)
+                              .deleteExpense(e.id);
+                          ref.invalidate(tripExpensesProvider(tripId));
+                        } catch (_) {
+                          ref.invalidate(tripExpensesProvider(tripId));
+                        }
+                      },
+                      background: _dismissBackground(),
+                      child: _ExpenseCard(expense: e, currency: currency),
+                    ),
+                  ),
+                ],
+              );
+            },
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => ErrorRetry(
+              error: e,
+              onRetry: () => ref.invalidate(tripExpensesProvider(tripId)),
+            ),
           ),
         ),
         Positioned(

@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../core/widgets/pull_to_refresh.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -27,86 +30,98 @@ class AiConversationsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final conversations = ref.watch(aiConversationsProvider);
 
-    final body = conversations.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => ErrorRetry(
-        error: e,
-        onRetry: () => ref.invalidate(aiConversationsProvider),
-      ),
-      data: (items) {
-        if (items.isEmpty) {
-          return Center(
-            child: BrandEmptyState(
-              icon: Icons.smart_toy_outlined,
-              title: 'No conversations yet',
-              message: 'Ask the assistant to remember a place or plan a trip.',
-              action: BrandPrimaryButton(
-                label: 'Start a conversation',
-                expand: false,
-                onPressed: () => _openConversation(context, null),
-              ),
-            ),
-          );
-        }
-
-        return ListView.separated(
-          padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
-          itemCount: items.length,
-          separatorBuilder: (_, _) => const SizedBox(height: BrandSpace.sm),
-          itemBuilder: (context, index) {
-            final conversation = items[index];
-            return Dismissible(
-              key: ValueKey(conversation.id),
-              direction: DismissDirection.endToStart,
-              background: Container(
-                alignment: Alignment.centerRight,
-                padding: const EdgeInsets.symmetric(horizontal: BrandSpace.lg),
-                decoration: BoxDecoration(
-                  color: BrandColors.error,
-                  borderRadius: BrandRadii.podRadius,
-                ),
-                child: Icon(Icons.delete_outline, color: BrandColors.onPrimary),
-              ),
-              confirmDismiss: (_) => showAppConfirmDialog(
-                context,
-                title: 'Delete conversation?',
-                message: 'This conversation and its messages will be deleted.',
-                confirmLabel: 'Delete',
-                destructive: true,
-              ),
-              onDismissed: (_) async {
-                try {
-                  await ref
-                      .read(aiRepositoryProvider)
-                      .deleteConversation(conversation.id);
-                  ref.invalidate(aiConversationsProvider);
-                } catch (e) {
-                  // The tile is already gone from the list; refetch so a failed
-                  // delete doesn't leave it looking removed when it isn't.
-                  ref.invalidate(aiConversationsProvider);
-                  if (context.mounted) {
-                    showAppToast(context, friendlyError(e), error: true);
-                  }
-                }
-              },
-              child: BrandCard(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: BrandSpace.md,
-                  vertical: BrandSpace.xs,
-                ),
-                child: BrandListRow(
-                  icon: Icons.smart_toy_outlined,
-                  title: conversation.title,
-                  subtitle: DateFormat.yMMMd().add_jm().format(
-                    conversation.createdAt.toLocal(),
-                  ),
-                  onTap: () => _openConversation(context, conversation.id),
+    final body = PullToRefresh(
+      onRefresh: () => ref.refresh(aiConversationsProvider.future),
+      child: conversations.when(
+        skipLoadingOnReload: true,
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => ErrorRetry(
+          error: e,
+          onRetry: () => ref.invalidate(aiConversationsProvider),
+        ),
+        data: (items) {
+          if (items.isEmpty) {
+            return Center(
+              child: BrandEmptyState(
+                icon: Icons.smart_toy_outlined,
+                title: 'No conversations yet',
+                message:
+                    'Ask the assistant to remember a place or plan a trip.',
+                action: BrandPrimaryButton(
+                  label: 'Start a conversation',
+                  expand: false,
+                  onPressed: () => _openConversation(context, null),
                 ),
               ),
             );
-          },
-        );
-      },
+          }
+
+          return ListView.separated(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
+            itemCount: items.length,
+            separatorBuilder: (_, _) => const SizedBox(height: BrandSpace.sm),
+            itemBuilder: (context, index) {
+              final conversation = items[index];
+              return Dismissible(
+                key: ValueKey(conversation.id),
+                direction: DismissDirection.endToStart,
+                background: Container(
+                  alignment: Alignment.centerRight,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: BrandSpace.lg,
+                  ),
+                  decoration: BoxDecoration(
+                    color: BrandColors.error,
+                    borderRadius: BrandRadii.podRadius,
+                  ),
+                  child: Icon(
+                    Icons.delete_outline,
+                    color: BrandColors.onPrimary,
+                  ),
+                ),
+                confirmDismiss: (_) => showAppConfirmDialog(
+                  context,
+                  title: 'Delete conversation?',
+                  message:
+                      'This conversation and its messages will be deleted.',
+                  confirmLabel: 'Delete',
+                  destructive: true,
+                ),
+                onDismissed: (_) async {
+                  try {
+                    await ref
+                        .read(aiRepositoryProvider)
+                        .deleteConversation(conversation.id);
+                    ref.invalidate(aiConversationsProvider);
+                  } catch (e) {
+                    // The tile is already gone from the list; refetch so a failed
+                    // delete doesn't leave it looking removed when it isn't.
+                    ref.invalidate(aiConversationsProvider);
+                    if (context.mounted) {
+                      showAppToast(context, friendlyError(e), error: true);
+                    }
+                  }
+                },
+                child: BrandCard(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: BrandSpace.md,
+                    vertical: BrandSpace.xs,
+                  ),
+                  child: BrandListRow(
+                    icon: Icons.smart_toy_outlined,
+                    title: conversation.title,
+                    subtitle: DateFormat.yMMMd().add_jm().format(
+                      conversation.createdAt.toLocal(),
+                    ),
+                    onTap: () => _openConversation(context, conversation.id),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
     );
 
     if (!showAppBar) {

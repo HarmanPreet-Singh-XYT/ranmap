@@ -76,6 +76,43 @@ class ProfileRepository {
     }
   }
 
+  /// A single profile by id (public columns only), or null if it doesn't exist.
+  Future<Profile?> fetchById(String id) async {
+    final row = await _client
+        .from('profiles')
+        .select(kProfilePublicColumns)
+        .eq('id', id)
+        .maybeSingle();
+    return row == null ? null : Profile.fromJson(row);
+  }
+
+  /// Which of [groupIds] the user is an active member of — the groups held in
+  /// common when [groupIds] are the viewer's own.
+  Future<Set<String>> activeGroupIdsOf(
+    String userId,
+    List<String> groupIds,
+  ) async {
+    if (groupIds.isEmpty) return {};
+    final rows = await _client
+        .from('group_members')
+        .select('group_id')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .inFilter('group_id', groupIds);
+    return {for (final r in rows as List) r['group_id'] as String};
+  }
+
+  /// Which of [tripIds] the user is on.
+  Future<Set<String>> tripIdsOf(String userId, List<String> tripIds) async {
+    if (tripIds.isEmpty) return {};
+    final rows = await _client
+        .from('trip_members')
+        .select('trip_id')
+        .eq('user_id', userId)
+        .inFilter('trip_id', tripIds);
+    return {for (final r in rows as List) r['trip_id'] as String};
+  }
+
   /// A single profile by its exact handle, or null when no such user exists.
   /// Used where the handle is already known (e.g. an invite link's inviter) and
   /// a fuzzy search would be wasteful and could return a near-match.

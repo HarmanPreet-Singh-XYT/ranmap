@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../core/widgets/pull_to_refresh.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart' show DateFormat;
@@ -104,60 +107,71 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     return BrandScaffold(
       bottomSafeArea: false,
       header: const _ProfileBar(),
-      child: profileAsync.when(
-        data: (profile) {
-          if (profile == null) {
-            return Center(
-              child: BrandEmptyState(
-                icon: Icons.person_off_outlined,
-                title: 'No profile found',
-                message:
-                    'We couldn’t load your profile. Try again, and if it keeps '
-                    'happening, sign out and back in.',
-                action: BrandPrimaryButton(
-                  label: 'Retry',
-                  trailingIcon: null,
-                  expand: false,
-                  onPressed: () => ref.invalidate(myProfileProvider),
-                ),
-              ),
-            );
-          }
-          return ListView(
-            padding: const EdgeInsets.only(
-              top: BrandSpace.md,
-              bottom: BrandSpace.xl,
-            ),
-            children: [
-              _ProfileHeaderCard(profile: profile),
-              const SizedBox(height: BrandSpace.md),
-              _ProCard(
-                isPro: ref.watch(isProProvider),
-                isExtreme: ref.watch(isExtremeProvider),
-              ),
-              const SizedBox(height: BrandSpace.md),
-              const _PlanUsageCard(),
-              const SizedBox(height: BrandSpace.lg),
-              _VehicleGarage(
-                profile: profile,
-                selected: _pendingVehicle ?? profile.vehicleType,
-                switching: _switching,
-                onSelect: (id) => setState(() => _pendingVehicle = id),
-                onSwitch: () => _switchVehicle(profile, _pendingVehicle!),
-              ),
-              const SizedBox(height: BrandSpace.lg),
-              const _PilotRollup(),
-              const SizedBox(height: BrandSpace.lg),
-              const _MenuCard(),
-              const SizedBox(height: BrandSpace.lg),
-              _SignOutFooter(onSignOut: _signOut),
-            ],
-          );
+      child: PullToRefresh(
+        onRefresh: () {
+          ref.invalidate(myTripStatsProvider);
+          ref.invalidate(vehicleServiceProvider);
+          ref.invalidate(entitlementsProvider);
+          ref.invalidate(myGroupsProvider);
+          return ref.refresh(myProfileProvider.future);
         },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => ErrorRetry(
-          error: e,
-          onRetry: () => ref.invalidate(myProfileProvider),
+        child: profileAsync.when(
+          skipLoadingOnReload: true,
+          data: (profile) {
+            if (profile == null) {
+              return Center(
+                child: BrandEmptyState(
+                  icon: Icons.person_off_outlined,
+                  title: 'No profile found',
+                  message:
+                      'We couldn’t load your profile. Try again, and if it keeps '
+                      'happening, sign out and back in.',
+                  action: BrandPrimaryButton(
+                    label: 'Retry',
+                    trailingIcon: null,
+                    expand: false,
+                    onPressed: () => ref.invalidate(myProfileProvider),
+                  ),
+                ),
+              );
+            }
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.only(
+                top: BrandSpace.md,
+                bottom: BrandSpace.xl,
+              ),
+              children: [
+                _ProfileHeaderCard(profile: profile),
+                const SizedBox(height: BrandSpace.md),
+                _ProCard(
+                  isPro: ref.watch(isProProvider),
+                  isExtreme: ref.watch(isExtremeProvider),
+                ),
+                const SizedBox(height: BrandSpace.md),
+                const _PlanUsageCard(),
+                const SizedBox(height: BrandSpace.lg),
+                _VehicleGarage(
+                  profile: profile,
+                  selected: _pendingVehicle ?? profile.vehicleType,
+                  switching: _switching,
+                  onSelect: (id) => setState(() => _pendingVehicle = id),
+                  onSwitch: () => _switchVehicle(profile, _pendingVehicle!),
+                ),
+                const SizedBox(height: BrandSpace.lg),
+                const _PilotRollup(),
+                const SizedBox(height: BrandSpace.lg),
+                const _MenuCard(),
+                const SizedBox(height: BrandSpace.lg),
+                _SignOutFooter(onSignOut: _signOut),
+              ],
+            );
+          },
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => ErrorRetry(
+            error: e,
+            onRetry: () => ref.invalidate(myProfileProvider),
+          ),
         ),
       ),
     );
@@ -216,9 +230,9 @@ class _ProfileBar extends StatelessWidget {
             button: true,
             label: 'Settings',
             child: GestureDetector(
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-              ),
+              onTap: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
               behavior: HitTestBehavior.opaque,
               child: Container(
                 height: 48,
@@ -672,9 +686,7 @@ class _ProCard extends ConsumerWidget {
                         ),
                         children: [
                           TextSpan(
-                            text: isPro
-                                ? 'PRO ACCESS: '
-                                : 'UPGRADE FOR: ',
+                            text: isPro ? 'PRO ACCESS: ' : 'UPGRADE FOR: ',
                             style: BrandText.weight(
                               BrandText.labelSm,
                               700,

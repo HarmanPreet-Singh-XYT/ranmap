@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../core/widgets/pull_to_refresh.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -33,9 +36,8 @@ class _PhotoSpot {
   final List<MapPost> posts = [];
   String title = '';
 
-  DateTime get latest => posts
-      .map((p) => p.createdAt)
-      .reduce((a, b) => a.isAfter(b) ? a : b);
+  DateTime get latest =>
+      posts.map((p) => p.createdAt).reduce((a, b) => a.isAfter(b) ? a : b);
 }
 
 /// Every photo in one place, grouped by location. Each location is a
@@ -174,158 +176,164 @@ class _PhotoLibraryScreenState extends ConsumerState<PhotoLibraryScreen> {
         title: 'Photos',
         onBack: () => Navigator.of(context).maybePop(),
       ),
-      child: photosAsync.when(
-        loading: () => const Padding(
-          padding: EdgeInsets.symmetric(vertical: BrandSpace.md),
-          child: BrandSkeletonList(count: 5),
-        ),
-        error: (e, _) => ErrorRetry(
-          error: e,
-          onRetry: () => ref.invalidate(allPhotosProvider),
-        ),
-        data: (photos) {
-          final byId = {for (final p in photos) p.post.id: p};
-          final mineCount = photos.where((p) => p.isMine).length;
-          final scoped = [
-            for (final p in photos)
-              if (_scope == _Scope.all ||
-                  (_scope == _Scope.mine) == p.isMine)
-                p.post,
-          ];
-          final posts = scoped;
-          if (photos.isEmpty) {
-            return const Center(
-              child: BrandEmptyState(
-                icon: Icons.photo_library_outlined,
-                title: 'No photos yet',
-                message:
-                    'Hold a spot on the map and choose Photo to pin pictures there. They collect here, grouped by place.',
-              ),
-            );
-          }
-          final spots = _buildSpots(posts, trips, landmarks);
-          final hasOthers = photos.length > mineCount;
-          final q = _query.trim().toLowerCase();
-          final searching = q.isNotEmpty;
-
-          // When searching, each spot shows only its matching photos.
-          final visible = <({_PhotoSpot spot, List<MapPost> posts})>[];
-          for (final spot in spots) {
-            final hits = searching
-                ? [
-                    for (final p in spot.posts)
-                      if (_matches(p, spot, trips, byId, q)) p,
-                  ]
-                : spot.posts;
-            if (hits.isNotEmpty) visible.add((spot: spot, posts: hits));
-          }
-          final photoCount = visible.fold<int>(0, (n, e) => n + e.posts.length);
-
-          return Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(top: BrandSpace.md),
-                child: BrandTextField(
-                  controller: _search,
-                  hint: 'Search places, captions, trips…',
-                  leadingIcon: Icons.search_rounded,
-                  textInputAction: TextInputAction.search,
-                  onChanged: (v) => setState(() => _query = v),
-                  trailing: searching
-                      ? IconButton(
-                          tooltip: 'Clear',
-                          icon: Icon(
-                            Icons.close_rounded,
-                            color: BrandColors.textMuted,
-                          ),
-                          onPressed: () {
-                            _search.clear();
-                            setState(() => _query = '');
-                          },
-                        )
-                      : null,
+      child: PullToRefresh(
+        onRefresh: () => ref.refresh(allPhotosProvider.future),
+        child: photosAsync.when(
+          skipLoadingOnReload: true,
+          loading: () => const Padding(
+            padding: EdgeInsets.symmetric(vertical: BrandSpace.md),
+            child: BrandSkeletonList(count: 5),
+          ),
+          error: (e, _) => ErrorRetry(
+            error: e,
+            onRetry: () => ref.invalidate(allPhotosProvider),
+          ),
+          data: (photos) {
+            final byId = {for (final p in photos) p.post.id: p};
+            final mineCount = photos.where((p) => p.isMine).length;
+            final scoped = [
+              for (final p in photos)
+                if (_scope == _Scope.all || (_scope == _Scope.mine) == p.isMine)
+                  p.post,
+            ];
+            final posts = scoped;
+            if (photos.isEmpty) {
+              return const Center(
+                child: BrandEmptyState(
+                  icon: Icons.photo_library_outlined,
+                  title: 'No photos yet',
+                  message: 'Hold a spot on the map and choose Photo to pin pictures there. They collect here, grouped by place.',
                 ),
-              ),
-              if (hasOthers && mineCount > 0)
+              );
+            }
+            final spots = _buildSpots(posts, trips, landmarks);
+            final hasOthers = photos.length > mineCount;
+            final q = _query.trim().toLowerCase();
+            final searching = q.isNotEmpty;
+
+            // When searching, each spot shows only its matching photos.
+            final visible = <({_PhotoSpot spot, List<MapPost> posts})>[];
+            for (final spot in spots) {
+              final hits = searching
+                  ? [
+                      for (final p in spot.posts)
+                        if (_matches(p, spot, trips, byId, q)) p,
+                    ]
+                  : spot.posts;
+              if (hits.isNotEmpty) visible.add((spot: spot, posts: hits));
+            }
+            final photoCount = visible.fold<int>(
+              0,
+              (n, e) => n + e.posts.length,
+            );
+
+            return Column(
+              children: [
                 Padding(
-                  padding: const EdgeInsets.only(top: BrandSpace.sm),
-                  child: Row(
-                    children: [
-                      for (final (scope, label) in const [
-                        (_Scope.all, 'All'),
-                        (_Scope.mine, 'Mine'),
-                        (_Scope.others, 'From others'),
-                      ])
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ChoiceChip(
-                            label: Text(label),
-                            selected: _scope == scope,
-                            onSelected: (_) => setState(() => _scope = scope),
-                          ),
-                        ),
-                    ],
+                  padding: const EdgeInsets.only(top: BrandSpace.md),
+                  child: BrandTextField(
+                    controller: _search,
+                    hint: 'Search places, captions, trips…',
+                    leadingIcon: Icons.search_rounded,
+                    textInputAction: TextInputAction.search,
+                    onChanged: (v) => setState(() => _query = v),
+                    trailing: searching
+                        ? IconButton(
+                            tooltip: 'Clear',
+                            icon: Icon(
+                              Icons.close_rounded,
+                              color: BrandColors.textMuted,
+                            ),
+                            onPressed: () {
+                              _search.clear();
+                              setState(() => _query = '');
+                            },
+                          )
+                        : null,
                   ),
                 ),
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    searching
-                        ? '$photoCount ${photoCount == 1 ? 'photo' : 'photos'} in ${visible.length} ${visible.length == 1 ? 'place' : 'places'}'
-                        : '${posts.length} ${posts.length == 1 ? 'photo' : 'photos'} · ${spots.length} ${spots.length == 1 ? 'place' : 'places'}',
-                    style: BrandText.bodySm.copyWith(
-                      color: BrandColors.textMuted,
+                if (hasOthers && mineCount > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: BrandSpace.sm),
+                    child: Row(
+                      children: [
+                        for (final (scope, label) in const [
+                          (_Scope.all, 'All'),
+                          (_Scope.mine, 'Mine'),
+                          (_Scope.others, 'From others'),
+                        ])
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(label),
+                              selected: _scope == scope,
+                              onSelected: (_) => setState(() => _scope = scope),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      searching
+                          ? '$photoCount ${photoCount == 1 ? 'photo' : 'photos'} in ${visible.length} ${visible.length == 1 ? 'place' : 'places'}'
+                          : '${posts.length} ${posts.length == 1 ? 'photo' : 'photos'} · ${spots.length} ${spots.length == 1 ? 'place' : 'places'}',
+                      style: BrandText.bodySm.copyWith(
+                        color: BrandColors.textMuted,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              Expanded(
-                child: visible.isEmpty
-                    ? Center(
-                        child: BrandEmptyState(
-                          icon: Icons.search_off_rounded,
-                          title: 'No matches',
-                          message: searching
-                              ? 'Nothing matches "${_query.trim()}".'
-                              : 'No photos in this view.',
+                Expanded(
+                  child: visible.isEmpty
+                      ? Center(
+                          child: BrandEmptyState(
+                            icon: Icons.search_off_rounded,
+                            title: 'No matches',
+                            message: searching
+                                ? 'Nothing matches "${_query.trim()}".'
+                                : 'No photos in this view.',
+                          ),
+                        )
+                      : ListView.separated(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.only(bottom: BrandSpace.lg),
+                          itemCount: visible.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: BrandSpace.sm),
+                          itemBuilder: (context, i) {
+                            final entry = visible[i];
+                            final key =
+                                '${entry.spot.lat.toStringAsFixed(4)},${entry.spot.lng.toStringAsFixed(4)}';
+                            return _SpotSection(
+                              spot: entry.spot,
+                              shown: entry.posts,
+                              posterNames: {
+                                for (final p in entry.posts)
+                                  if (!(byId[p.id]?.isMine ?? true))
+                                    '@${p.posterUsername ?? 'someone'}',
+                              }.toList(),
+                              tripTitles: {
+                                for (final p in entry.spot.posts)
+                                  if (trips[p.tripId]?.title != null)
+                                    trips[p.tripId]!.title,
+                              }.toList(),
+                              // Searching opens every hit so results are visible.
+                              expanded: searching || _expanded.contains(key),
+                              onToggle: () => setState(() {
+                                if (!_expanded.add(key)) _expanded.remove(key);
+                              }),
+                            );
+                          },
                         ),
-                      )
-                    : ListView.separated(
-                        padding: const EdgeInsets.only(bottom: BrandSpace.lg),
-                        itemCount: visible.length,
-                        separatorBuilder: (_, _) =>
-                            const SizedBox(height: BrandSpace.sm),
-                        itemBuilder: (context, i) {
-                          final entry = visible[i];
-                          final key =
-                              '${entry.spot.lat.toStringAsFixed(4)},${entry.spot.lng.toStringAsFixed(4)}';
-                          return _SpotSection(
-                            spot: entry.spot,
-                            shown: entry.posts,
-                            posterNames: {
-                              for (final p in entry.posts)
-                                if (!(byId[p.id]?.isMine ?? true))
-                                  '@${p.posterUsername ?? 'someone'}',
-                            }.toList(),
-                            tripTitles: {
-                              for (final p in entry.spot.posts)
-                                if (trips[p.tripId]?.title != null)
-                                  trips[p.tripId]!.title,
-                            }.toList(),
-                            // Searching opens every hit so results are visible.
-                            expanded: searching || _expanded.contains(key),
-                            onToggle: () => setState(() {
-                              if (!_expanded.add(key)) _expanded.remove(key);
-                            }),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          );
-        },
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -357,7 +365,9 @@ class _SpotSection extends StatelessWidget {
     final subtitle = [
       '$count ${count == 1 ? 'photo' : 'photos'}',
       if (tripTitles.isNotEmpty)
-        tripTitles.length == 1 ? tripTitles.first : '${tripTitles.length} trips',
+        tripTitles.length == 1
+            ? tripTitles.first
+            : '${tripTitles.length} trips',
       if (posterNames.isNotEmpty)
         'by ${posterNames.length <= 2 ? posterNames.join(', ') : '${posterNames.length} others'}',
       latest,

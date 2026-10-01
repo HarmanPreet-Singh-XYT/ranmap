@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../core/feedback/app_feedback.dart';
 import 'dart:math' as math;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -193,6 +194,9 @@ class VoiceSession extends Notifier<VoiceSessionState> {
         micDenied: micDenied,
         error: null,
       );
+      // You're in — the same rising two-note cue Discord plays.
+      AppFeedback.medium();
+      AppFeedback.play(Sfx.voiceJoin);
     } catch (e) {
       if (room != null) await _dispose(room);
       if (generation != _generation) return;
@@ -241,6 +245,17 @@ class VoiceSession extends Notifier<VoiceSessionState> {
       final channel = state.channel;
       if (generation == _generation && channel != null) {
         _scheduleReconnect(generation, channel);
+      }
+    });
+    // Someone else joining or leaving the room, as an audible presence cue.
+    events.on<lk.ParticipantConnectedEvent>((_) {
+      if (generation == _generation) {
+        AppFeedback.play(Sfx.voiceJoin, volume: 0.5);
+      }
+    });
+    events.on<lk.ParticipantDisconnectedEvent>((_) {
+      if (generation == _generation) {
+        AppFeedback.play(Sfx.voiceLeave, volume: 0.5);
       }
     });
     // Fresh `audioLevel`s as members start/stop speaking.
@@ -308,10 +323,15 @@ class VoiceSession extends Notifier<VoiceSessionState> {
   /// the user straight back into the same trip's channel.
   Future<void> leave({bool byUser = true}) async {
     final channel = state.channel;
+    final wasConnected = state.status == VoiceStatus.connected;
     if (byUser && channel != null) _optedOut.add(channel.roomKey);
     _generation++;
     await _teardownRoom();
     state = const VoiceSessionState();
+    if (wasConnected) {
+      AppFeedback.light();
+      AppFeedback.play(Sfx.voiceLeave);
+    }
   }
 
   Future<String?> toggleMute() => _setMicrophone(muted: !state.muted);
@@ -349,6 +369,11 @@ class VoiceSession extends Notifier<VoiceSessionState> {
     }
     if (_room == null) return null;
     if (!keepState) {
+      // Mute/unmute blips, but not for push-to-talk's constant open/close.
+      if (!state.ptt && muted != state.muted) {
+        AppFeedback.selection();
+        AppFeedback.play(muted ? Sfx.mute : Sfx.unmute, volume: 0.6);
+      }
       state = state.copyWith(
         muted: muted,
         talking: talking ?? state.talking,

@@ -48,11 +48,13 @@ class GoogleMapsApiService {
     required Position origin,
     required Position destination,
     String? profile,
+    bool withSteps = false,
   }) async {
     final body = await _get('/maps/directions', {
       'origin': '${origin.lat},${origin.lng}',
       'destination': '${destination.lat},${destination.lng}',
       'profile': ?profile,
+      if (withSteps) 'steps': '1',
     });
 
     final routes = (body['routes'] as List? ?? const [])
@@ -65,6 +67,11 @@ class GoogleMapsApiService {
         durationSeconds: (route['durationSeconds'] as num?)?.toInt() ?? 0,
         encodedPolyline: polyline,
         points: decodePolyline(polyline),
+        steps: [
+          for (final step in (route['steps'] as List? ?? const []))
+            // One malformed step must not lose the whole route.
+            if (step is Map<String, dynamic>) ?_tryStep(step),
+        ],
       );
     }).toList();
 
@@ -72,6 +79,14 @@ class GoogleMapsApiService {
       throw Exception('No route found between those points.');
     }
     return options;
+  }
+
+  static RouteStep? _tryStep(Map<String, dynamic> json) {
+    try {
+      return RouteStep.fromJson(json);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Forward-geocodes a typed address or place name into candidate locations,

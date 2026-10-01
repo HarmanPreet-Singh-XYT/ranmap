@@ -94,6 +94,7 @@ class _TripChecklistTabState extends ConsumerState<TripChecklistTab> {
     final itemsAsync = ref.watch(tripChecklistProvider(widget.tripId));
 
     return itemsAsync.when(
+      skipLoadingOnReload: true,
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => ErrorRetry(
         error: e,

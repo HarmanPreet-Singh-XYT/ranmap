@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -62,6 +63,7 @@ class _TripListScreenState extends ConsumerState<TripListScreen> {
               padding: const EdgeInsets.only(top: BrandSpace.md, bottom: 96),
               children: [
                 invitesAsync.when(
+                  skipLoadingOnReload: true,
                   data: (invites) {
                     if (invites.isEmpty) return const SizedBox.shrink();
                     return Column(
@@ -91,6 +93,7 @@ class _TripListScreenState extends ConsumerState<TripListScreen> {
                   ),
                 ),
                 tripsAsync.when(
+                  skipLoadingOnReload: true,
                   data: (trips) {
                     if (trips.isEmpty) {
                       return _TripsEmptyState(onPlan: _newTrip);
@@ -163,15 +166,16 @@ class _TripListScreenState extends ConsumerState<TripListScreen> {
               ],
             ),
           ),
-          Positioned(
-            right: BrandSpace.md,
-            bottom: BrandSpace.md,
-            child: BrandFab(
-              icon: Icons.add_rounded,
-              tooltip: 'New trip',
-              onPressed: _newTrip,
+          if (tripsAsync.valueOrNull?.isNotEmpty ?? false)
+            Positioned(
+              right: BrandSpace.md,
+              bottom: BrandSpace.md,
+              child: BrandFab(
+                icon: Icons.add_rounded,
+                tooltip: 'New trip',
+                onPressed: _newTrip,
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -312,7 +316,9 @@ class _InviteCardState extends ConsumerState<_InviteCard> {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      await ref.read(tripRepositoryProvider).respondToInvite(
+      await ref
+          .read(tripRepositoryProvider)
+          .respondToInvite(
             tripId: widget.invite['trip_id'] as String,
             accept: accept,
           );
@@ -402,7 +408,8 @@ class _TripCardState extends ConsumerState<_TripCard> {
     setState(() => _busy = true);
     try {
       await ref.read(tripRepositoryProvider).startTrip(widget.trip.id);
-      ref.invalidate(myTripsProvider);
+      HapticFeedback.mediumImpact();
+      refreshTripData(ref, tripId: widget.trip.id);
     } catch (e) {
       if (mounted) showAppToast(context, friendlyError(e), error: true);
     } finally {
@@ -486,96 +493,151 @@ class _TripCardState extends ConsumerState<_TripCard> {
         context,
       ).push(MaterialPageRoute(builder: (_) => TripDetailScreen(trip: trip))),
       behavior: HitTestBehavior.opaque,
-      child: BrandCard(
-        padding: const EdgeInsets.all(BrandSpace.md),
-        child: Row(
-          children: [
-            Container(
-              height: 44,
-              width: 44,
-              decoration: BoxDecoration(
-                color: _tint(trip.status),
-                borderRadius: BrandRadii.miniRadius,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BrandRadii.podRadius,
+          border: trip.status == TripStatus.active
+              ? Border.all(color: BrandColors.primaryContainer, width: 1.5)
+              : null,
+        ),
+        child: BrandCard(
+          padding: const EdgeInsets.all(BrandSpace.md),
+          child: Row(
+            children: [
+              Container(
+                height: 44,
+                width: 44,
+                decoration: BoxDecoration(
+                  color: _tint(trip.status),
+                  borderRadius: BrandRadii.miniRadius,
+                ),
+                child: Icon(
+                  _statusIcon(trip.status),
+                  size: 22,
+                  color: BrandColors.primary,
+                ),
               ),
-              child: Icon(
-                _statusIcon(trip.status),
-                size: 22,
-                color: BrandColors.primary,
-              ),
-            ),
-            const SizedBox(width: BrandSpace.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    trip.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: BrandText.weight(
-                      BrandText.titleSm,
-                      700,
-                    ).copyWith(color: BrandColors.textHeadline),
-                  ),
-                  const SizedBox(height: 6),
-                  BrandPill(
-                    label: _statusLabel(trip.status),
-                    background: _pillBackground(trip.status),
-                    foreground: _pillForeground(trip.status),
-                    bold: true,
-                  ),
-                  if (trip.status == TripStatus.planned &&
-                      trip.scheduledStart != null) ...[
+              const SizedBox(width: BrandSpace.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      trip.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: BrandText.weight(
+                        BrandText.titleSm,
+                        700,
+                      ).copyWith(color: BrandColors.textHeadline),
+                    ),
                     const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.event_rounded,
-                          size: 14,
-                          color: BrandColors.textMuted,
-                        ),
-                        const SizedBox(width: BrandSpace.xs),
-                        Flexible(
-                          child: Text(
-                            DateFormat.yMMMd().add_jm().format(
-                              trip.scheduledStart!.toLocal(),
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: BrandText.bodySm.copyWith(
-                              color: BrandColors.textMuted,
+                    BrandPill(
+                      label: _statusLabel(trip.status),
+                      background: _pillBackground(trip.status),
+                      foreground: _pillForeground(trip.status),
+                      bold: true,
+                    ),
+                    if (_routeLabel(trip) != null) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.alt_route_rounded,
+                            size: 14,
+                            color: BrandColors.textMuted,
+                          ),
+                          const SizedBox(width: BrandSpace.xs),
+                          Flexible(
+                            child: Text(
+                              _routeLabel(trip)!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: BrandText.bodySm.copyWith(
+                                color: BrandColors.textBody,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
+                        ],
+                      ),
+                    ],
+                    if (_whenLabel(trip) != null) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.event_rounded,
+                            size: 14,
+                            color: BrandColors.textMuted,
+                          ),
+                          const SizedBox(width: BrandSpace.xs),
+                          Flexible(
+                            child: Text(
+                              _whenLabel(trip)!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: BrandText.bodySm.copyWith(
+                                color: BrandColors.textMuted,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-            const SizedBox(width: BrandSpace.sm),
-            if (trip.status == TripStatus.planned)
-              BrandPrimaryButton(
-                label: 'Start',
-                trailingIcon: null,
-                glow: false,
-                expand: false,
-                loading: _busy,
-                onPressed: _busy ? null : _start,
-              )
-            else
-              Icon(
-                trip.status == TripStatus.active
-                    ? Icons.navigation_rounded
-                    : Icons.chevron_right_rounded,
-                color: trip.status == TripStatus.active
-                    ? BrandColors.primaryContainer
-                    : BrandColors.textMuted,
-              ),
-          ],
+              const SizedBox(width: BrandSpace.sm),
+              if (trip.status == TripStatus.planned)
+                BrandPrimaryButton(
+                  label: 'Start',
+                  trailingIcon: null,
+                  glow: false,
+                  expand: false,
+                  loading: _busy,
+                  onPressed: _busy ? null : _start,
+                )
+              else
+                Icon(
+                  trip.status == TripStatus.active
+                      ? Icons.navigation_rounded
+                      : Icons.chevron_right_rounded,
+                  color: trip.status == TripStatus.active
+                      ? BrandColors.primaryContainer
+                      : BrandColors.textMuted,
+                ),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  /// "Toronto → Montreal", or just the destination when there's no origin.
+  static String? _routeLabel(Trip trip) {
+    final from = trip.originName?.trim();
+    final to = trip.destinationName?.trim();
+    final hasFrom = from != null && from.isNotEmpty;
+    final hasTo = to != null && to.isNotEmpty;
+    if (hasFrom && hasTo) return '$from → $to';
+    if (hasTo) return 'To $to';
+    return null;
+  }
+
+  /// When it starts / started / ended, in the words that fit its status.
+  static String? _whenLabel(Trip trip) {
+    String fmt(DateTime d) => DateFormat.yMMMd().add_jm().format(d.toLocal());
+    return switch (trip.status) {
+      TripStatus.planned =>
+        trip.scheduledStart == null
+            ? null
+            : 'Starts ${fmt(trip.scheduledStart!)}',
+      TripStatus.active =>
+        trip.startedAt == null ? null : 'Started ${fmt(trip.startedAt!)}',
+      TripStatus.completed =>
+        trip.endedAt == null ? null : 'Ended ${fmt(trip.endedAt!)}',
+      TripStatus.cancelled => null,
+    };
   }
 
   static Color _tint(TripStatus status) => switch (status) {

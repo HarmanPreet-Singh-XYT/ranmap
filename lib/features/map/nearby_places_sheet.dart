@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import '../../core/widgets/haptic_switch.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
@@ -264,7 +266,7 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
                   horizontal: 16,
                   vertical: 4,
                 ),
-                child: FSwitch(
+                child: HapticSwitch(
                   label: const Text('Search along the route'),
                   value: _alongRoute,
                   onChange: (v) {

@@ -126,7 +126,10 @@ class VehicleModelLayerManager {
           sourceId: _sourceId(pose.id),
           modelId: VehicleModels.modelIdFor(pose.vehicleType),
           modelType: ModelType.COMMON_3D,
-          modelScale: const <double?>[1, 1, 1],
+          // Viewport-scaled like the user's own puck (which uses 11 px/m), so
+          // teammates stay readable at any zoom — a touch smaller than "me".
+          modelScaleMode: ModelScaleMode.VIEWPORT,
+          modelScale: const <double?>[8, 8, 8],
           modelRotation: _rotation(pose),
           modelCastShadows: true,
         ),

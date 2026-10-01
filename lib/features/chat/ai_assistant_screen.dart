@@ -181,6 +181,7 @@ class _AiAssistantScreenState extends ConsumerState<AiAssistantScreen> {
         children: [
           Expanded(
             child: remoteMessages.when(
+              skipLoadingOnReload: true,
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => ErrorRetry(
                 error: e,
@@ -411,7 +412,14 @@ class _MessageBubble extends StatelessWidget {
             ),
             decoration: BoxDecoration(
               color: bg,
-              borderRadius: BrandRadii.cardRadius,
+              // A fixed bubble radius (not the card's large one, which turns a
+              // short "hi" into a circle); the sender's corner squares off.
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(18),
+                topRight: const Radius.circular(18),
+                bottomLeft: Radius.circular(isUser ? 18 : 5),
+                bottomRight: Radius.circular(isUser ? 5 : 18),
+              ),
             ),
             child: isUser
                 ? Text(

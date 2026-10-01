@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+
+import '../../core/widgets/pull_to_refresh.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme/brand_palette.dart';
 import '../../core/util/error_text.dart';
@@ -12,6 +14,7 @@ import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/saved_place.dart';
+import 'map_navigation.dart';
 import 'saved_place_providers.dart';
 
 /// A dedicated home for the places the user (or the AI copilot) has saved —
@@ -29,45 +32,50 @@ class SavedPlacesScreen extends ConsumerWidget {
         title: 'Saved places',
         onBack: () => Navigator.of(context).maybePop(),
       ),
-      child: placesAsync.when(
-        data: (places) {
-          if (places.isEmpty) {
-            return const Center(
-              child: BrandEmptyState(
-                icon: Icons.bookmark_border_rounded,
-                title: 'No saved places yet',
-                message: 'Tap a spot on the map and choose "Save this place", or ask the AI assistant to remember one. Your saved places collect here.',
-              ),
-            );
-          }
-          return ListView(
-            padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
-            children: [
-              BrandCard(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: BrandSpace.md,
-                  vertical: BrandSpace.xs,
+      child: PullToRefresh(
+        onRefresh: () => ref.refresh(savedPlacesProvider.future),
+        child: placesAsync.when(
+          skipLoadingOnReload: true,
+          data: (places) {
+            if (places.isEmpty) {
+              return const Center(
+                child: BrandEmptyState(
+                  icon: Icons.bookmark_border_rounded,
+                  title: 'No saved places yet',
+                  message: 'Tap a spot on the map and choose "Save this place", or ask the AI assistant to remember one. Your saved places collect here.',
                 ),
-                child: Column(
-                  children: [
-                    for (final (i, place) in places.indexed) ...[
-                      if (i > 0) const BrandRowDivider(),
-                      _SavedPlaceRow(
-                        place: place,
-                        onDelete: () => _delete(context, ref, place),
-                      ),
+              );
+            }
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(vertical: BrandSpace.sm),
+              children: [
+                BrandCard(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: BrandSpace.md,
+                    vertical: BrandSpace.xs,
+                  ),
+                  child: Column(
+                    children: [
+                      for (final (i, place) in places.indexed) ...[
+                        if (i > 0) const BrandRowDivider(),
+                        _SavedPlaceRow(
+                          place: place,
+                          onDelete: () => _delete(context, ref, place),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-              const LongPressHint(),
-            ],
-          );
-        },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => ErrorRetry(
-          error: e,
-          onRetry: () => ref.invalidate(savedPlacesProvider),
+                const LongPressHint(),
+              ],
+            );
+          },
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => ErrorRetry(
+            error: e,
+            onRetry: () => ref.invalidate(savedPlacesProvider),
+          ),
         ),
       ),
     );
@@ -95,14 +103,14 @@ class SavedPlacesScreen extends ConsumerWidget {
   }
 }
 
-class _SavedPlaceRow extends StatelessWidget {
+class _SavedPlaceRow extends ConsumerWidget {
   const _SavedPlaceRow({required this.place, required this.onDelete});
 
   final SavedPlace place;
   final VoidCallback onDelete;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final point = place.point;
     final subtitle = place.notes?.isNotEmpty == true
         ? place.notes
@@ -118,7 +126,13 @@ class _SavedPlaceRow extends StatelessWidget {
       showChevron: false,
       onTap: point == null
           ? null
-          : () => _openDirections(context, point.lat, point.lng),
+          : () => navigateInApp(
+              context,
+              ref,
+              name: place.name,
+              lat: point.lat,
+              lng: point.lng,
+            ),
       onLongPress: () => showAppActionSheet(
         context,
         title: place.name,
@@ -128,7 +142,13 @@ class _SavedPlaceRow extends StatelessWidget {
             AppSheetAction(
               label: 'Directions',
               icon: Icons.directions_rounded,
-              onSelected: () => _openDirections(context, point.lat, point.lng),
+              onSelected: () => navigateInApp(
+                context,
+                ref,
+                name: place.name,
+                lat: point.lat,
+                lng: point.lng,
+              ),
             ),
           AppSheetAction(
             label: 'Remove saved place',
@@ -139,30 +159,5 @@ class _SavedPlaceRow extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  /// Hands coordinates off to the native Google Maps app for directions, the
-  /// same hand-off the live-teammate sheet uses.
-  Future<void> _openDirections(
-    BuildContext context,
-    double lat,
-    double lng,
-  ) async {
-    final uri = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
-    );
-    try {
-      final launched = await launchUrl(
-        uri,
-        mode: LaunchMode.externalApplication,
-      );
-      if (!launched && context.mounted) {
-        showAppToast(context, 'Could not open Google Maps.', error: true);
-      }
-    } catch (_) {
-      if (context.mounted) {
-        showAppToast(context, 'Could not open Google Maps.', error: true);
-      }
-    }
   }
 }

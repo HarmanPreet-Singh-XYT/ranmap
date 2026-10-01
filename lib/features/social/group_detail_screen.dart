@@ -1,4 +1,7 @@
 import 'dart:async';
+import '../../core/widgets/haptic_switch.dart';
+
+import '../../core/widgets/pull_to_refresh.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -35,6 +38,7 @@ import '../map/group_convoy_screen.dart';
 import '../premium/paywall.dart';
 import '../premium/premium_providers.dart';
 import 'social_providers.dart';
+import 'user_profile_screen.dart';
 
 class GroupDetailScreen extends ConsumerWidget {
   const GroupDetailScreen({super.key, required this.group});
@@ -529,40 +533,81 @@ class GroupDetailScreen extends ConsumerWidget {
       ),
       child: Stack(
         children: [
-          membersAsync.when(
-            data: (_) => ListView(
-              padding: const EdgeInsets.only(top: BrandSpace.sm, bottom: 96),
-              children: [
-                _GroupIdentityCard(group: group, memberCount: active.length),
-                const SizedBox(height: BrandSpace.md),
-                _CapacityCard(groupId: group.id, count: active.length),
-                const SizedBox(height: BrandSpace.md),
-                BrandCard(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: BrandSpace.md,
-                    vertical: BrandSpace.xs,
-                  ),
-                  child: BrandListRow(
-                    icon: Icons.share_location_rounded,
-                    iconColor: BrandColors.primary,
-                    title: 'Live convoy',
-                    subtitle: 'See your crew live, share location, send SOS',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => GroupConvoyScreen(
-                          groupId: group.id,
-                          groupName: group.name,
+          PullToRefresh(
+            onRefresh: () => Future.wait([
+              ref.refresh(groupProvider(group.id).future),
+              ref.refresh(groupMembersProvider(group.id).future),
+            ]),
+            child: membersAsync.when(
+              skipLoadingOnReload: true,
+              data: (_) => ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.only(top: BrandSpace.sm, bottom: 96),
+                children: [
+                  _GroupIdentityCard(group: group, memberCount: active.length),
+                  const SizedBox(height: BrandSpace.md),
+                  _CapacityCard(groupId: group.id, count: active.length),
+                  const SizedBox(height: BrandSpace.md),
+                  BrandCard(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: BrandSpace.md,
+                      vertical: BrandSpace.xs,
+                    ),
+                    child: BrandListRow(
+                      icon: Icons.share_location_rounded,
+                      iconColor: BrandColors.primary,
+                      title: 'Live convoy',
+                      subtitle: 'See your crew live, share location, send SOS',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => GroupConvoyScreen(
+                            groupId: group.id,
+                            groupName: group.name,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-                if (isAdmin && pending.isNotEmpty) ...[
+                  if (isAdmin && pending.isNotEmpty) ...[
+                    const SizedBox(height: BrandSpace.lg),
+                    BrandSectionHeader(
+                      icon: Icons.how_to_reg_rounded,
+                      title: 'Join requests',
+                      trailing: BrandPill(
+                        label: '${pending.length}',
+                        bold: true,
+                      ),
+                    ),
+                    const SizedBox(height: BrandSpace.sm),
+                    BrandCard(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: BrandSpace.md,
+                        vertical: BrandSpace.xs,
+                      ),
+                      child: Column(
+                        children: [
+                          for (final (i, m) in pending.indexed) ...[
+                            if (i > 0) const BrandRowDivider(),
+                            _memberTile(
+                              context,
+                              ref,
+                              m,
+                              isAdmin: isAdmin,
+                              isOwnerViewer: isOwner,
+                              myUid: myUid,
+                              ownerId: group.ownerId,
+                              isPending: true,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: BrandSpace.lg),
                   BrandSectionHeader(
-                    icon: Icons.how_to_reg_rounded,
-                    title: 'Join requests',
-                    trailing: BrandPill(label: '${pending.length}', bold: true),
+                    icon: Icons.groups_rounded,
+                    title: 'Members',
+                    trailing: BrandPill(label: '${active.length}'),
                   ),
                   const SizedBox(height: BrandSpace.sm),
                   BrandCard(
@@ -572,7 +617,7 @@ class GroupDetailScreen extends ConsumerWidget {
                     ),
                     child: Column(
                       children: [
-                        for (final (i, m) in pending.indexed) ...[
+                        for (final (i, m) in active.indexed) ...[
                           if (i > 0) const BrandRowDivider(),
                           _memberTile(
                             context,
@@ -582,119 +627,90 @@ class GroupDetailScreen extends ConsumerWidget {
                             isOwnerViewer: isOwner,
                             myUid: myUid,
                             ownerId: group.ownerId,
-                            isPending: true,
                           ),
                         ],
                       ],
                     ),
                   ),
-                ],
-                const SizedBox(height: BrandSpace.lg),
-                BrandSectionHeader(
-                  icon: Icons.groups_rounded,
-                  title: 'Members',
-                  trailing: BrandPill(label: '${active.length}'),
-                ),
-                const SizedBox(height: BrandSpace.sm),
-                BrandCard(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: BrandSpace.md,
-                    vertical: BrandSpace.xs,
+                  const SizedBox(height: BrandSpace.lg),
+                  _InviteCard(
+                    group: group,
+                    isAdmin: isAdmin,
+                    onChanged: () => _refresh(ref),
                   ),
-                  child: Column(
-                    children: [
-                      for (final (i, m) in active.indexed) ...[
-                        if (i > 0) const BrandRowDivider(),
-                        _memberTile(
-                          context,
-                          ref,
-                          m,
-                          isAdmin: isAdmin,
-                          isOwnerViewer: isOwner,
-                          myUid: myUid,
-                          ownerId: group.ownerId,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                const SizedBox(height: BrandSpace.lg),
-                _InviteCard(
-                  group: group,
-                  isAdmin: isAdmin,
-                  onChanged: () => _refresh(ref),
-                ),
-                if (isAdmin) ...[
+                  if (isAdmin) ...[
+                    const SizedBox(height: BrandSpace.lg),
+                    BrandCard(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: BrandSpace.md,
+                        vertical: BrandSpace.xs,
+                      ),
+                      child: BrandListRow(
+                        icon: Icons.edit_outlined,
+                        title: 'Edit group',
+                        subtitle: 'Name, description and avatar',
+                        onTap: () => _editGroup(context, ref, group),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: BrandSpace.lg),
                   BrandCard(
                     padding: const EdgeInsets.symmetric(
                       horizontal: BrandSpace.md,
                       vertical: BrandSpace.xs,
                     ),
-                    child: BrandListRow(
-                      icon: Icons.edit_outlined,
-                      title: 'Edit group',
-                      subtitle: 'Name, description and avatar',
-                      onTap: () => _editGroup(context, ref, group),
+                    child: Column(
+                      children: [
+                        if (isOwner && otherActive.isNotEmpty) ...[
+                          BrandListRow(
+                            icon: Icons.workspace_premium_outlined,
+                            iconColor: BrandColors.primary,
+                            title: 'Transfer ownership',
+                            subtitle: 'Hand the group to another member',
+                            onTap: () =>
+                                _pickNewOwner(context, ref, otherActive),
+                          ),
+                          const BrandRowDivider(),
+                        ],
+                        BrandListRow(
+                          icon: isOwner
+                              ? Icons.door_front_door_outlined
+                              : Icons.logout_rounded,
+                          title: 'Leave group',
+                          subtitle: isOwner
+                              ? 'Transfer first, or delete if you are the last one'
+                              : 'You will no longer see this group',
+                          onTap: () => _leave(
+                            context,
+                            ref,
+                            group,
+                            isOwner: isOwner,
+                            others: otherActive,
+                          ),
+                        ),
+                        if (isOwner) ...[
+                          const BrandRowDivider(),
+                          BrandListRow(
+                            icon: Icons.delete_outline_rounded,
+                            iconBackground: BrandColors.errorContainer,
+                            iconColor: BrandColors.error,
+                            titleColor: BrandColors.error,
+                            title: 'Delete group',
+                            subtitle:
+                                'Permanently deletes the group for everyone',
+                            onTap: () => _deleteGroup(context, ref),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ],
-                const SizedBox(height: BrandSpace.lg),
-                BrandCard(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: BrandSpace.md,
-                    vertical: BrandSpace.xs,
-                  ),
-                  child: Column(
-                    children: [
-                      if (isOwner && otherActive.isNotEmpty) ...[
-                        BrandListRow(
-                          icon: Icons.workspace_premium_outlined,
-                          iconColor: BrandColors.primary,
-                          title: 'Transfer ownership',
-                          subtitle: 'Hand the group to another member',
-                          onTap: () => _pickNewOwner(context, ref, otherActive),
-                        ),
-                        const BrandRowDivider(),
-                      ],
-                      BrandListRow(
-                        icon: isOwner
-                            ? Icons.door_front_door_outlined
-                            : Icons.logout_rounded,
-                        title: 'Leave group',
-                        subtitle: isOwner
-                            ? 'Transfer first, or delete if you are the last one'
-                            : 'You will no longer see this group',
-                        onTap: () => _leave(
-                          context,
-                          ref,
-                          group,
-                          isOwner: isOwner,
-                          others: otherActive,
-                        ),
-                      ),
-                      if (isOwner) ...[
-                        const BrandRowDivider(),
-                        BrandListRow(
-                          icon: Icons.delete_outline_rounded,
-                          iconBackground: BrandColors.errorContainer,
-                          iconColor: BrandColors.error,
-                          titleColor: BrandColors.error,
-                          title: 'Delete group',
-                          subtitle:
-                              'Permanently deletes the group for everyone',
-                          onTap: () => _deleteGroup(context, ref),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) => ErrorRetry(
-              error: e,
-              onRetry: () => ref.invalidate(groupMembersProvider(group.id)),
+              ),
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => ErrorRetry(
+                error: e,
+                onRetry: () => ref.invalidate(groupMembersProvider(group.id)),
+              ),
             ),
           ),
           // Only an admin may add members (RLS enforces it too), and the FAB
@@ -772,6 +788,9 @@ class GroupDetailScreen extends ConsumerWidget {
       seed: seed,
       username: username,
       isMe: userId == myUid,
+      onAvatarTap: userId == null
+          ? null
+          : () => openUserProfile(context, userId),
       trailing: trailing,
       onTap: isPending
           ? null
@@ -962,7 +981,7 @@ class _InviteCard extends ConsumerWidget {
                   subtitle: 'Review each person before they join',
                   showChevron: false,
                   onTap: null,
-                  trailing: FSwitch(
+                  trailing: HapticSwitch(
                     value: group.inviteRequiresApproval,
                     onChange: (v) => _setApproval(context, ref, v),
                   ),
@@ -1053,8 +1072,11 @@ class _MemberRow extends StatelessWidget {
     required this.trailing,
     this.isMe = false,
     this.onTap,
+    this.onAvatarTap,
   });
 
+  /// Opens the member's profile.
+  final VoidCallback? onAvatarTap;
   final String seed;
   final String username;
   final Widget trailing;
@@ -1070,11 +1092,14 @@ class _MemberRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: Row(
           children: [
-            AvatarView(
-              seed: seed,
-              size: 40,
-              background: BrandColors.surfaceContainerLow,
-              accentColor: BrandColors.primary,
+            GestureDetector(
+              onTap: onAvatarTap,
+              child: AvatarView(
+                seed: seed,
+                size: 40,
+                background: BrandColors.surfaceContainerLow,
+                accentColor: BrandColors.primary,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -1215,6 +1240,7 @@ class _EditGroupSheetState extends ConsumerState<_EditGroupSheet> {
   Widget build(BuildContext context) {
     return BrandSheetSurface(
       child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../core/widgets/haptic_switch.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:forui/forui.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 
 import '../../core/theme/brand_palette.dart';
@@ -262,7 +262,7 @@ class _PttToggle extends StatelessWidget {
               ),
             ),
           ),
-          FSwitch(value: value, onChange: onChanged),
+          HapticSwitch(value: value, onChange: onChanged),
         ],
       ),
     );

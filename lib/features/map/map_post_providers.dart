@@ -12,6 +12,12 @@ final mapPostRepositoryProvider = Provider<MapPostRepository>(
   (ref) => MapPostRepository(),
 );
 
+/// Every photo the current user has pinned, trip or not, so a pin dropped on a
+/// quiet Sunday is still on their map.
+final myMapPostsProvider = FutureProvider.autoDispose<List<MapPost>>(
+  (ref) => ref.watch(mapPostRepositoryProvider).myPosts(),
+);
+
 final tripMapPostsProvider = FutureProvider.autoDispose
     .family<List<MapPost>, String>((ref, tripId) {
       return ref.watch(mapPostRepositoryProvider).postsForTrip(tripId);

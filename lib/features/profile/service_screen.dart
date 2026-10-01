@@ -81,8 +81,7 @@ class ServiceScreen extends ConsumerWidget {
           child: BrandEmptyState(
             icon: Icons.workspace_premium_rounded,
             title: 'Service reminders are a Ranmap Pro feature.',
-            message:
-                'Track your maintenance interval from logged trip distance and get a due badge before it is overdue.',
+            message: 'Track your maintenance interval from logged trip distance and get a due badge before it is overdue.',
             tint: BrandColors.accentPeach,
             action: BrandPrimaryButton(
               label: 'Upgrade to Pro',
@@ -106,6 +105,7 @@ class ServiceScreen extends ConsumerWidget {
         onBack: () => Navigator.of(context).maybePop(),
       ),
       child: serviceAsync.when(
+        skipLoadingOnReload: true,
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => ErrorRetry(
           error: e,

@@ -10,6 +10,16 @@ final authStateProvider = StreamProvider<AuthState>((ref) {
   return SupabaseService.auth.onAuthStateChange;
 });
 
+/// The signed-in user's id (null when signed out). Providers that cache
+/// per-account data watch this so an account switch can't show the previous
+/// user's plan, preferences or selections.
+final currentUserIdProvider = Provider<String?>((ref) {
+  final fromStream = ref.watch(
+    authStateProvider.select((a) => a.valueOrNull?.session?.user.id),
+  );
+  return fromStream ?? SupabaseService.currentUser?.id;
+});
+
 /// The current user's `profiles` row, or null if they haven't finished
 /// onboarding (username + avatar) yet.
 final myProfileProvider = FutureProvider<Profile?>((ref) async {

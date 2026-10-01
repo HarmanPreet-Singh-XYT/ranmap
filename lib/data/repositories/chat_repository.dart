@@ -94,6 +94,29 @@ class ChatRepository {
     await _client.from('chat_messages').delete().eq('id', messageId);
   }
 
+  /// When the *other* member of a direct conversation last opened it (null if
+  /// never) — what turns a sent message's tick blue.
+  Future<DateTime?> peerLastReadAt(String conversationId) async {
+    final me = SupabaseService.currentUserId;
+    final rows = await _client
+        .from('conversation_reads')
+        .select('last_read_at')
+        .eq('conversation_id', conversationId)
+        .neq('user_id', me)
+        .limit(1);
+    final list = rows as List;
+    if (list.isEmpty) return null;
+    return DateTime.tryParse(list.first['last_read_at'] as String? ?? '');
+  }
+
+  /// Records that the current user has seen everything in the conversation.
+  Future<void> markConversationRead(String conversationId) async {
+    await _client.rpc(
+      'mark_conversation_read',
+      params: {'p_conv': conversationId},
+    );
+  }
+
   /// The direct-message inbox, most recent first.
   Future<List<DirectConversation>> myConversations() async {
     final data = await _client.rpc('my_conversations');

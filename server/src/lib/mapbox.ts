@@ -13,6 +13,26 @@ export interface NormalizedRoute {
   distanceMeters: number;
   durationSeconds: number;
   polyline: string;
+  /** Turn-by-turn maneuvers, present only when the caller asked for steps. */
+  steps?: NormalizedStep[];
+}
+
+/** One maneuver of a route (Mapbox `step` with its `maneuver`). */
+export interface NormalizedStep {
+  /** Human instruction for the maneuver, e.g. "Turn left onto Main Street". */
+  instruction: string;
+  /** Mapbox maneuver type: turn, depart, arrive, roundabout, merge, fork… */
+  type: string;
+  /** left | right | slight left | sharp right | straight | uturn, when relevant. */
+  modifier: string | null;
+  /** The road this step travels along after the maneuver. */
+  name: string;
+  /** Length of the step, from this maneuver to the next. */
+  distanceMeters: number;
+  durationSeconds: number;
+  /** Where the maneuver happens. */
+  lat: number;
+  lng: number;
 }
 
 /** How much a stop adds to the drive, in provider terms. */
@@ -62,7 +82,10 @@ export function mapboxProfileForMode(mode: string): string | null {
 const CODE_OK = "Ok";
 const CODE_NO_ROUTE = "NoRoute";
 
-export function normalizeDirections(body: unknown): NormalizedRoute[] | null {
+export function normalizeDirections(
+  body: unknown,
+  includeSteps = false,
+): NormalizedRoute[] | null {
   const response = asRecord(body);
   if (!response) return null;
 
@@ -91,9 +114,41 @@ export function normalizeDirections(body: unknown): NormalizedRoute[] | null {
       distanceMeters: toRoundedNumber(route.distance),
       durationSeconds: toRoundedNumber(route.duration),
       polyline: geometry,
+      ...(includeSteps ? { steps: normalizeSteps(legs) } : {}),
     });
   }
   return routes;
+}
+
+/** Flattens every leg's steps into one ordered list of maneuvers. */
+function normalizeSteps(legs: unknown[]): NormalizedStep[] {
+  const out: NormalizedStep[] = [];
+  for (const legEntry of legs) {
+    const rawSteps = asRecord(legEntry)?.steps;
+    if (!Array.isArray(rawSteps)) continue;
+    for (const stepEntry of rawSteps) {
+      const step = asRecord(stepEntry);
+      const maneuver = asRecord(step?.maneuver);
+      if (!step || !maneuver) continue;
+      // Mapbox maneuver locations are [lng, lat].
+      const location = maneuver.location;
+      if (!Array.isArray(location) || location.length < 2) continue;
+      const lng = location[0];
+      const lat = location[1];
+      if (typeof lat !== "number" || typeof lng !== "number") continue;
+      out.push({
+        instruction: typeof maneuver.instruction === "string" ? maneuver.instruction : "",
+        type: typeof maneuver.type === "string" ? maneuver.type : "turn",
+        modifier: typeof maneuver.modifier === "string" ? maneuver.modifier : null,
+        name: typeof step.name === "string" ? step.name : "",
+        distanceMeters: toRoundedNumber(step.distance),
+        durationSeconds: toRoundedNumber(step.duration),
+        lat,
+        lng,
+      });
+    }
+  }
+  return out;
 }
 
 /**

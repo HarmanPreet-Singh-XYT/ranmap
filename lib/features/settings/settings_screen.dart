@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/widgets/haptic_switch.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -126,12 +127,23 @@ class SettingsScreen extends ConsumerWidget {
               ),
               const BrandRowDivider(),
               BrandListRow(
+                icon: Icons.visibility_off_rounded,
+                title: 'Minimal map',
+                subtitle: 'Hide the controls, cards and tab bar on the map',
+                onTap: null,
+                trailing: HapticSwitch(
+                  value: settings.mapMinimal,
+                  onChange: notifier.setMapMinimal,
+                ),
+              ),
+              const BrandRowDivider(),
+              BrandListRow(
                 icon: Icons.apartment_rounded,
                 title: '3D buildings',
                 // Only the switch toggles: a row onTap plus the switch's own
                 // onChange could both fire for one tap and cancel out.
                 onTap: null,
-                trailing: FSwitch(
+                trailing: HapticSwitch(
                   value: settings.mapThreeD,
                   onChange: notifier.setMapThreeD,
                 ),
@@ -141,7 +153,7 @@ class SettingsScreen extends ConsumerWidget {
                 icon: Icons.landscape_rounded,
                 title: 'Terrain',
                 onTap: null,
-                trailing: FSwitch(
+                trailing: HapticSwitch(
                   value: settings.mapTerrain,
                   onChange: notifier.setMapTerrain,
                 ),
@@ -311,7 +323,7 @@ class SettingsScreen extends ConsumerWidget {
                 subtitle: 'Broadcast your position to the active trip',
                 // Only the switch toggles, matching the 3D/terrain rows.
                 onTap: null,
-                trailing: FSwitch(
+                trailing: HapticSwitch(
                   value: settings.shareLocation,
                   onChange: notifier.setShareLocation,
                 ),
@@ -320,11 +332,33 @@ class SettingsScreen extends ConsumerWidget {
               BrandListRow(
                 icon: Icons.headset_mic_rounded,
                 title: 'Auto-join trip voice',
-                subtitle: 'Join the convoy voice channel when a trip starts',
+                subtitle: 'Off: you get a prompt to join when a trip starts',
                 onTap: null,
-                trailing: FSwitch(
+                trailing: HapticSwitch(
                   value: settings.voiceAutoJoin,
                   onChange: notifier.setVoiceAutoJoin,
+                ),
+              ),
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: Icons.volume_up_rounded,
+                title: 'Sound effects',
+                subtitle: 'Message, voice and navigation sounds',
+                onTap: null,
+                trailing: HapticSwitch(
+                  value: settings.soundEffects,
+                  onChange: notifier.setSoundEffects,
+                ),
+              ),
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: Icons.vibration_rounded,
+                title: 'Haptic feedback',
+                subtitle: 'Vibrate on taps, toggles and events',
+                onTap: null,
+                trailing: HapticSwitch(
+                  value: settings.haptics,
+                  onChange: notifier.setHaptics,
                 ),
               ),
               const BrandRowDivider(),
@@ -333,7 +367,7 @@ class SettingsScreen extends ConsumerWidget {
                 title: 'Keep screen on during trips',
                 subtitle: 'Stops the screen sleeping while a trip is active',
                 onTap: null,
-                trailing: FSwitch(
+                trailing: HapticSwitch(
                   value: settings.keepScreenOn,
                   onChange: notifier.setKeepScreenOn,
                 ),
@@ -606,6 +640,7 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
         ref
             .watch(notificationPreferencesProvider)
             .when(
+              skipLoadingOnReload: true,
               loading: () => const Padding(
                 padding: EdgeInsets.symmetric(vertical: 16),
                 child: Center(child: FCircularProgress(size: .sm)),
@@ -621,7 +656,7 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
                       icon: Icons.mail_outline_rounded,
                       title: 'Trip invites',
                       subtitle: 'When someone invites you to a trip',
-                      trailing: FSwitch(
+                      trailing: HapticSwitch(
                         value: prefs.tripInvites,
                         onChange: (v) =>
                             _update(prefs.copyWith(tripInvites: v)),
@@ -632,7 +667,7 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
                       icon: Icons.forum_outlined,
                       title: 'Chat messages',
                       subtitle: 'New messages in your trip and group channels',
-                      trailing: FSwitch(
+                      trailing: HapticSwitch(
                         value: prefs.chatMessages,
                         onChange: (v) =>
                             _update(prefs.copyWith(chatMessages: v)),
@@ -644,7 +679,7 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
                       title: 'Group invites',
                       subtitle:
                           'When you are added to a group or approved to join',
-                      trailing: FSwitch(
+                      trailing: HapticSwitch(
                         value: prefs.groupInvites,
                         onChange: (v) =>
                             _update(prefs.copyWith(groupInvites: v)),
@@ -655,7 +690,7 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
                       icon: Icons.sos_rounded,
                       title: 'Convoy alerts',
                       subtitle: 'SOS and regroup signals from your crew',
-                      trailing: FSwitch(
+                      trailing: HapticSwitch(
                         value: prefs.convoyAlerts,
                         onChange: (v) =>
                             _update(prefs.copyWith(convoyAlerts: v)),
@@ -666,7 +701,7 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
                       icon: Icons.route_outlined,
                       title: 'Trip updates',
                       subtitle: 'When a scheduled trip starts',
-                      trailing: FSwitch(
+                      trailing: HapticSwitch(
                         value: prefs.tripUpdates,
                         onChange: (v) =>
                             _update(prefs.copyWith(tripUpdates: v)),

@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../core/widgets/pull_to_refresh.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/brand_palette.dart';
@@ -29,41 +32,47 @@ class GroupPhotosScreen extends ConsumerWidget {
         title: 'Crew photos',
         onBack: () => Navigator.of(context).maybePop(),
       ),
-      child: postsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => ErrorRetry(
-          error: e,
-          onRetry: () => ref.invalidate(groupSharedPostsProvider(groupId)),
-        ),
-        data: (posts) {
-          if (posts.isEmpty) {
-            return Center(
-              child: SingleChildScrollView(
-                child: BrandEmptyState(
-                  imageAsset: 'assets/images/onboarding/welcome_memories.jpg',
-                  icon: Icons.photo_library_rounded,
-                  title: 'Crew Photo Vault',
-                  message:
-                      'Photos shared with $groupName will appear in this collaborative road trip album. Snap moments directly on the live map.',
+      child: PullToRefresh(
+        onRefresh: () => ref.refresh(groupSharedPostsProvider(groupId).future),
+        child: postsAsync.when(
+          skipLoadingOnReload: true,
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => ErrorRetry(
+            error: e,
+            onRetry: () => ref.invalidate(groupSharedPostsProvider(groupId)),
+          ),
+          data: (posts) {
+            if (posts.isEmpty) {
+              return Center(
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  child: BrandEmptyState(
+                    imageAsset: 'assets/images/onboarding/welcome_memories.jpg',
+                    icon: Icons.photo_library_rounded,
+                    title: 'Crew Photo Vault',
+                    message:
+                        'Photos shared with $groupName will appear in this collaborative road trip album. Snap moments directly on the live map.',
+                  ),
                 ),
+              );
+            }
+            return GridView.builder(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(vertical: BrandSpace.md),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+              ),
+              itemCount: posts.length,
+              itemBuilder: (context, i) => MapPhotoTile(
+                post: posts[i],
+                stack: posts,
+                borderRadius: BrandRadii.miniRadius,
               ),
             );
-          }
-          return GridView.builder(
-            padding: const EdgeInsets.symmetric(vertical: BrandSpace.md),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-            ),
-            itemCount: posts.length,
-            itemBuilder: (context, i) => MapPhotoTile(
-              post: posts[i],
-              stack: posts,
-              borderRadius: BrandRadii.miniRadius,
-            ),
-          );
-        },
+          },
+        ),
       ),
     );
   }
@@ -82,41 +91,46 @@ class SharedWithMePhotosScreen extends ConsumerWidget {
         title: 'Shared with me',
         onBack: () => Navigator.of(context).maybePop(),
       ),
-      child: postsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => ErrorRetry(
-          error: e,
-          onRetry: () => ref.invalidate(sharedWithMePostsProvider),
-        ),
-        data: (posts) {
-          if (posts.isEmpty) {
-            return Center(
-              child: SingleChildScrollView(
-                child: BrandEmptyState(
-                  imageAsset: 'assets/images/onboarding/welcome_memories.jpg',
-                  icon: Icons.photo_library_rounded,
-                  title: 'Nothing shared yet',
-                  message:
-                      'Photos your friends share with you directly will show up here.',
+      child: PullToRefresh(
+        onRefresh: () => ref.refresh(sharedWithMePostsProvider.future),
+        child: postsAsync.when(
+          skipLoadingOnReload: true,
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => ErrorRetry(
+            error: e,
+            onRetry: () => ref.invalidate(sharedWithMePostsProvider),
+          ),
+          data: (posts) {
+            if (posts.isEmpty) {
+              return Center(
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  child: BrandEmptyState(
+                    imageAsset: 'assets/images/onboarding/welcome_memories.jpg',
+                    icon: Icons.photo_library_rounded,
+                    title: 'Nothing shared yet',
+                    message: 'Photos your friends share with you directly will show up here.',
+                  ),
                 ),
+              );
+            }
+            return GridView.builder(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(vertical: BrandSpace.md),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+              ),
+              itemCount: posts.length,
+              itemBuilder: (context, i) => MapPhotoTile(
+                post: posts[i],
+                stack: posts,
+                borderRadius: BrandRadii.miniRadius,
               ),
             );
-          }
-          return GridView.builder(
-            padding: const EdgeInsets.symmetric(vertical: BrandSpace.md),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-            ),
-            itemCount: posts.length,
-            itemBuilder: (context, i) => MapPhotoTile(
-              post: posts[i],
-              stack: posts,
-              borderRadius: BrandRadii.miniRadius,
-            ),
-          );
-        },
+          },
+        ),
       ),
     );
   }

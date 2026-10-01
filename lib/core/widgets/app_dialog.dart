@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../feedback/app_feedback.dart';
 import 'package:forui/forui.dart';
 
 import 'brand/brand_sheet_surface.dart';
@@ -15,6 +16,12 @@ Future<bool> showAppConfirmDialog(
   String cancelLabel = 'Cancel',
   bool destructive = false,
 }) async {
+  // A destructive prompt gets a weightier tap so it can't be missed.
+  if (destructive) {
+    AppFeedback.heavy();
+  } else {
+    AppFeedback.light();
+  }
   final result = await showFDialog<bool>(
     context: context,
     builder: (context, style, animation) => FDialog(

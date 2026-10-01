@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/models/group.dart';
+import '../../data/models/trip.dart';
+import '../trip/trip_providers.dart';
 import '../../data/models/profile.dart';
 import '../../data/providers/repository_providers.dart';
 import '../../data/repositories/friend_repository.dart';
@@ -74,4 +76,42 @@ final groupMembersProvider = FutureProvider.autoDispose
 final groupInvitePreviewProvider = FutureProvider.autoDispose
     .family<GroupInvitePreview?, String>((ref, code) {
       return ref.watch(groupRepositoryProvider).invitePreview(code);
+    });
+
+/// Another user's public profile (null when they don't exist).
+final publicProfileProvider = FutureProvider.autoDispose
+    .family<Profile?, String>(
+      (ref, userId) => ref.watch(profileRepositoryProvider).fetchById(userId),
+    );
+
+/// The friendship row between the viewer and [userId] (any status), or null.
+final friendshipWithProvider = FutureProvider.autoDispose
+    .family<Map<String, dynamic>?, String>(
+      (ref, userId) => ref.watch(friendRepositoryProvider).friendshipWith(userId),
+    );
+
+/// Groups both the viewer and [userId] are active members of.
+final commonGroupsProvider = FutureProvider.autoDispose
+    .family<List<Group>, String>((ref, userId) async {
+      final mine = await ref.watch(myGroupsProvider.future);
+      final theirs = await ref
+          .watch(profileRepositoryProvider)
+          .activeGroupIdsOf(userId, [for (final g in mine) g.id]);
+      return [
+        for (final g in mine)
+          if (theirs.contains(g.id)) g,
+      ];
+    });
+
+/// Trips both the viewer and [userId] are on.
+final commonTripsProvider = FutureProvider.autoDispose
+    .family<List<Trip>, String>((ref, userId) async {
+      final mine = await ref.watch(myTripsProvider.future);
+      final theirs = await ref
+          .watch(profileRepositoryProvider)
+          .tripIdsOf(userId, [for (final t in mine) t.id]);
+      return [
+        for (final t in mine)
+          if (theirs.contains(t.id)) t,
+      ];
     });

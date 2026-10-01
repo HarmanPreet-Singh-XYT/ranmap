@@ -52,6 +52,7 @@ dependencies:
   flutter_markdown_plus: ^1.0.12
   gal: ^2.3.3
   wakelock_plus: ^1.8.0
+  audioplayers: ^6.8.1
 
 dev_dependencies:
   flutter_test:
@@ -63,6 +64,7 @@ flutter:
   assets:
     - .env
     - assets/models/
+    - assets/sounds/
     - assets/images/onboarding/
     - assets/images/tour/
     - assets/images/paywall/

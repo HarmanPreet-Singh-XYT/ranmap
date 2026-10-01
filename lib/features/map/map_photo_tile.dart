@@ -61,6 +61,7 @@ class MapPhotoTile extends ConsumerWidget {
             fit: StackFit.expand,
             children: [
               urlAsync.when(
+                skipLoadingOnReload: true,
                 loading: () =>
                     ColoredBox(color: BrandColors.surfaceContainerLow),
                 error: (_, _) => const _BrokenThumb(),

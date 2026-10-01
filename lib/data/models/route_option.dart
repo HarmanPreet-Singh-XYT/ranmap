@@ -1,5 +1,48 @@
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
+/// One maneuver of a route: what to do, where, and how far until the next one.
+class RouteStep {
+  const RouteStep({
+    required this.instruction,
+    required this.type,
+    this.modifier,
+    this.name = '',
+    required this.distanceMeters,
+    required this.durationSeconds,
+    required this.lat,
+    required this.lng,
+  });
+
+  /// "Turn left onto Oak Avenue".
+  final String instruction;
+
+  /// Mapbox maneuver type: `depart`, `turn`, `arrive`, `roundabout`, `merge`…
+  final String type;
+
+  /// `left`, `right`, `slight left`, `sharp right`, `straight`, `uturn`.
+  final String? modifier;
+
+  /// The road after the maneuver.
+  final String name;
+
+  /// Length from this maneuver to the next.
+  final double distanceMeters;
+  final double durationSeconds;
+  final double lat;
+  final double lng;
+
+  factory RouteStep.fromJson(Map<String, dynamic> json) => RouteStep(
+    instruction: json['instruction'] as String? ?? '',
+    type: json['type'] as String? ?? 'turn',
+    modifier: json['modifier'] as String?,
+    name: json['name'] as String? ?? '',
+    distanceMeters: (json['distanceMeters'] as num?)?.toDouble() ?? 0,
+    durationSeconds: (json['durationSeconds'] as num?)?.toDouble() ?? 0,
+    lat: (json['lat'] as num).toDouble(),
+    lng: (json['lng'] as num).toDouble(),
+  );
+}
+
 /// One candidate route between two points, from the Directions API.
 class RouteOption {
   final String summary;
@@ -8,12 +51,17 @@ class RouteOption {
   final String encodedPolyline;
   final List<Position> points;
 
+  /// Turn-by-turn maneuvers, when the route was requested with steps. Empty for
+  /// planning-only routes; the navigator then derives turns from [points].
+  final List<RouteStep> steps;
+
   const RouteOption({
     required this.summary,
     required this.distanceMeters,
     required this.durationSeconds,
     required this.encodedPolyline,
     required this.points,
+    this.steps = const [],
   });
 
   /// Formatted distance, e.g. "12.4 km" or "850 m".

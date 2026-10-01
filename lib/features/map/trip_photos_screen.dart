@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../core/widgets/pull_to_refresh.dart';
+
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -38,54 +41,59 @@ class TripPhotosScreen extends ConsumerWidget {
         title: '$tripTitle photos',
         onBack: () => Navigator.of(context).maybePop(),
       ),
-      child: postsAsync.when(
-        loading: () => const Padding(
-          padding: EdgeInsets.symmetric(vertical: BrandSpace.md),
-          child: BrandSkeletonList(count: 5),
-        ),
-        error: (e, _) => ErrorRetry(
-          error: e,
-          onRetry: () => ref.invalidate(tripMapPostsProvider(tripId)),
-        ),
-        data: (posts) {
-          return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // The vault quota header — same list the grid renders, so the
-                  // count can never drift from what's on screen.
-                  _PhotoQuotaHeader(count: posts.length),
-                  const SizedBox(height: BrandSpace.md),
-                  Expanded(
-                    child: posts.isEmpty
-                        ? const Center(
-                            child: BrandEmptyState(
-                              imageAsset: 'assets/images/onboarding/welcome_memories.jpg',
-                              icon: Icons.photo_library_outlined,
-                              title: 'No photos pinned yet',
-                              message: 'Capture memories and pin photos from the map during your drive to build your trip gallery.',
+      child: PullToRefresh(
+        onRefresh: () => ref.refresh(tripMapPostsProvider(tripId).future),
+        child: postsAsync.when(
+          skipLoadingOnReload: true,
+          loading: () => const Padding(
+            padding: EdgeInsets.symmetric(vertical: BrandSpace.md),
+            child: BrandSkeletonList(count: 5),
+          ),
+          error: (e, _) => ErrorRetry(
+            error: e,
+            onRetry: () => ref.invalidate(tripMapPostsProvider(tripId)),
+          ),
+          data: (posts) {
+            return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // The vault quota header — same list the grid renders, so the
+                    // count can never drift from what's on screen.
+                    _PhotoQuotaHeader(count: posts.length),
+                    const SizedBox(height: BrandSpace.md),
+                    Expanded(
+                      child: posts.isEmpty
+                          ? const Center(
+                              child: BrandEmptyState(
+                                imageAsset: 'assets/images/onboarding/welcome_memories.jpg',
+                                icon: Icons.photo_library_outlined,
+                                title: 'No photos pinned yet',
+                                message: 'Capture memories and pin photos from the map during your drive to build your trip gallery.',
+                              ),
+                            )
+                          : GridView.builder(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              padding: const EdgeInsets.symmetric(
+                                vertical: BrandSpace.sm,
+                              ),
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: 3,
+                                    mainAxisSpacing: 8,
+                                    crossAxisSpacing: 8,
+                                  ),
+                              itemCount: posts.length,
+                              itemBuilder: (context, i) =>
+                                  MapPhotoTile(post: posts[i], stack: posts),
                             ),
-                          )
-                        : GridView.builder(
-                            padding: const EdgeInsets.symmetric(
-                              vertical: BrandSpace.sm,
-                            ),
-                            gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: 3,
-                                  mainAxisSpacing: 8,
-                                  crossAxisSpacing: 8,
-                                ),
-                            itemCount: posts.length,
-                            itemBuilder: (context, i) =>
-                                MapPhotoTile(post: posts[i], stack: posts),
-                          ),
-                  ),
-                ],
-              )
-              .animate()
-              .fadeIn(duration: 300.ms)
-              .slideY(begin: 0.04, end: 0, curve: Curves.easeOutCubic);
-        },
+                    ),
+                  ],
+                )
+                .animate()
+                .fadeIn(duration: 300.ms)
+                .slideY(begin: 0.04, end: 0, curve: Curves.easeOutCubic);
+          },
+        ),
       ),
     );
   }

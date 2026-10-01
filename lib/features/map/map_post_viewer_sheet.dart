@@ -443,6 +443,7 @@ class _PostImage extends ConsumerWidget {
     return ClipRRect(
       borderRadius: BrandRadii.cardRadius,
       child: signedUrlAsync.when(
+        skipLoadingOnReload: true,
         loading: () => SizedBox(
           height: 240,
           child: Center(

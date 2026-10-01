@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../feedback/app_feedback.dart';
+
 import '../../theme/brand_palette.dart';
 import '../../theme/brand_typography.dart';
 
@@ -20,6 +22,7 @@ class BrandListRow extends StatelessWidget {
     this.showChevron = true,
     this.titleColor,
     this.iconBackgroundColor,
+    this.leading,
   });
 
   final IconData icon;
@@ -41,6 +44,9 @@ class BrandListRow extends StatelessWidget {
   final Color? titleColor;
   final Color? iconBackgroundColor;
 
+  /// Replaces the icon circle (e.g. a person's avatar).
+  final Widget? leading;
+
   @override
   Widget build(BuildContext context) {
     final bg =
@@ -48,23 +54,29 @@ class BrandListRow extends StatelessWidget {
         iconBackgroundColor ??
         BrandColors.surfaceContainerLow;
     return GestureDetector(
-      onTap: onTap,
+      onTap: onTap == null
+          ? null
+          : () {
+              AppFeedback.tap();
+              onTap!();
+            },
       onLongPress: onLongPress,
       behavior: HitTestBehavior.opaque,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: Row(
           children: [
-            Container(
-              height: 40,
-              width: 40,
-              decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
-              child: Icon(
-                icon,
-                size: 20,
-                color: iconColor ?? BrandColors.textHeadline,
-              ),
-            ),
+            leading ??
+                Container(
+                  height: 40,
+                  width: 40,
+                  decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
+                  child: Icon(
+                    icon,
+                    size: 20,
+                    color: iconColor ?? BrandColors.textHeadline,
+                  ),
+                ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(

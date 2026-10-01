@@ -6,6 +6,7 @@ import 'package:forui/forui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../../core/feedback/app_feedback.dart';
 import '../../core/router/auth_state_provider.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/app_toast.dart';
@@ -14,6 +15,8 @@ import '../../core/providers/settings_provider.dart';
 import '../chat/chat_hub_screen.dart';
 import '../chat/chat_providers.dart';
 import '../chat/voice_mini_bar.dart';
+import '../map/map_navigation.dart';
+import 'realtime_sync.dart';
 import '../chat/voice_session.dart';
 import '../premium/paywall_gate.dart';
 import '../social/invite_landing_screen.dart';
@@ -74,8 +77,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       if (!mounted) return;
       final voice = ref.read(voiceSessionProvider.notifier);
       if (next != null && next.id != previous?.id) {
-        if (!ref.read(appSettingsProvider).voiceAutoJoin) return;
         final channel = ChatChannel.trip(next.id);
+        if (!ref.read(appSettingsProvider).voiceAutoJoin) {
+          _offerVoice(channel, next.title);
+          return;
+        }
         if (voice.wasLeftByUser(channel)) return;
         // Don't yank someone out of a call they started elsewhere.
         final current = ref.read(voiceSessionProvider);
@@ -88,6 +94,31 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         }
       }
     });
+  }
+
+  /// Voice is opt-in: when a trip starts without auto-join, offer a one-tap join
+  /// instead of connecting everyone's mic and speaker unasked.
+  void _offerVoice(ChatChannel channel, String title) {
+    final voice = ref.read(voiceSessionProvider.notifier);
+    if (voice.wasLeftByUser(channel)) return;
+    if (ref.read(voiceSessionProvider).inCall) return;
+    showFToast(
+      context: context,
+      title: const Text('Trip started'),
+      description: const Text('Join the convoy voice channel?'),
+      icon: const Icon(Icons.headset_mic_rounded),
+      alignment: FToastAlignment.bottomCenter,
+      duration: const Duration(seconds: 8),
+      suffixBuilder: (context, entry) => FButton(
+        variant: FButtonVariant.outline,
+        size: FButtonSizeVariant.sm,
+        onPress: () {
+          entry.dismiss();
+          unawaited(voice.join(channel, title: title));
+        },
+        child: const Text('Join'),
+      ),
+    );
   }
 
   /// The last wake-lock state pushed to the platform.
@@ -240,6 +271,19 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // future in [_decideLandingTab], which doesn't hold a subscription of its
     // own).
     ref.watch(myTripsProvider);
+    // Live updates: friend requests, trips, groups and notifications refresh as
+    // they change, not on the next app launch.
+    ref.watch(realtimeSyncProvider);
+    // "Navigate here" raised anywhere (chat location, saved place) lands on the
+    // map, which draws the route in-app.
+    ref.listen(mapNavRequestProvider, (_, next) {
+      if (next == null) return;
+      setState(() {
+        _index = _mapTab;
+        _visited.add(_mapTab);
+        _userNavigated = true;
+      });
+    });
     // A pending invite can arrive (or the profile resolve) after the first
     // frame; offer it once both are ready.
     ref.listen(myProfileProvider, (_, next) {
@@ -265,6 +309,28 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // Always-on voice: join the trip's channel when it goes active, and drop
     // out when it ends.
     ref.listen(activeTripProvider, (previous, next) {
+      // Sharing is on by default for every new trip: a pause from an earlier
+      // trip must not leave this crew invisible until someone digs into Settings.
+      final started = next.valueOrNull;
+      final before = previous?.valueOrNull;
+      // Trip lifecycle fanfares: only on a real transition, not first load.
+      if (previous != null && previous.hasValue) {
+        if (before == null && started != null) {
+          AppFeedback.success();
+          AppFeedback.play(Sfx.tripStart);
+        } else if (before != null && started == null) {
+          AppFeedback.medium();
+          AppFeedback.play(Sfx.tripEnd);
+        }
+      }
+      if (started != null && started.id != previous?.valueOrNull?.id) {
+        final settings = ref.read(appSettingsProvider);
+        if (!settings.shareLocation) {
+          Future.microtask(
+            () => ref.read(appSettingsProvider.notifier).setShareLocation(true),
+          );
+        }
+      }
       _syncVoiceToActiveTrip(previous?.valueOrNull, next.valueOrNull);
     });
     // The provider may already hold an active trip when the shell mounts (a
@@ -283,35 +349,50 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final requestCount =
         ref.watch(incomingRequestsProvider).valueOrNull?.length ?? 0;
 
+    // Minimal map: the tab bar steps out of the way on the map tab (tapping the
+    // eye button there brings everything back).
+    final hideNav =
+        _index == _mapTab &&
+        ref.watch(appSettingsProvider.select((s) => s.mapMinimal));
+
     return FScaffold(
       // Screens own their own padding/background (the map especially).
       childPad: false,
-      footer: FBottomNavigationBar(
-        index: _index,
-        onChange: (i) => setState(() {
-          _index = i;
-          _visited.add(i);
-          _userNavigated = true;
-        }),
-        children: [
-          const FBottomNavigationBarItem(
-            icon: Icon(Icons.map_rounded),
-            label: Text('Map'),
-          ),
-          FBottomNavigationBarItem(
-            icon: _NavBadge(count: inviteCount, icon: Icons.route_rounded),
-            label: const Text('Trips'),
-          ),
-          const FBottomNavigationBarItem(
-            icon: Icon(Icons.chat_bubble_rounded),
-            label: Text('Chat'),
-          ),
-          FBottomNavigationBarItem(
-            icon: _NavBadge(count: requestCount, icon: Icons.person_rounded),
-            label: const Text('Profile'),
-          ),
-        ],
-      ),
+      footer: hideNav
+          ? null
+          : FBottomNavigationBar(
+              index: _index,
+              onChange: (i) => setState(() {
+                if (i != _index) AppFeedback.selection();
+                _index = i;
+                _visited.add(i);
+                _userNavigated = true;
+              }),
+              children: [
+                const FBottomNavigationBarItem(
+                  icon: Icon(Icons.map_rounded),
+                  label: Text('Map'),
+                ),
+                FBottomNavigationBarItem(
+                  icon: _NavBadge(
+                    count: inviteCount,
+                    icon: Icons.route_rounded,
+                  ),
+                  label: const Text('Trips'),
+                ),
+                const FBottomNavigationBarItem(
+                  icon: Icon(Icons.chat_bubble_rounded),
+                  label: Text('Chat'),
+                ),
+                FBottomNavigationBarItem(
+                  icon: _NavBadge(
+                    count: requestCount,
+                    icon: Icons.person_rounded,
+                  ),
+                  label: const Text('Profile'),
+                ),
+              ],
+            ),
       // Surfaces the non-Pro paywall once after onboarding and weekly after.
       child: Column(
         children: [

@@ -1,9 +1,11 @@
 import 'dart:async';
+
+import '../../core/widgets/haptic_switch.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:forui/forui.dart';
 // `Position` is geolocator's (latitude/longitude); the map engine's own
 // `Position` (GeoJSON) is hidden so `Geo.pos` can still be used for the
 // navigate-to-member hand-off.
@@ -32,6 +34,7 @@ import '../social/group_photos_screen.dart';
 import '../social/social_providers.dart';
 import 'live_sync_providers.dart';
 import 'map_engine/map_engine.dart' hide LocationSettings, Position;
+import 'map_navigation.dart';
 import 'navigate_to_member_sheet.dart';
 
 /// A crew member's live state in the convoy roster.
@@ -335,6 +338,7 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
           ),
           const SizedBox(height: BrandSpace.sm),
           membersAsync.when(
+            skipLoadingOnReload: true,
             loading: () => const Padding(
               padding: EdgeInsets.all(BrandSpace.lg),
               child: Center(child: CircularProgressIndicator()),
@@ -386,6 +390,7 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
           BrandSectionHeader(icon: Icons.campaign_rounded, title: 'Alerts'),
           const SizedBox(height: BrandSpace.sm),
           alertsAsync.when(
+            skipLoadingOnReload: true,
             // Never hide this section on failure: a silent blank could read as
             // "no active alerts" when an SOS or regroup is actually pending.
             loading: () => const Padding(
@@ -499,7 +504,15 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
               context,
               destination: Geo.pos(loc.lat, loc.lng),
               username: username,
+              userId: userId,
               vehicleType: profile?['vehicle_type'] as String?,
+              onNavigate: () => navigateInApp(
+                context,
+                ref,
+                name: '@$username',
+                lat: loc.lat,
+                lng: loc.lng,
+              ),
             ),
       behavior: HitTestBehavior.opaque,
       child: Padding(
@@ -599,7 +612,7 @@ class _GroupConvoyScreenState extends ConsumerState<GroupConvoyScreen> {
         subtitle: subtitle,
         showChevron: false,
         onTap: null,
-        trailing: FSwitch(value: effective, onChange: _toggleSharing),
+        trailing: HapticSwitch(value: effective, onChange: _toggleSharing),
       ),
     );
   }

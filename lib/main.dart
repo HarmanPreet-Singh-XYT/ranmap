@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/app.dart';
+import 'core/feedback/app_feedback.dart';
 import 'core/providers/app_prefs_provider.dart';
 import 'core/push/push_service.dart';
 import 'core/storage/secure_store.dart';
@@ -30,6 +31,8 @@ Future<void> main() async {
   // is configured and otherwise becomes a no-op. It never prompts for
   // permission here — that waits until the user asks (Settings → Notifications).
   await configurePush();
+  // Sets the shared audio context (no focus stealing) for UI sound effects.
+  unawaited(AppFeedback.init());
   // Keep RevenueCat's identity in lockstep with Supabase auth, so a purchase is
   // attributed to the right profile (and the webhook can find it). On sign-in,
   // also refresh this device's push token for the new user.

@@ -14,6 +14,7 @@ import 'package:geolocator/geolocator.dart' hide Position;
 import '../../core/constants/avatars.dart';
 import '../../core/constants/defaults.dart';
 import '../../core/router/auth_state_provider.dart';
+import '../../core/feedback/app_feedback.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
@@ -57,6 +58,9 @@ import 'nearby_places_sheet.dart';
 import 'navigate_to_member_sheet.dart';
 import 'offline_maps_screen.dart';
 import 'place_details_sheet.dart';
+import 'map_navigation.dart';
+import 'navigation/nav_engine.dart';
+import 'navigation/nav_widgets.dart';
 import 'saved_place_providers.dart';
 import 'saved_places_screen.dart';
 
@@ -116,6 +120,32 @@ class _MapScreenState extends ConsumerState<MapScreen>
   final _vehicles = VehicleModelLayerManager();
   final _beam = HeadlightBeam();
 
+  /// The teammate the camera is locked onto, or null. Released by dragging the
+  /// map, recentring on yourself, or the teammate dropping off the live feed.
+  String? _followingUserId;
+
+  // --- turn-by-turn navigation ---------------------------------------------
+  NavEngine? _navEngine;
+  NavProgress? _nav;
+  bool _navFollow = true;
+  bool _rerouting = false;
+  int _offRouteFixes = 0;
+  DateTime? _lastReroute;
+  (double, double)? _navLastFix;
+  int? _announcedStep; // next-maneuver index already chimed at ~180 m
+  int? _closeStep; // ...and at ~40 m
+
+  /// Latest own position and trip destination, captured in build so navigation
+  /// requests (which arrive outside build) can route from where you are now.
+  double? _deviceLat;
+  double? _deviceLng;
+  NearbyPlace? _navDestination;
+
+  /// When the member-target route was last (re)fetched, to throttle refreshes
+  /// as the teammate moves.
+  DateTime? _memberRouteAt;
+  (double, double)? _followLast;
+
   /// The most recent GPS course (degrees) seen while moving.
   double? _lastCourse;
 
@@ -173,10 +203,21 @@ class _MapScreenState extends ConsumerState<MapScreen>
   /// load started (or the screen went away) meanwhile.
   int _styleGeneration = 0;
 
+  /// Annotation managers the native map still owns. A native call on a manager
+  /// the SDK already dropped (a style reload, the map view being rebuilt) throws
+  /// on the platform thread and kills the app — Dart's try/catch can't intercept
+  /// it — so every call is gated on [_live] immediately beforehand.
+  final Set<PointAnnotationManager> _liveManagers = {};
+
+  bool _live(PointAnnotationManager? manager) =>
+      manager != null && mounted && _liveManagers.contains(manager);
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // A request raised before the map tab existed (e.g. from a chat message).
+    WidgetsBinding.instance.addPostFrameCallback((_) => _consumeNavRequest());
     // Map defaults come from Settings; changes there are applied live below.
     final settings = ref.read(appSettingsProvider);
     _style = RanmapMapStyle.fromId(settings.mapStyleId);
@@ -278,6 +319,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
   /// Disposes the annotation managers (and their tap subscriptions). Their
   /// sources/layers vanish with the style anyway.
   Future<void> _disposeAnnotationManagers() async {
+    _liveManagers.clear();
     _photoTapCancel?.cancel();
     _photoTapCancel = null;
     _photoPoints = null;
@@ -314,6 +356,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
     // Created last so teammate pins draw above the other markers.
     final teammatePoints = await map.annotations.createPointAnnotationManager();
     if (generation != _styleGeneration || !mounted) return;
+    _liveManagers.addAll([photoPoints, savedPlacePoints, teammatePoints]);
 
     _photoTapCancel = photoPoints.tapEvents(onTap: _onPhotoTap);
     _teammateTapCancel = teammatePoints.tapEvents(onTap: _onTeammateTap);
@@ -530,7 +573,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
   /// Selects [place] (from the nearby list, a tapped POI, or a long-press) and
   /// shows its card with a Directions action.
-  Future<void> _selectPlace(NearbyPlace place) async {
+  Future<void> _selectPlace(NearbyPlace place, {bool fly = true}) async {
     if (!mounted) return;
     _previewToken++;
     setState(() {
@@ -540,7 +583,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
       _previewLoading = false;
       _previewError = null;
     });
-    await _mapKey.currentState?.flyTo(place.location, zoom: kPlaceZoom);
+    if (fly) {
+      await _mapKey.currentState?.flyTo(place.location, zoom: kPlaceZoom);
+    }
   }
 
   void _clearSelectedPlace() {
@@ -700,7 +745,11 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
   /// Fetches routes from the user's position to the selected place and draws
   /// the best one highlighted on the map.
-  Future<void> _previewDirections(double lat, double lng) async {
+  Future<void> _previewDirections(
+    double lat,
+    double lng, {
+    bool fit = true,
+  }) async {
     final place = _selectedPlace;
     if (place == null || _previewLoading) return;
 
@@ -728,14 +777,20 @@ class _MapScreenState extends ConsumerState<MapScreen>
         origin: Geo.pos(lat, lng),
         destination: place.location,
         profile: modes.contains(vehicle) ? vehicle : null,
+        withSteps: true,
       );
       // Cancelled (or another place chosen) while the request was in flight.
       if (!mounted || token != _previewToken) return;
       setState(() {
         _previewRoutes = routes;
         _previewIndex = 0;
+        // A teammate we're navigating to moved: follow the fresh route.
+        if (_navEngine != null) {
+          _navEngine = NavEngine(routes.first);
+          _nav = _navEngine!.update(lat, lng);
+        }
       });
-      unawaited(_fitRoute(routes.first.points));
+      if (fit) unawaited(_fitRoute(routes.first.points));
     } catch (e) {
       if (mounted && token == _previewToken) {
         setState(() => _previewError = friendlyError(e));
@@ -751,13 +806,18 @@ class _MapScreenState extends ConsumerState<MapScreen>
   /// or an unnamed POI would only spend a search on a garbage text query.
   bool _canShowDetails(NearbyPlace place) =>
       !place.placeId.startsWith('pin:') &&
+      !_isNavTarget(place) &&
       place.name.isNotEmpty &&
       place.name != 'Place' &&
       place.name != 'Dropped pin';
 
   /// Opens the rich details sheet for a place already selected on the map
   /// (a tapped POI or dropped pin), routing to it if the user asks.
-  Future<void> _openPlaceDetails(NearbyPlace place, double lat, double lng) async {
+  Future<void> _openPlaceDetails(
+    NearbyPlace place,
+    double lat,
+    double lng,
+  ) async {
     if (!_canShowDetails(place)) return;
     final action = await showPlaceDetailsSheet(context, place);
     if (!mounted || action == null) return;
@@ -1016,9 +1076,13 @@ class _MapScreenState extends ConsumerState<MapScreen>
   Widget build(BuildContext context) {
     // Apply Settings changes (map style / 3D / terrain) to the live map.
     ref.listen(appSettingsProvider, (_, next) => _applySettings(next));
+    ref.listen(mapNavRequestProvider, (_, next) {
+      if (next != null) _consumeNavRequest();
+    });
     final permissionAsync = ref.watch(locationPermissionProvider);
 
     return permissionAsync.when(
+      skipLoadingOnReload: true,
       data: (access) => switch (access) {
         LocationAccess.granted => _buildLocationView(context),
         _ => _LocationDeniedView(access: access),
@@ -1039,6 +1103,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
     final positionAsync = ref.watch(devicePositionProvider);
 
     return positionAsync.when(
+      skipLoadingOnReload: true,
       data: (position) => _buildMap(
         context,
         position.latitude,
@@ -1088,6 +1153,17 @@ class _MapScreenState extends ConsumerState<MapScreen>
     double deviceHeadingDegrees,
   ) {
     final here = Geo.pos(deviceLat, deviceLng);
+    _deviceLat = deviceLat;
+    _deviceLng = deviceLng;
+    final destPoint = activeTrip?.destinationPoint;
+    _navDestination = destPoint == null
+        ? null
+        : NearbyPlace(
+            name: activeTrip!.destinationName ?? 'Destination',
+            placeId: 'trip:${activeTrip.id}',
+            category: 'Trip destination',
+            location: Geo.pos(destPoint.lat, destPoint.lng),
+          );
     // Several trips can be live at once; the map follows one and this lets the
     // user switch.
     final activeTrips =
@@ -1161,6 +1237,17 @@ class _MapScreenState extends ConsumerState<MapScreen>
       }
     }
 
+    _latestTeammates = teammates;
+    _scheduleNavUpdate(
+      deviceLat,
+      deviceLng,
+      deviceSpeedMps > 1.0 && deviceHeadingDegrees >= 0
+          ? deviceHeadingDegrees
+          : (_compass ?? _lastCourse),
+    );
+    _trackFollowedTeammate(teammates);
+    _refreshMemberRoute(teammates);
+
     final profileVehicleType =
         ref.watch(myProfileProvider).valueOrNull?.vehicleType ??
         kDefaultVehicleType;
@@ -1180,6 +1267,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
     final shareLocation = ref.watch(
       appSettingsProvider.select((s) => s.shareLocation),
     );
+    final minimal = ref.watch(appSettingsProvider.select((s) => s.mapMinimal));
 
     // Live speed for the badge comes from [liveSpeedMpsProvider], which decays
     // to zero when the distance-filtered GPS stream goes quiet — so it drops
@@ -1190,7 +1278,16 @@ class _MapScreenState extends ConsumerState<MapScreen>
     final mapPostsAsync = activeTrip == null
         ? null
         : ref.watch(tripMapPostsProvider(activeTrip.id));
-    final mapPosts = mapPostsAsync?.valueOrNull ?? const <MapPost>[];
+    // The trip pins (everyone) plus all of the user own, so personal pins show
+    // whether or not a trip is running.
+    final myPosts =
+        ref.watch(myMapPostsProvider).valueOrNull ?? const <MapPost>[];
+    final mapPosts = <MapPost>[
+      ...(mapPostsAsync?.valueOrNull ?? const <MapPost>[]),
+      ...myPosts,
+    ];
+    final seenPostIds = <String>{};
+    mapPosts.retainWhere((p) => seenPostIds.add(p.id));
 
     // The AI copilot's saved places are independent of any trip, so they're
     // fetched — and pinned — whether or not a convoy is active.
@@ -1253,334 +1350,482 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
     return FScaffold(
       childPad: false,
-      child: Stack(
-        children: [
-          RanmapMapView(
-            key: _mapKey,
-            center: here,
-            zoom: kFollowZoom,
-            style: _style,
-            threeD: _threeD,
-            terrain: _terrain,
-            showUserLocation: true,
-            userVehicleType: userVehicleType,
-            onStyleReady: _onStyleReady,
-            onCameraChanged: (data) {
-              final map = _mapKey.currentState?.map;
-              if (map != null) {
-                unawaited(_beam.onCameraChanged(map, data.cameraState.zoom));
-              }
-            },
-          ),
-          if (liveError != null)
-            Positioned(
-              top: 16 + topInset,
-              left: 16,
-              child: _LiveSyncErrorChip(
-                detail: friendlyError(liveError),
-                onRetry: () {
-                  if (activeTripId != null) {
-                    ref.invalidate(tripLiveSyncProvider(activeTripId));
-                    ref.invalidate(tripMapPostsProvider(activeTripId));
-                  } else if (liveGroupId != null) {
-                    ref.invalidate(groupLiveSyncProvider(liveGroupId));
-                  }
-                },
-              ),
-            ),
-          Positioned(
-            top: 16 + topInset,
-            right: 16,
-            child: FloatingPanel(
-              padding: const EdgeInsets.all(6),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _MapControl(
-                    icon: Icons.notifications_none_rounded,
-                    tooltip: 'Notifications',
-                    badgeCount:
-                        ref.watch(unreadNotificationsProvider).valueOrNull ?? 0,
-                    onTap: () async {
-                      await Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const NotificationsScreen(),
-                        ),
+      child: // The map's overlays (IconButton, InkWell, FilledButton…) are Material
+          // widgets, but FScaffold provides no Material ancestor — without this they
+          // throw "No Material widget found" and render as a red error box.
+          Material(
+            type: MaterialType.transparency,
+            child: Stack(
+              children: [
+                RanmapMapView(
+                  key: _mapKey,
+                  center: here,
+                  zoom: kFollowZoom,
+                  style: _style,
+                  threeD: _threeD,
+                  terrain: _terrain,
+                  showUserLocation: true,
+                  userVehicleType: userVehicleType,
+                  onStyleReady: _onStyleReady,
+                  onStyleReloading: () =>
+                      unawaited(_disposeAnnotationManagers()),
+                  onUserPan: () {
+                    _stopFollowing();
+                    if (_navEngine != null && _navFollow) {
+                      setState(() => _navFollow = false);
+                    }
+                  },
+                  onCameraChanged: (data) {
+                    final map = _mapKey.currentState?.map;
+                    if (map != null) {
+                      unawaited(
+                        _beam.onCameraChanged(map, data.cameraState.zoom),
                       );
-                      ref.invalidate(unreadNotificationsProvider);
-                    },
+                    }
+                  },
+                ),
+                if (liveError != null)
+                  Positioned(
+                    top: 16 + topInset,
+                    left: 16,
+                    child: _LiveSyncErrorChip(
+                      detail: friendlyError(liveError),
+                      onRetry: () {
+                        if (activeTripId != null) {
+                          ref.invalidate(tripLiveSyncProvider(activeTripId));
+                          ref.invalidate(tripMapPostsProvider(activeTripId));
+                        } else if (liveGroupId != null) {
+                          ref.invalidate(groupLiveSyncProvider(liveGroupId));
+                        }
+                      },
+                    ),
                   ),
-                  _MapControl(
-                    icon: Icons.my_location_rounded,
-                    tooltip: 'Recenter on me',
-                    onTap: () =>
-                        _mapKey.currentState?.flyTo(here, zoom: kFollowZoom),
-                  ),
-                  _MapControl(
-                    icon: Icons.layers_rounded,
-                    tooltip: 'Map options',
-                    onTap: () => _showMapOptions(deviceLat, deviceLng),
-                  ),
-                  _MapControl(
-                    icon: Icons.search_rounded,
-                    tooltip: 'Search nearby places',
-                    onTap: () => _searchNearby(here),
-                  ),
-                  if (activeTrip != null)
-                    _MapControl(
-                      icon: Icons.add_a_photo_outlined,
-                      tooltip: 'Add a photo to the map',
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => AddMapPostScreen(
-                            tripId: activeTrip.id,
-                            lat: deviceLat,
-                            lng: deviceLng,
-                          ),
+                if (_followingUserId != null)
+                  Positioned(
+                    top: 56 + topInset,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: GestureDetector(
+                        onTap: _stopFollowing,
+                        child: BrandPill(
+                          label:
+                              'Following @${teammates.where((t) => t.userId == _followingUserId).firstOrNull?.username ?? 'teammate'} · tap to stop',
+                          icon: Icons.my_location_rounded,
+                          background: BrandColors.primary,
+                          foreground: BrandColors.onPrimary,
+                          iconColor: BrandColors.onPrimary,
                         ),
                       ),
                     ),
-                  if (activeTrip != null || liveGroupId != null)
-                    _MapControl(
-                      icon: shareLocation
-                          ? Icons.share_location_rounded
-                          : Icons.location_disabled_rounded,
-                      tooltip: shareLocation
-                          ? 'Pause location sharing'
-                          : 'Resume location sharing',
-                      active: shareLocation,
-                      onTap: () => ref
-                          .read(appSettingsProvider.notifier)
-                          .setShareLocation(!shareLocation),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          // Live-convoy status pill, centred just below the status bar.
-          Positioned(
-            top: 8 + topInset,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: BrandColors.surface.withValues(alpha: 0.92),
-                      borderRadius: BrandRadii.pill,
-                      boxShadow: BrandShadows.subtle,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          height: 8,
-                          width: 8,
-                          decoration: BoxDecoration(
-                            color: (!hasLiveScope || !shareLocation)
-                                ? BrandColors.textMuted
-                                : BrandColors.primaryContainer,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          !hasLiveScope
-                              ? 'No active convoy'
-                              : shareLocation
-                              ? 'Convoy live · ${memberLocations.length}'
-                              : 'Location sharing paused',
-                          style: BrandText.labelSm.copyWith(
-                            color: BrandColors.textHeadline,
-                          ),
-                        ),
-                      ],
-                    ),
                   ),
-                  // Own live speed, straight from the device's Position — shown
-                  // only when the platform actually reported one.
-                  if (liveSpeedMps != null) ...[
-                    const SizedBox(width: BrandSpace.sm),
-                    BrandPill(
-                      label: formatSpeed(liveSpeedMps * 3.6, unit),
-                      icon: Icons.speed_rounded,
-                      background: BrandColors.surface.withValues(alpha: 0.92),
-                      foreground: BrandColors.textHeadline,
-                      iconColor: BrandColors.primary,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: 16,
-            child: BrandCard(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // The selected place (nearby result, tapped POI, or dropped
-                  // pin) with a Directions action and route summary.
-                  if (_selectedPlace != null) ...[
-                    _buildPlaceCard(deviceLat, deviceLng),
-                    const SizedBox(height: BrandSpace.sm),
-                  ],
-                  // Live roster: each teammate's avatar + how far away they are,
-                  // tap to navigate to them.
-                  if (teammates.isNotEmpty) ...[
-                    SizedBox(
-                      height: 68,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: teammates.length,
-                        separatorBuilder: (_, _) =>
-                            const SizedBox(width: BrandSpace.md),
-                        itemBuilder: (context, i) {
-                          final teammate = teammates[i];
-                          return _TeammateChip(
-                            teammate: teammate,
-                            meters: haversineMeters(
-                              deviceLat,
-                              deviceLng,
-                              teammate.lat,
-                              teammate.lng,
-                            ),
-                            // Real initial bearing so the arrow points at them.
-                            bearing: _initialBearingRadians(
-                              deviceLat,
-                              deviceLng,
-                              teammate.lat,
-                              teammate.lng,
-                            ),
-                            unit: unit,
-                            onTap: () => showNavigateToMemberSheet(
-                              context,
-                              destination: Geo.pos(teammate.lat, teammate.lng),
-                              username: teammate.username,
-                              vehicleType: profileVehicleType,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: BrandSpace.sm),
-                    // Safe-gap readout: the live distance to the closest
-                    // teammate, recomputed from real positions above.
-                    if (nearestTeammateMeters != null)
-                      Row(
+                // Minimal map: just two small buttons — bring the UI back, or
+                // recenter. Everything else is out of the way.
+                if (minimal)
+                  Positioned(
+                    top: 16 + topInset + (_nav != null ? 140 : 0),
+                    right: 16,
+                    child: FloatingPanel(
+                      padding: const EdgeInsets.all(6),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(
-                            Icons.social_distance_rounded,
-                            size: 14,
-                            color: BrandColors.textMuted,
+                          _MapControl(
+                            icon: Icons.visibility_rounded,
+                            tooltip: 'Show controls',
+                            onTap: () {
+                              AppFeedback.selection();
+                              ref
+                                  .read(appSettingsProvider.notifier)
+                                  .setMapMinimal(false);
+                            },
                           ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              'Nearest: ${formatShortDistance(nearestTeammateMeters, unit).replaceAll(' away', '')}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: BrandText.bodySm.copyWith(
-                                color: BrandColors.textBody,
-                              ),
-                            ),
+                          _MapControl(
+                            icon: Icons.my_location_rounded,
+                            tooltip: 'Recenter on me',
+                            onTap: () {
+                              _stopFollowing();
+                              _mapKey.currentState?.flyTo(
+                                here,
+                                zoom: kFollowZoom,
+                              );
+                            },
                           ),
                         ],
                       ),
-                    const SizedBox(height: BrandSpace.sm),
-                  ],
-                  if (!hasLiveScope)
-                    _buildGetStartedCard(
-                      context,
-                      deviceLat,
-                      deviceLng,
-                      unit,
-                      savedPlaces,
-                    )
-                  else
-                    GestureDetector(
-                      onTap: teammates.isEmpty
-                          ? null
-                          : () => _showTeammates(teammates),
-                      behavior: HitTestBehavior.opaque,
-                      child: Row(
+                    ),
+                  ),
+                if (!minimal)
+                  Positioned(
+                    top: 16 + topInset + (_nav != null ? 140 : 0),
+                    right: 16,
+                    child: FloatingPanel(
+                      padding: const EdgeInsets.all(6),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Container(
-                            height: 38,
-                            width: 38,
-                            decoration: BoxDecoration(
-                              color: BrandColors.secondaryFixed.withValues(
-                                alpha: 0.5,
+                          _MapControl(
+                            icon: Icons.visibility_off_rounded,
+                            tooltip: 'Hide controls',
+                            onTap: () {
+                              AppFeedback.selection();
+                              ref
+                                  .read(appSettingsProvider.notifier)
+                                  .setMapMinimal(true);
+                            },
+                          ),
+                          _MapControl(
+                            icon: Icons.notifications_none_rounded,
+                            tooltip: 'Notifications',
+                            badgeCount:
+                                ref
+                                    .watch(unreadNotificationsProvider)
+                                    .valueOrNull ??
+                                0,
+                            onTap: () async {
+                              await Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => const NotificationsScreen(),
+                                ),
+                              );
+                              ref.invalidate(unreadNotificationsProvider);
+                            },
+                          ),
+                          _MapControl(
+                            icon: Icons.my_location_rounded,
+                            tooltip: 'Recenter on me',
+                            onTap: () {
+                              _stopFollowing();
+                              _mapKey.currentState?.flyTo(
+                                here,
+                                zoom: kFollowZoom,
+                              );
+                            },
+                          ),
+                          _MapControl(
+                            icon: Icons.layers_rounded,
+                            tooltip: 'Map options',
+                            onTap: () => _showMapOptions(deviceLat, deviceLng),
+                          ),
+                          _MapControl(
+                            icon: Icons.search_rounded,
+                            tooltip: 'Search nearby places',
+                            onTap: () => _searchNearby(here),
+                          ),
+                          _MapControl(
+                            icon: Icons.add_a_photo_outlined,
+                            tooltip: 'Pin a photo to the map',
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => AddMapPostScreen(
+                                  tripId: activeTrip?.id,
+                                  lat: deviceLat,
+                                  lng: deviceLng,
+                                ),
                               ),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              Icons.directions_car_filled_rounded,
-                              color: BrandColors.primary,
-                              size: 20,
                             ),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                          if (activeTrip != null || liveGroupId != null)
+                            _MapControl(
+                              icon: shareLocation
+                                  ? Icons.share_location_rounded
+                                  : Icons.location_disabled_rounded,
+                              tooltip: shareLocation
+                                  ? 'Pause location sharing'
+                                  : 'Resume location sharing',
+                              active: shareLocation,
+                              onTap: () => ref
+                                  .read(appSettingsProvider.notifier)
+                                  .setShareLocation(!shareLocation),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                // Turn-by-turn instruction banner.
+                if (_nav != null)
+                  Positioned(
+                    top: 8 + topInset,
+                    left: 12,
+                    right: 12,
+                    child: NavBanner(
+                      progress: _nav!,
+                      unit: unit,
+                      rerouting: _rerouting,
+                    ),
+                  ),
+                // Live-convoy status pill, centred just below the status bar.
+                if (_nav == null && !minimal)
+                  Positioned(
+                    top: 8 + topInset,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: BrandColors.surface.withValues(
+                                alpha: 0.92,
+                              ),
+                              borderRadius: BrandRadii.pill,
+                              boxShadow: BrandShadows.subtle,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text(
-                                  activeTrip?.title ??
-                                      convoyGroupName ??
-                                      'Your crew',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: BrandText.weight(
-                                    BrandText.titleSm,
-                                    700,
-                                  ).copyWith(color: BrandColors.textHeadline),
+                                Container(
+                                  height: 8,
+                                  width: 8,
+                                  decoration: BoxDecoration(
+                                    color: (!hasLiveScope || !shareLocation)
+                                        ? BrandColors.textMuted
+                                        : BrandColors.primaryContainer,
+                                    shape: BoxShape.circle,
+                                  ),
                                 ),
+                                const SizedBox(width: 6),
                                 Text(
-                                  '${memberLocations.length} teammate${memberLocations.length == 1 ? '' : 's'} live now',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: BrandText.bodySm.copyWith(
-                                    color: BrandColors.textMuted,
+                                  !hasLiveScope
+                                      ? 'No active convoy'
+                                      : shareLocation
+                                      ? 'Convoy live · ${memberLocations.length}'
+                                      : 'Location sharing paused',
+                                  style: BrandText.labelSm.copyWith(
+                                    color: BrandColors.textHeadline,
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                          if (activeTrips.length > 1)
-                            IconButton(
-                              tooltip: 'Switch trip',
-                              visualDensity: VisualDensity.compact,
-                              icon: Icon(
-                                Icons.swap_horiz_rounded,
-                                color: BrandColors.primary,
+                          // Own live speed, straight from the device's Position — shown
+                          // only when the platform actually reported one.
+                          if (liveSpeedMps != null) ...[
+                            const SizedBox(width: BrandSpace.sm),
+                            BrandPill(
+                              label: formatSpeed(liveSpeedMps * 3.6, unit),
+                              icon: Icons.speed_rounded,
+                              background: BrandColors.surface.withValues(
+                                alpha: 0.92,
                               ),
-                              onPressed: () =>
-                                  _pickActiveTrip(activeTrips, activeTrip),
+                              foreground: BrandColors.textHeadline,
+                              iconColor: BrandColors.primary,
                             ),
-                          if (teammates.isNotEmpty)
-                            Icon(
-                              Icons.chevron_right_rounded,
-                              color: BrandColors.textMuted,
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                // Minimal map keeps only what the user started: a selected place
+                // or an active route.
+                if (!minimal || _selectedPlace != null || _nav != null)
+                  Positioned(
+                    left: 16,
+                    right: 16,
+                    // With the tab bar hidden the card must clear the gesture bar.
+                    bottom:
+                        16 +
+                        (minimal
+                            ? MediaQuery.viewPaddingOf(context).bottom
+                            : 0),
+                    child: BrandCard(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // The selected place (nearby result, tapped POI, or dropped
+                          // pin) with a Directions action and route summary.
+                          if (_nav != null)
+                            NavBottomBar(
+                              progress: _nav!,
+                              unit: unit,
+                              following: _navFollow,
+                              onRecenter: () {
+                                setState(() => _navFollow = true);
+                                _followNavCamera(
+                                  deviceLat,
+                                  deviceLng,
+                                  _compass ?? _lastCourse,
+                                );
+                              },
+                              onEnd: _endNavigation,
+                            ),
+                          if (_nav == null && _selectedPlace != null) ...[
+                            if (_isNavTarget(_selectedPlace!)) ...[
+                              _buildNavTargets(),
+                              const SizedBox(height: BrandSpace.sm),
+                            ],
+                            _buildPlaceCard(deviceLat, deviceLng),
+                            const SizedBox(height: BrandSpace.sm),
+                          ],
+                          // Live roster: each teammate's avatar + how far away they are,
+                          // tap to navigate to them.
+                          if (_nav == null && teammates.isNotEmpty) ...[
+                            SizedBox(
+                              height: 68,
+                              child: ListView.separated(
+                                scrollDirection: Axis.horizontal,
+                                itemCount: teammates.length,
+                                separatorBuilder: (_, _) =>
+                                    const SizedBox(width: BrandSpace.md),
+                                itemBuilder: (context, i) {
+                                  final teammate = teammates[i];
+                                  return _TeammateChip(
+                                    teammate: teammate,
+                                    meters: haversineMeters(
+                                      deviceLat,
+                                      deviceLng,
+                                      teammate.lat,
+                                      teammate.lng,
+                                    ),
+                                    // Real initial bearing so the arrow points at them.
+                                    bearing: _initialBearingRadians(
+                                      deviceLat,
+                                      deviceLng,
+                                      teammate.lat,
+                                      teammate.lng,
+                                    ),
+                                    unit: unit,
+                                    onTap: () => _openTeammate(teammate),
+                                  );
+                                },
+                              ),
+                            ),
+                            const SizedBox(height: BrandSpace.sm),
+                            // Safe-gap readout: the live distance to the closest
+                            // teammate, recomputed from real positions above.
+                            if (nearestTeammateMeters != null)
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.social_distance_rounded,
+                                    size: 14,
+                                    color: BrandColors.textMuted,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      'Nearest: ${formatShortDistance(nearestTeammateMeters, unit).replaceAll(' away', '')}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: BrandText.bodySm.copyWith(
+                                        color: BrandColors.textBody,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            const SizedBox(height: BrandSpace.sm),
+                          ],
+                          // The "no convoy" prompt would only crowd a selected place
+                          // or active navigation.
+                          if (_nav != null || _selectedPlace != null)
+                            const SizedBox.shrink()
+                          else if (!hasLiveScope)
+                            _buildGetStartedCard(
+                              context,
+                              deviceLat,
+                              deviceLng,
+                              unit,
+                              savedPlaces,
+                            )
+                          else
+                            GestureDetector(
+                              onTap: teammates.isEmpty
+                                  ? null
+                                  : () => _showTeammates(teammates),
+                              behavior: HitTestBehavior.opaque,
+                              child: Row(
+                                children: [
+                                  Container(
+                                    height: 38,
+                                    width: 38,
+                                    decoration: BoxDecoration(
+                                      color: BrandColors.secondaryFixed
+                                          .withValues(alpha: 0.5),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Icon(
+                                      Icons.directions_car_filled_rounded,
+                                      color: BrandColors.primary,
+                                      size: 20,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          activeTrip?.title ??
+                                              convoyGroupName ??
+                                              'Your crew',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style:
+                                              BrandText.weight(
+                                                BrandText.titleSm,
+                                                700,
+                                              ).copyWith(
+                                                color: BrandColors.textHeadline,
+                                              ),
+                                        ),
+                                        Text(
+                                          '${memberLocations.length} teammate${memberLocations.length == 1 ? '' : 's'} live now',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: BrandText.bodySm.copyWith(
+                                            color: BrandColors.textMuted,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (_navDestination != null)
+                                    IconButton(
+                                      tooltip: 'Navigate to destination',
+                                      visualDensity: VisualDensity.compact,
+                                      icon: Icon(
+                                        Icons.flag_rounded,
+                                        color: BrandColors.primary,
+                                      ),
+                                      onPressed: () =>
+                                          _navigateTo(_navDestination!),
+                                    ),
+                                  if (activeTrips.length > 1)
+                                    IconButton(
+                                      tooltip: 'Switch trip',
+                                      visualDensity: VisualDensity.compact,
+                                      icon: Icon(
+                                        Icons.swap_horiz_rounded,
+                                        color: BrandColors.primary,
+                                      ),
+                                      onPressed: () => _pickActiveTrip(
+                                        activeTrips,
+                                        activeTrip,
+                                      ),
+                                    ),
+                                  if (teammates.isNotEmpty)
+                                    Icon(
+                                      Icons.chevron_right_rounded,
+                                      color: BrandColors.textMuted,
+                                    ),
+                                ],
+                              ),
                             ),
                         ],
                       ),
                     ),
-                ],
-              ),
+                  ),
+              ],
             ),
           ),
-        ],
-      ),
     );
   }
 
@@ -1648,11 +1893,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
     );
   }
 
-  /// Pins a photo at the selected place (a dropped pin or tapped POI) on the
-  /// active trip's map. Photos belong to a trip, so without one there's nowhere
-  /// for it to live.
+  /// Pins a photo at the selected place (a dropped pin or tapped POI). It joins
+  /// the running trip when there is one; otherwise it is a personal pin.
   Future<void> _pinPhotoAt(NearbyPlace place) async {
-    // Await the provider so a still-loading active trip isn't misread as none.
+    // Await the provider so a still-loading trip is not misread as none.
     Trip? trip;
     try {
       trip = await ref.read(activeTripProvider.future);
@@ -1660,15 +1904,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
       trip = null;
     }
     if (!mounted) return;
-    final activeTrip = trip;
-    if (activeTrip == null) {
-      showAppToast(context, 'Start a trip to pin photos on the map.');
-      return;
-    }
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => AddMapPostScreen(
-          tripId: activeTrip.id,
+          tripId: trip?.id,
           lat: place.location.lat.toDouble(),
           lng: place.location.lng.toDouble(),
         ),
@@ -1685,7 +1924,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
     final subtitle = chosen != null
         ? '${chosen.durationLabel} · ${chosen.distanceLabel}'
         : (place.category?.replaceAll('_', ' ') ??
-              (place.placeId.startsWith('pin:') ? 'Dropped pin' : 'Place'));
+              (place.placeId.startsWith('pin:')
+                  ? '${place.location.lat.toStringAsFixed(4)}, ${place.location.lng.toStringAsFixed(4)}'
+                  : 'Place'));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1707,7 +1948,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
                       height: 38,
                       width: 38,
                       decoration: BoxDecoration(
-                        color: BrandColors.secondaryFixed.withValues(alpha: 0.5),
+                        color: BrandColors.secondaryFixed.withValues(
+                          alpha: 0.5,
+                        ),
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
@@ -1802,34 +2045,57 @@ class _MapScreenState extends ConsumerState<MapScreen>
                       : () => _previewDirections(lat, lng),
                 ),
               ),
-              const SizedBox(width: BrandSpace.sm),
-              BrandSecondaryButton(
-                label: 'Photo',
-                expand: false,
-                leading: Icon(
-                  Icons.add_a_photo_outlined,
-                  size: 18,
-                  color: BrandColors.textHeadlineAlt,
+              if (!_isNavTarget(place)) ...[
+                const SizedBox(width: BrandSpace.sm),
+                BrandSecondaryButton(
+                  label: 'Photo',
+                  expand: false,
+                  leading: Icon(
+                    Icons.add_a_photo_outlined,
+                    size: 18,
+                    color: BrandColors.textHeadlineAlt,
+                  ),
+                  onPressed: () => _pinPhotoAt(place),
                 ),
-                onPressed: () => _pinPhotoAt(place),
-              ),
+              ],
             ],
           )
         else ...[
           BrandPrimaryButton(
-            label: 'Use for a trip',
-            leadingIcon: Icons.route_rounded,
-            onPressed: () => _useRouteForTrip(lat, lng),
+            label: 'Start',
+            leadingIcon: Icons.navigation_rounded,
+            trailingIcon: null,
+            onPressed: _startNavigation,
           ),
           const SizedBox(height: BrandSpace.sm),
-          BrandSecondaryButton(
-            label: 'Cancel route',
-            leading: Icon(
-              Icons.close_rounded,
-              size: 18,
-              color: BrandColors.textHeadlineAlt,
-            ),
-            onPressed: _cancelRoutePreview,
+          Row(
+            children: [
+              if (!_isNavTarget(place)) ...[
+                Expanded(
+                  child: BrandSecondaryButton(
+                    label: 'Use for trip',
+                    leading: Icon(
+                      Icons.route_rounded,
+                      size: 18,
+                      color: BrandColors.textHeadlineAlt,
+                    ),
+                    onPressed: () => _useRouteForTrip(lat, lng),
+                  ),
+                ),
+                const SizedBox(width: BrandSpace.sm),
+              ],
+              Expanded(
+                child: BrandSecondaryButton(
+                  label: _isNavTarget(place) ? 'Stop' : 'Cancel',
+                  leading: Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: BrandColors.textHeadlineAlt,
+                  ),
+                  onPressed: _cancelRoutePreview,
+                ),
+              ),
+            ],
           ),
         ],
         if (_previewLoading) ...[
@@ -1987,7 +2253,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
       );
       final image = _savedPlacePin!;
 
+      if (!_live(manager)) return;
       await manager.deleteAll();
+      if (!_live(manager)) return;
       if (located.isNotEmpty) {
         await manager.createMulti([
           for (final place in located)
@@ -2062,12 +2330,12 @@ class _MapScreenState extends ConsumerState<MapScreen>
           devicePixelRatio: devicePixelRatio,
         );
       }
-      if (!identical(manager, _teammatePoints)) return;
+      if (!_live(manager) || !identical(manager, _teammatePoints)) return;
       await manager.deleteAll();
       _teammateAnnotations.clear();
       _userByAnnotationId.clear();
       _teammateLast.clear();
-      if (teammates.isNotEmpty) {
+      if (teammates.isNotEmpty && _live(manager)) {
         final created = await manager.createMulti([
           for (final t in teammates)
             PointAnnotationOptions(
@@ -2095,6 +2363,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
       final annotation = _teammateAnnotations[t.userId];
       final last = _teammateLast[t.userId];
       if (annotation == null) continue;
+      if (!_live(manager)) return;
       if (last != null && last.$1 == t.lat && last.$2 == t.lng) continue;
       annotation.geometry = Geo.point(t.lat, t.lng);
       await manager.update(annotation);
@@ -2114,11 +2383,380 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
   Future<void> _openTeammate(_Teammate teammate) async {
     if (!mounted) return;
+    final following = _followingUserId == teammate.userId;
     await showNavigateToMemberSheet(
       context,
       destination: Geo.pos(teammate.lat, teammate.lng),
       username: teammate.username,
-      vehicleType: teammate.vehicleType,
+      userId: teammate.userId,
+      vehicleType: ref.read(myProfileProvider).valueOrNull?.vehicleType,
+      following: following,
+      onNavigate: () => _navigateToMember(teammate),
+      onShow: () {
+        _stopFollowing();
+        unawaited(
+          _mapKey.currentState?.flyTo(
+            Geo.pos(teammate.lat, teammate.lng),
+            zoom: kFollowZoom,
+          ),
+        );
+      },
+      onToggleFollow: () {
+        if (following) {
+          _stopFollowing();
+          return;
+        }
+        setState(() {
+          _followingUserId = teammate.userId;
+          _followLast = (teammate.lat, teammate.lng);
+        });
+        unawaited(
+          _mapKey.currentState?.flyTo(
+            Geo.pos(teammate.lat, teammate.lng),
+            zoom: kFollowZoom,
+          ),
+        );
+      },
+    );
+  }
+
+  void _stopFollowing() {
+    if (_followingUserId == null) return;
+    setState(() {
+      _followingUserId = null;
+      _followLast = null;
+    });
+  }
+
+  /// Keeps the camera on the locked teammate as their live position updates.
+  /// Called from build, so state changes are deferred a frame.
+  void _trackFollowedTeammate(List<_Teammate> teammates) {
+    final id = _followingUserId;
+    if (id == null) return;
+    final target = teammates.where((t) => t.userId == id).firstOrNull;
+    if (target == null) {
+      // They stopped sharing or aged out: nothing left to follow.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _followingUserId != id) return;
+        _stopFollowing();
+        showAppToast(context, 'Lost their live location — stopped following.');
+      });
+      return;
+    }
+    final at = (target.lat, target.lng);
+    if (_followLast == at) return;
+    _followLast = at;
+    unawaited(_mapKey.currentState?.easeTo(Geo.pos(at.$1, at.$2)));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Turn-by-turn navigation
+  // ---------------------------------------------------------------------------
+
+  /// Begins guidance along the route currently previewed.
+  void _startNavigation() {
+    final lat = _deviceLat;
+    final lng = _deviceLng;
+    if (_previewRoutes.isEmpty || lat == null || lng == null) return;
+    final route = _previewRoutes[_previewIndex];
+    final engine = NavEngine(route);
+    AppFeedback.medium();
+    AppFeedback.play(Sfx.navStart);
+    setState(() {
+      // Only the chosen road stays on the map while driving.
+      _previewRoutes = [route];
+      _previewIndex = 0;
+      _navEngine = engine;
+      _nav = engine.update(lat, lng);
+      _navFollow = true;
+      _offRouteFixes = 0;
+      _announcedStep = null;
+      _closeStep = null;
+      _navLastFix = (lat, lng);
+    });
+    _followNavCamera(lat, lng, _compass ?? _lastCourse);
+  }
+
+  void _followNavCamera(double lat, double lng, double? heading) {
+    unawaited(
+      _mapKey.currentState?.followCamera(
+        Geo.pos(lat, lng),
+        bearing: heading,
+        zoom: 17,
+        pitch: 55,
+      ),
+    );
+  }
+
+  /// Ends guidance. [arrived] celebrates; otherwise it's a plain cancel.
+  void _endNavigation({bool arrived = false}) {
+    if (_navEngine == null) return;
+    final lat = _deviceLat;
+    final lng = _deviceLng;
+    setState(() {
+      _navEngine = null;
+      _nav = null;
+      _rerouting = false;
+      _navLastFix = null;
+    });
+    if (arrived) {
+      AppFeedback.success();
+      AppFeedback.play(Sfx.arrive);
+      showAppToast(context, "You've arrived.");
+    } else {
+      AppFeedback.medium();
+    }
+    _clearSelectedPlace();
+    if (lat != null && lng != null) {
+      unawaited(
+        _mapKey.currentState?.flyTo(
+          Geo.pos(lat, lng),
+          zoom: kFollowZoom,
+          pitch: 45,
+        ),
+      );
+    }
+  }
+
+  /// Called from build on every new fix; the real work happens after the frame
+  /// so it can call setState.
+  void _scheduleNavUpdate(double lat, double lng, double? heading) {
+    if (_navEngine == null) return;
+    if (_navLastFix == (lat, lng)) return;
+    _navLastFix = (lat, lng);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _navEngine != null) _applyNavFix(lat, lng, heading);
+    });
+  }
+
+  void _applyNavFix(double lat, double lng, double? heading) {
+    final engine = _navEngine;
+    if (engine == null) return;
+    final progress = engine.update(lat, lng);
+    setState(() => _nav = progress);
+
+    if (progress.arrived) {
+      _endNavigation(arrived: true);
+      return;
+    }
+    if (_navFollow) _followNavCamera(lat, lng, heading);
+
+    // Chime as a maneuver approaches: once at ~180 m, a tick again at ~40 m.
+    final idx = progress.stepIndex;
+    if (progress.step.type != 'arrive') {
+      if (progress.metersToManeuver <= 180 && _announcedStep != idx) {
+        _announcedStep = idx;
+        AppFeedback.medium();
+        AppFeedback.play(Sfx.turn);
+      }
+      if (progress.metersToManeuver <= 40 && _closeStep != idx) {
+        _closeStep = idx;
+        AppFeedback.heavy();
+      }
+    }
+
+    // Off the route for several fixes in a row: fetch a new one.
+    if (progress.offRouteMeters > NavEngine.offRouteThresholdMeters) {
+      _offRouteFixes++;
+      final last = _lastReroute;
+      if (_offRouteFixes >= 3 &&
+          !_rerouting &&
+          (last == null ||
+              DateTime.now().difference(last) > const Duration(seconds: 15))) {
+        unawaited(_reroute(lat, lng));
+      }
+    } else {
+      _offRouteFixes = 0;
+    }
+  }
+
+  Future<void> _reroute(double lat, double lng) async {
+    final place = _selectedPlace;
+    if (place == null || _navEngine == null) return;
+    _lastReroute = DateTime.now();
+    setState(() => _rerouting = true);
+    try {
+      const modes = {'car', 'bike', 'scooter', 'suv', 'other'};
+      final vehicle = ref.read(myProfileProvider).valueOrNull?.vehicleType;
+      final routes = await GoogleMapsApiService.directions(
+        origin: Geo.pos(lat, lng),
+        destination: place.location,
+        profile: modes.contains(vehicle) ? vehicle : null,
+        withSteps: true,
+      );
+      if (!mounted || _navEngine == null) return;
+      final engine = NavEngine(routes.first);
+      AppFeedback.play(Sfx.reroute);
+      setState(() {
+        _previewRoutes = [routes.first];
+        _previewIndex = 0;
+        _navEngine = engine;
+        _nav = engine.update(lat, lng);
+        _announcedStep = null;
+        _closeStep = null;
+        _offRouteFixes = 0;
+      });
+    } catch (_) {
+      // Keep guiding on the old route; try again after the cooldown.
+    } finally {
+      if (mounted) setState(() => _rerouting = false);
+    }
+  }
+
+  /// Member and trip-destination targets are routed to, not browsed: no photo
+  /// pinning, details sheet or "use for a trip".
+  static bool _isNavTarget(NearbyPlace place) =>
+      place.placeId.startsWith('member:') || place.placeId.startsWith('trip:');
+
+  /// Draws an in-app route from the user's position to [place].
+  Future<void> _navigateTo(NearbyPlace place) async {
+    final lat = _deviceLat;
+    final lng = _deviceLng;
+    if (lat == null || lng == null) {
+      showAppToast(context, 'Waiting for your location…');
+      return;
+    }
+    _stopFollowing();
+    _memberRouteAt = DateTime.now();
+    await _selectPlace(place, fly: false);
+    await _previewDirections(lat, lng);
+  }
+
+  Future<void> _navigateToMember(_Teammate t) => _navigateTo(
+    NearbyPlace(
+      name: t.username != null ? '@${t.username}' : 'Teammate',
+      placeId: 'member:${t.userId}',
+      category: 'Teammate',
+      location: Geo.pos(t.lat, t.lng),
+    ),
+  );
+
+  /// Handles a "navigate here" request raised elsewhere in the app (a location
+  /// shared in chat, a saved place).
+  void _consumeNavRequest() {
+    final request = ref.read(mapNavRequestProvider);
+    if (request == null || !mounted) return;
+    Future.microtask(() {
+      if (!mounted) return;
+      ref.read(mapNavRequestProvider.notifier).state = null;
+      unawaited(
+        _navigateTo(
+          NearbyPlace(
+            name: request.name,
+            placeId: 'pin:shared',
+            location: Geo.pos(request.lat, request.lng),
+          ),
+        ),
+      );
+    });
+  }
+
+  /// While navigating to a teammate, re-routes as they move (throttled: it
+  /// costs a directions call) so the line follows them instead of going stale.
+  void _refreshMemberRoute(List<_Teammate> teammates) {
+    final place = _selectedPlace;
+    if (place == null || !place.placeId.startsWith('member:')) return;
+    if (_previewRoutes.isEmpty || _previewLoading) return;
+    final id = place.placeId.substring('member:'.length);
+    final t = teammates.where((t) => t.userId == id).firstOrNull;
+    final lat = _deviceLat;
+    final lng = _deviceLng;
+    if (t == null || lat == null || lng == null) return;
+    final moved = haversineMeters(
+      place.location.lat.toDouble(),
+      place.location.lng.toDouble(),
+      t.lat,
+      t.lng,
+    );
+    final last = _memberRouteAt;
+    if (moved < 300 ||
+        (last != null &&
+            DateTime.now().difference(last) < const Duration(seconds: 30))) {
+      return;
+    }
+    _memberRouteAt = DateTime.now();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || _selectedPlace?.placeId != place.placeId) return;
+      setState(() {
+        _selectedPlace = NearbyPlace(
+          name: place.name,
+          placeId: place.placeId,
+          category: place.category,
+          location: Geo.pos(t.lat, t.lng),
+        );
+      });
+      await _previewDirections(lat, lng, fit: false);
+    });
+  }
+
+  /// Switcher between navigation targets: the trip's destination and each
+  /// live teammate. Shown while navigating to one of them.
+  Widget _buildNavTargets() {
+    final selectedId = _selectedPlace?.placeId;
+    Widget chip(String label, IconData icon, String id, VoidCallback onTap) {
+      final selected = selectedId == id;
+      return InkWell(
+        borderRadius: BrandRadii.pill,
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? BrandColors.primary : Colors.transparent,
+            borderRadius: BrandRadii.pill,
+            border: Border.all(
+              color: selected ? BrandColors.primary : BrandColors.hairline,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: selected ? BrandColors.onPrimary : BrandColors.primary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: BrandText.labelSm.copyWith(
+                  color: selected
+                      ? BrandColors.onPrimary
+                      : BrandColors.textHeadline,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final destination = _navDestination;
+    return SizedBox(
+      height: 34,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          if (destination != null) ...[
+            chip(
+              destination.name,
+              Icons.flag_rounded,
+              destination.placeId,
+              () => _navigateTo(destination),
+            ),
+            const SizedBox(width: BrandSpace.sm),
+          ],
+          for (final t in _latestTeammates) ...[
+            chip(
+              t.username != null ? '@${t.username}' : 'Teammate',
+              Icons.directions_car_filled_rounded,
+              'member:${t.userId}',
+              () => _navigateToMember(t),
+            ),
+            const SizedBox(width: BrandSpace.sm),
+          ],
+        ],
+      ),
     );
   }
 
@@ -2143,12 +2781,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
         List<MapPost>? stack;
         for (final candidate in stacks) {
           final anchor = candidate.first;
-          if (haversineMeters(
-                anchor.lat,
-                anchor.lng,
-                post.lat,
-                post.lng,
-              ) <=
+          if (haversineMeters(anchor.lat, anchor.lng, post.lat, post.lng) <=
               _photoStackRadiusMeters) {
             stack = candidate;
             break;
@@ -2170,9 +2803,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
         );
       }
 
+      if (!_live(manager)) return;
       await manager.deleteAll();
       _postByAnnotationId.clear();
-      if (stacks.isNotEmpty) {
+      if (stacks.isNotEmpty && _live(manager)) {
         final created = await manager.createMulti([
           for (final stack in stacks)
             PointAnnotationOptions(
@@ -2241,7 +2875,11 @@ class _MapScreenState extends ConsumerState<MapScreen>
   }
 
   Future<void> _syncSelectedPlace(double devicePixelRatio) async {
-    final place = _selectedPlace;
+    // A teammate is already on the map as a vehicle + avatar; no pin for them.
+    final selected = _selectedPlace;
+    final place = selected != null && selected.placeId.startsWith('member:')
+        ? null
+        : selected;
     if (_renderedPlaceId == place?.placeId) return;
     if (_mapKey.currentState?.map == null) return;
     final pinColor = NavColors.of(context).activeRoute;
@@ -2249,10 +2887,19 @@ class _MapScreenState extends ConsumerState<MapScreen>
     try {
       // The place pin lives on its own manager so it isn't wiped out every time
       // the photo set changes.
-      _placePoints ??= await _mapKey.currentState?.map?.annotations
-          .createPointAnnotationManager();
+      final generation = _styleGeneration;
+      if (_placePoints == null || !_live(_placePoints)) {
+        final created = await _mapKey.currentState?.map?.annotations
+            .createPointAnnotationManager();
+        // A style reload during the await orphaned it; drop it.
+        if (created == null || !mounted || generation != _styleGeneration) {
+          return;
+        }
+        _placePoints = created;
+        _liveManagers.add(created);
+      }
       final placeManager = _placePoints;
-      if (placeManager == null) return;
+      if (placeManager == null || !_live(placeManager)) return;
 
       _placePin ??= await MapMarkers.pin(
         pinColor,
@@ -2261,8 +2908,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
       );
       final image = _placePin!;
 
+      if (!_live(placeManager)) return;
       await placeManager.deleteAll();
-      if (place != null) {
+      if (place != null && _live(placeManager)) {
         await placeManager.create(
           PointAnnotationOptions(
             geometry: Point(coordinates: place.location),
@@ -2417,13 +3065,11 @@ class _LocationDeniedView extends ConsumerWidget {
                       unawaited(_requestLocationPermission(context, ref));
                     }
                   },
-                  child: Text(
-                    switch (access) {
-                      LocationAccess.serviceDisabled => 'Turn on location',
-                      LocationAccess.deniedForever => 'Open settings',
-                      _ => 'Allow location',
-                    },
-                  ),
+                  child: Text(switch (access) {
+                    LocationAccess.serviceDisabled => 'Turn on location',
+                    LocationAccess.deniedForever => 'Open settings',
+                    _ => 'Allow location',
+                  }),
                 ),
               ),
               if (!serviceOff && !blocked) ...[

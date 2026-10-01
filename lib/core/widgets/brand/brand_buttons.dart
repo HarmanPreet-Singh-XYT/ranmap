@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../feedback/app_feedback.dart';
 import '../../theme/brand_palette.dart';
 import '../../theme/brand_typography.dart';
 import '../app_spinner.dart';
@@ -38,7 +39,12 @@ class _BrandPressableState extends State<BrandPressable> {
       onTapDown: (_) => _set(true),
       onTapUp: (_) => _set(false),
       onTapCancel: () => _set(false),
-      onTap: enabled ? widget.onTap : null,
+      onTap: enabled
+          ? () {
+              AppFeedback.tap();
+              widget.onTap!();
+            }
+          : null,
       behavior: HitTestBehavior.opaque,
       child: AnimatedScale(
         scale: _down ? 0.98 : 1,
