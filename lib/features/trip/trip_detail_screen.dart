@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 import 'package:geolocator/geolocator.dart' hide Position;
+import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'package:intl/intl.dart';
@@ -19,6 +20,7 @@ import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/geo_distance.dart';
+import '../../core/util/image_upload.dart';
 import '../../core/util/units.dart';
 import '../../core/util/validation.dart';
 import '../../core/widgets/app_dialog.dart';
@@ -41,7 +43,9 @@ import '../../data/models/trip_stats.dart';
 import '../../data/models/trip_stop.dart';
 import '../../data/services/google_maps_api_service.dart';
 import '../../data/services/supabase_service.dart';
+import '../chat/chat_providers.dart';
 import '../chat/chat_share.dart';
+import '../chat/voice_channel_screen.dart';
 import '../map/live_sync_providers.dart';
 import '../map/map_engine/geo.dart';
 import '../map/trip_photos_screen.dart';
@@ -304,6 +308,13 @@ class TripDetailScreen extends ConsumerWidget {
         trip.originPoint != null &&
         trip.destinationPoint != null &&
         trip.routePolyline != null;
+    // Read, not watch: this runs from a tap, and the screen already keeps the
+    // roster warm for the header's voice button.
+    final crewCount =
+        ref.read(tripMembersProvider(trip.id)).valueOrNull?.length ?? 0;
+    final canTalk =
+        crewCount > 1 &&
+        (trip.status == TripStatus.active || trip.status == TripStatus.planned);
     await showFSheet<void>(
       context: context,
       side: FLayout.btt,
@@ -315,6 +326,19 @@ class TripDetailScreen extends ConsumerWidget {
           ),
           child: Column(
             children: [
+              if (canTalk) ...[
+                BrandListRow(
+                  icon: Icons.headset_mic_rounded,
+                  iconColor: BrandColors.primary,
+                  title: 'Convoy voice',
+                  subtitle: 'Talk to the crew while you drive',
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _openVoice(context);
+                  },
+                ),
+                const BrandRowDivider(),
+              ],
               BrandListRow(
                 icon: Icons.auto_awesome_rounded,
                 iconColor: BrandColors.primary,
@@ -510,9 +534,28 @@ class TripDetailScreen extends ConsumerWidget {
     }
   }
 
+  /// Opens the trip's voice channel — the same channel the trip chat's call
+  /// button uses, so either route lands in the same LiveKit room.
+  void _openVoice(BuildContext context) => Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => VoiceChannelScreen(
+        channel: ChatChannel.trip(trip.id),
+        title: trip.title,
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isCreator = SupabaseService.currentUser?.id == trip.createdBy;
+    // Voice is a crew thing — a solo trip has nobody to talk to — so the entry
+    // point appears only once someone else is on the trip, and only while the
+    // trip is live or still being planned. Same rule the trip-start prompt uses.
+    final crewCount =
+        ref.watch(tripMembersProvider(trip.id)).valueOrNull?.length ?? 0;
+    final canTalk =
+        crewCount > 1 &&
+        (trip.status == TripStatus.active || trip.status == TripStatus.planned);
 
     return BrandScaffold(
       header: BrandHeader(
@@ -545,6 +588,14 @@ class TripDetailScreen extends ConsumerWidget {
                   ),
                 ),
               ),
+              if (canTalk) ...[
+                const SizedBox(width: BrandSpace.xs),
+                _HeaderIconButton(
+                  icon: Icons.headset_mic_rounded,
+                  semanticLabel: 'Convoy voice',
+                  onTap: () => _openVoice(context),
+                ),
+              ],
               const Spacer(),
               if (trip.status == TripStatus.active) ...[
                 _TripActionButton(
@@ -2303,7 +2354,10 @@ class _ExpensesTab extends ConsumerWidget {
                         try {
                           await ref
                               .read(tripRepositoryProvider)
-                              .deleteExpense(e.id);
+                              .deleteExpense(
+                                e.id,
+                                attachments: e.attachments,
+                              );
                           ref.invalidate(tripExpensesProvider(tripId));
                         } catch (_) {
                           ref.invalidate(tripExpensesProvider(tripId));
@@ -2557,7 +2611,7 @@ class _LedgerSummary extends ConsumerWidget {
   }
 }
 
-class _ExpenseCard extends StatelessWidget {
+class _ExpenseCard extends ConsumerWidget {
   const _ExpenseCard({required this.expense, required this.currency});
 
   final TripExpense expense;
@@ -2565,8 +2619,91 @@ class _ExpenseCard extends StatelessWidget {
   /// The trip's currency, so the row labels itself with the right symbol.
   final String currency;
 
+  /// The picked place if there was one, else the raw coordinates.
+  String get _locationText => (expense.placeName?.isNotEmpty ?? false)
+      ? expense.placeName!
+      : '${expense.lat!.toStringAsFixed(4)}, ${expense.lng!.toStringAsFixed(4)}';
+
+  /// Only whoever logged the expense may change its images — the media table's
+  /// policies say so, and the cap is measured against their plan.
+  bool _isMine() => expense.userId == SupabaseService.currentUser?.id;
+
+  int _limit(WidgetRef ref) => ref.read(isExtremeProvider)
+      ? kExtremeExpenseMediaLimit
+      : ref.read(isProProvider)
+      ? kProExpenseMediaLimit
+      : kFreeExpenseMediaLimit;
+
+  /// Adds more images to an expense that is already logged.
+  Future<void> _addImages(BuildContext context, WidgetRef ref) async {
+    final room = _limit(ref) - expense.attachments.length;
+    if (room <= 0) {
+      await showPaywall(context, feature: PremiumFeature.expenseAttachments);
+      return;
+    }
+    final uploaded = <String>[];
+    try {
+      final picked = await ImagePicker().pickMultiImage(
+        imageQuality: 85,
+        maxWidth: 1920,
+        limit: room < 2 ? 2 : room,
+      );
+      if (picked.isEmpty) return;
+      final repo = ref.read(tripRepositoryProvider);
+      for (final file in picked.take(room)) {
+        final bytes = await file.readAsBytes();
+        final problem = imageUploadError(
+          byteLength: bytes.length,
+          extension: imageExtensionOf(file.name),
+        );
+        if (problem != null) throw ImageUploadException(problem);
+        uploaded.add(
+          await repo.uploadExpenseAttachment(
+            imageBytes: bytes,
+            fileExtension: imageExtensionOf(file.name),
+          ),
+        );
+      }
+      await repo.attachExpenseMedia(
+        expense.id,
+        uploaded,
+        startAt: expense.attachments.length,
+      );
+      ref.invalidate(tripExpensesProvider(expense.tripId));
+    } catch (e) {
+      // Nothing to attach them to, so don't leave the objects behind.
+      await ref.read(tripRepositoryProvider).removeExpenseAttachments(uploaded);
+      if (!context.mounted) return;
+      if (looksPremiumRequired(e)) {
+        await showPaywall(context, feature: PremiumFeature.expenseAttachments);
+      } else {
+        showAppToast(context, friendlyError(e), error: true);
+      }
+    }
+  }
+
+  Future<void> _removeImage(
+    BuildContext context,
+    WidgetRef ref,
+    String storagePath,
+  ) async {
+    try {
+      await ref
+          .read(tripRepositoryProvider)
+          .removeExpenseAttachment(
+            expenseId: expense.id,
+            storagePath: storagePath,
+          );
+      ref.invalidate(tripExpensesProvider(expense.tripId));
+    } catch (e) {
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final attachments = expense.attachments;
+    final mine = _isMine();
     return Padding(
       padding: const EdgeInsets.only(bottom: BrandSpace.gutterSm),
       child: BrandCard(
@@ -2609,12 +2746,216 @@ class _ExpenseCard extends StatelessWidget {
                         color: BrandColors.textMuted,
                       ),
                     ),
+                  if (expense.hasLocation)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.place_rounded,
+                            size: 13,
+                            color: BrandColors.textMuted,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              _locationText,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: BrandText.bodySm.copyWith(
+                                color: BrandColors.textMuted,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),
+            if (attachments.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(left: BrandSpace.sm),
+                child: _AttachmentThumb(
+                  storagePaths: attachments,
+                  onRemove: mine
+                      ? (path) => _removeImage(context, ref, path)
+                      : null,
+                ),
+              ),
+            if (mine)
+              IconButton(
+                tooltip: attachments.isEmpty ? 'Add images' : 'Add more images',
+                icon: Icon(
+                  Icons.add_photo_alternate_outlined,
+                  size: 22,
+                  color: BrandColors.primary,
+                ),
+                onPressed: () => _addImages(context, ref),
+              ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// An expense's images: the first as a cover thumbnail, with a count when there
+/// are more, opening a pager over all of them. Visible to everyone on the trip,
+/// not just whoever logged the expense (0053).
+class _AttachmentThumb extends ConsumerWidget {
+  const _AttachmentThumb({required this.storagePaths, this.onRemove});
+
+  final List<String> storagePaths;
+
+  /// Removes one image by its storage path — null when the viewer isn't the
+  /// expense's owner.
+  final Future<void> Function(String storagePath)? onRemove;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final url = ref
+        .watch(expenseAttachmentUrlProvider(storagePaths.first))
+        .valueOrNull;
+    return Semantics(
+      button: true,
+      label: storagePaths.length == 1
+          ? 'View the receipt image'
+          : 'View ${storagePaths.length} receipt images',
+      child: GestureDetector(
+        onTap: () => showDialog<void>(
+          context: context,
+          builder: (_) =>
+              _AttachmentViewer(storagePaths: storagePaths, onRemove: onRemove),
+        ),
+        child: Stack(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 56,
+                height: 56,
+                child: url == null
+                    ? Container(color: BrandColors.surfaceContainerLow)
+                    : Image.network(
+                        url,
+                        fit: BoxFit.cover,
+                        // A thumbnail that won't load is decoration, not an
+                        // error worth surfacing.
+                        errorBuilder: (_, _, _) => Container(
+                          color: BrandColors.surfaceContainerLow,
+                          child: Icon(
+                            Icons.receipt_long_rounded,
+                            size: 20,
+                            color: BrandColors.textMuted,
+                          ),
+                        ),
+                      ),
+              ),
+            ),
+            if (storagePaths.length > 1)
+              Positioned(
+                right: 2,
+                bottom: 2,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    '${storagePaths.length}',
+                    style: BrandText.labelSm.copyWith(color: Colors.white),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// All of an expense's images, one per page, pinch-zoomable.
+class _AttachmentViewer extends StatefulWidget {
+  const _AttachmentViewer({required this.storagePaths, this.onRemove});
+
+  final List<String> storagePaths;
+
+  /// Set for the expense's owner; the delete affordance only appears when it is.
+  final Future<void> Function(String storagePath)? onRemove;
+
+  @override
+  State<_AttachmentViewer> createState() => _AttachmentViewerState();
+}
+
+class _AttachmentViewerState extends State<_AttachmentViewer> {
+  late final PageController _controller = PageController();
+  var _index = 0;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Dialog(
+    backgroundColor: Colors.black,
+    insetPadding: const EdgeInsets.all(12),
+    child: Stack(
+      children: [
+        PageView.builder(
+          controller: _controller,
+          onPageChanged: (index) => setState(() => _index = index),
+          itemCount: widget.storagePaths.length,
+          itemBuilder: (context, index) =>
+              _AttachmentPage(storagePath: widget.storagePaths[index]),
+        ),
+        if (widget.onRemove != null)
+          Positioned(
+            top: 4,
+            right: 4,
+            child: IconButton(
+              tooltip: 'Remove this image',
+              icon: const Icon(
+                Icons.delete_outline_rounded,
+                color: Colors.white,
+              ),
+              onPressed: () async {
+                final paths = widget.storagePaths;
+                if (_index >= paths.length) return;
+                final path = paths[_index];
+                // Close first: the expense underneath is about to change.
+                Navigator.of(context).pop();
+                await widget.onRemove!(path);
+              },
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+/// One full-size attachment. The URL is signed per object, so each page loads
+/// its own.
+class _AttachmentPage extends ConsumerWidget {
+  const _AttachmentPage({required this.storagePath});
+
+  final String storagePath;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final url = ref.watch(expenseAttachmentUrlProvider(storagePath)).valueOrNull;
+    if (url == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return InteractiveViewer(
+      maxScale: 5,
+      child: Image.network(url, fit: BoxFit.contain),
     );
   }
 }

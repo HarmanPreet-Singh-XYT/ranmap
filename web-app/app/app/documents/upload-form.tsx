@@ -4,6 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Upload } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import {
+  documentMimeOf,
+  DOCUMENT_TOO_LARGE_MESSAGE,
+  isAllowedDocument,
+  MAX_DOCUMENT_BYTES,
+  UNSUPPORTED_DOCUMENT_MESSAGE,
+} from "@/lib/data/document";
 import { classifyPlanMessage } from "@/lib/data/plan";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,6 +30,18 @@ export function DocumentUpload({ userId }: { userId: string }) {
 
   async function upload() {
     if (!file || !name.trim() || busy) return;
+    // The bucket enforces these (0055); checking here gives a specific message
+    // instead of a generic Storage rejection.
+    if (!isAllowedDocument(file)) {
+      setError(UNSUPPORTED_DOCUMENT_MESSAGE);
+      setPremium(false);
+      return;
+    }
+    if (file.size > MAX_DOCUMENT_BYTES) {
+      setError(DOCUMENT_TOO_LARGE_MESSAGE);
+      setPremium(false);
+      return;
+    }
     setBusy(true);
     setError(null);
     setPremium(false);
@@ -33,7 +52,9 @@ export function DocumentUpload({ userId }: { userId: string }) {
 
       const { error: upErr } = await supabase.storage
         .from("documents")
-        .upload(path, file, { contentType: file.type || "application/octet-stream" });
+        // Never `application/octet-stream`: the bucket refuses it, and it tells
+        // the browser nothing about what the file is.
+        .upload(path, file, { contentType: documentMimeOf(file) });
       if (upErr) throw upErr;
 
       const { error: insErr } = await supabase.from("user_documents").insert({

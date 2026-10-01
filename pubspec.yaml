@@ -53,6 +53,7 @@ dependencies:
   gal: ^2.3.3
   wakelock_plus: ^1.8.0
   audioplayers: ^6.8.1
+  file_selector: ^1.1.0
 
 dev_dependencies:
   flutter_test:

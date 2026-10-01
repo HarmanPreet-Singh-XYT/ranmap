@@ -217,6 +217,56 @@ export async function respondJoinRequest(
   return { error: null };
 }
 
+/**
+ * An admin invites a friend. The row lands as `pending`, so it costs nothing
+ * against the member cap — the invitee's accept is what re-runs the cap (and
+ * what can raise the paywall, see [respondGroupInvite]).
+ */
+export async function inviteGroupMember(
+  _prev: GroupActionState,
+  formData: FormData,
+): Promise<GroupActionState> {
+  const groupId = str(formData.get("group_id"));
+  const userId = str(formData.get("user_id"));
+  if (!groupId) return { error: "Invalid request." };
+  if (!userId) return { error: "Choose a friend to invite." };
+  const supabase = await createClient();
+  if (!(await currentUserId(supabase))) return { error: "You're signed out." };
+
+  const { error } = await supabase.rpc("invite_group_member", {
+    p_group: groupId,
+    p_user: userId,
+  });
+  if (error) return planErrorMessage(error, "Couldn't send that invitation.");
+  revalidatePath(`/app/groups/${groupId}`);
+  return { error: null, message: "Invitation sent." };
+}
+
+/**
+ * The invitee's answer. Accepting activates a membership, which re-runs the
+ * member-cap trigger — a full free group refuses here, and that refusal is the
+ * paywall (for the group's admins, not the invitee, so the copy is plain).
+ */
+export async function respondGroupInvite(
+  _prev: GroupActionState,
+  formData: FormData,
+): Promise<GroupActionState> {
+  const groupId = str(formData.get("group_id"));
+  if (!groupId) return { error: "Invalid request." };
+  const accept = formData.get("accept") === "1";
+  const supabase = await createClient();
+  if (!(await currentUserId(supabase))) return { error: "You're signed out." };
+
+  const { error } = await supabase.rpc("respond_group_invite", {
+    p_group: groupId,
+    p_accept: accept,
+  });
+  revalidatePath("/app/groups");
+  revalidatePath(`/app/groups/${groupId}`);
+  if (error) return planErrorMessage(error, "Couldn't answer that invitation.");
+  return { error: null };
+}
+
 export async function leaveGroup(formData: FormData): Promise<void> {
   const groupId = str(formData.get("group_id"));
   if (!groupId) return;

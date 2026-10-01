@@ -45,7 +45,8 @@ enum PremiumFeature {
   service('service', 'service reminders'),
   routeTemplates('route_templates', 'saved routes'),
   weather('weather', 'weather en route'),
-  recap('recap', 'trip recap export');
+  recap('recap', 'trip recap export'),
+  expenseAttachments('expense_media', 'expense attachments');
 
   const PremiumFeature(this.key, this.label);
 

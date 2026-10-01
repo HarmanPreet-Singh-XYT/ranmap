@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { listMyGroups } from "@/lib/data/groups";
+import { listMyGroupInvites, listMyGroups } from "@/lib/data/groups";
 import { AvatarView } from "@/app/(account)/_components/avatar-view";
 import { Card, CardContent } from "@/components/ui/card";
 import { CreateGroupForm } from "./_components/create-group-form";
+import { InviteResponse } from "./_components/invite-response";
 import { JoinGroupForm } from "./_components/join-group-form";
 
 export const metadata: Metadata = { title: "Groups" };
@@ -17,7 +18,10 @@ export default async function GroupsPage() {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const groups = await listMyGroups(supabase, user.id);
+  const [groups, invites] = await Promise.all([
+    listMyGroups(supabase, user.id),
+    listMyGroupInvites(supabase),
+  ]);
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6">
@@ -31,6 +35,34 @@ export default async function GroupsPage() {
             : `You're in ${groups.length} ${groups.length === 1 ? "group" : "groups"}.`}
         </p>
       </div>
+
+      {invites.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold text-slate-700">
+            Invitations ({invites.length})
+          </h2>
+          <Card size="sm">
+            <CardContent className="divide-y divide-[#E6E3DA]">
+              {invites.map((invite) => (
+                <div
+                  key={invite.group_id}
+                  className="flex flex-wrap items-center justify-between gap-3 py-2 first:pt-0 last:pb-0"
+                >
+                  <span className="min-w-0 text-sm">
+                    <span className="block truncate font-medium">{invite.name}</span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {invite.inviter_username
+                        ? `Invited by @${invite.inviter_username}`
+                        : "You were invited"}
+                    </span>
+                  </span>
+                  <InviteResponse groupId={invite.group_id} />
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </section>
+      )}
 
       <Card size="sm">
         <CardContent className="space-y-4">

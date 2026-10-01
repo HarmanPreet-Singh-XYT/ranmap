@@ -178,6 +178,15 @@ final tripWatchTokenProvider = FutureProvider.autoDispose
       return ref.watch(tripRepositoryProvider).watchToken(tripId);
     });
 
+/// A time-limited URL for one expense attachment. The `map-media` bucket is
+/// private, so the URL carries its own token; the read policy admits anyone on
+/// the trip the expense belongs to (0053).
+final expenseAttachmentUrlProvider = FutureProvider.autoDispose
+    .family<String, String>(
+      (ref, storagePath) =>
+          ref.watch(tripRepositoryProvider).attachmentSignedUrl(storagePath),
+    );
+
 /// The user's total recorded distance across every trip — their odometer,
 /// derived from the stats the app already keeps (no manual mileage entry).
 final odometerKmProvider = FutureProvider.autoDispose<double>((ref) async {

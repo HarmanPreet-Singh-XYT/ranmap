@@ -65,6 +65,7 @@ export const PLAN_LIMITS = {
   photos: { free: 25, pro: 5000, extreme: 20000 },
   documents: { free: 1, pro: 100, extreme: 500 },
   routes: { free: 1, pro: 100, extreme: 500 },
+  attachments: { free: 1, pro: 10, extreme: 25 },
 } as const;
 
 export function limitFor(

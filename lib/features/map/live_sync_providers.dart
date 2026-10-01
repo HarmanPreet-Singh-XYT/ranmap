@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/providers/app_prefs_provider.dart';
 import '../../core/router/auth_state_provider.dart';
 import '../../core/providers/settings_provider.dart';
+import '../../core/util/geo_distance.dart';
 import '../../data/models/group_alert.dart';
 import '../../data/providers/repository_providers.dart';
 import '../../data/repositories/trip_repository.dart';
@@ -50,18 +51,44 @@ class MemberLocation {
           : DateTime.now(),
     );
   }
+
+  /// A copy facing [heading] degrees clockwise from north.
+  MemberLocation withHeading(double? heading) => MemberLocation(
+    userId: userId,
+    lat: lat,
+    lng: lng,
+    speedMps: speedMps,
+    heading: heading,
+    recordedAt: recordedAt,
+  );
 }
 
-/// Records a relayed member in [into], skipping a malformed one rather than
-/// blanking the whole crew.
-void _remember(Map<String, MemberLocation> into, Object? member) {
-  if (member is! Map<String, dynamic>) return;
+/// Parses a relayed member, or null when the frame is malformed: one bad frame
+/// must not blank the whole crew.
+MemberLocation? _parseFrame(Object? member) {
+  if (member is! Map<String, dynamic>) return null;
   try {
-    final loc = MemberLocation.fromFrame(member);
-    into[loc.userId] = loc;
+    return MemberLocation.fromFrame(member);
   } catch (_) {
-    // One bad frame must not hide everyone else.
+    return null;
   }
+}
+
+/// Records a relayed member in [into], skipping a malformed one.
+void _remember(Map<String, MemberLocation> into, Object? member) {
+  final loc = _parseFrame(member);
+  if (loc != null) into[loc.userId] = loc;
+}
+
+/// The direction of travel from [from] to [to], or null when the two fixes are
+/// too close together for the bearing to mean anything — otherwise a parked
+/// rider's jitter would spin their vehicle on the spot.
+double? _travelHeading(MemberLocation from, MemberLocation to) {
+  const minimumMeters = 5.0;
+  if (haversineMeters(from.lat, from.lng, to.lat, to.lng) < minimumMeters) {
+    return null;
+  }
+  return bearingDegrees(from.lat, from.lng, to.lat, to.lng);
 }
 
 /// The group whose live convoy the current user has joined, or null.
@@ -316,7 +343,21 @@ Stream<Map<String, MemberLocation>> _liveSync(
           final known = lastShareablePosition;
           if (known != null) socket.sendPosition(known);
         case 'position':
-          _remember(latest, frame);
+          final userId = frame['userId'];
+          final previous = userId is String ? latest[userId] : null;
+          final parsed = _parseFrame(frame);
+          if (parsed != null) {
+            // Prefer the course the sender's own device reported. When it has
+            // none — geolocator reports no course while stationary, and a
+            // simulator never reports one — face the vehicle along its travel so
+            // it still turns instead of sitting there pointing north.
+            final derived = parsed.heading == null && previous != null
+                ? _travelHeading(previous, parsed)
+                : null;
+            latest[parsed.userId] = derived == null
+                ? parsed
+                : parsed.withHeading(derived);
+          }
         case 'leave':
           final userId = frame['userId'];
           if (userId is String) latest.remove(userId);

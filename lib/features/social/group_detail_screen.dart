@@ -409,7 +409,7 @@ class GroupDetailScreen extends ConsumerWidget {
   }
 
   // ---------------------------------------------------------------------------
-  // Add a friend directly (admin)
+  // Invite a friend (admin). They accept before becoming a member.
   // ---------------------------------------------------------------------------
 
   Future<void> _addFriend(
@@ -488,10 +488,16 @@ class GroupDetailScreen extends ConsumerWidget {
 
     if (selected == null) return;
     try {
+      // Invite, not add: the friend accepts, so the group can't silently
+      // enlarge someone's memberships (and the free member cap is only spent
+      // when they accept).
       await ref
           .read(groupRepositoryProvider)
-          .addMember(groupId: group.id, userId: selected['id'] as String);
+          .inviteMember(groupId: group.id, userId: selected['id'] as String);
       ref.invalidate(groupMembersProvider(group.id));
+      if (context.mounted) {
+        showAppToast(context, 'Invitation sent to @${selected['username']}.');
+      }
     } catch (e) {
       if (!context.mounted) return;
       // Over the free group-size cap (a DB trigger): offer Pro, don't error.
@@ -523,7 +529,14 @@ class GroupDetailScreen extends ConsumerWidget {
         isOwner ||
         (me != null && me['status'] == 'active' && me['role'] == 'admin');
     final active = members.where((m) => m['status'] == 'active').toList();
-    final pending = members.where((m) => m['status'] == 'pending').toList();
+    // Pending rows come in two kinds: a *join request* (they asked to join, the
+    // admin answers) and an *invitation* (we asked them, the invitee answers).
+    final pending = members
+        .where((m) => m['status'] == 'pending' && m['invited_by'] == null)
+        .toList();
+    final invited = members
+        .where((m) => m['status'] == 'pending' && m['invited_by'] != null)
+        .toList();
     final otherActive = active.where((m) => m['user_id'] != myUid).toList();
 
     return BrandScaffold(
@@ -597,6 +610,40 @@ class GroupDetailScreen extends ConsumerWidget {
                               myUid: myUid,
                               ownerId: group.ownerId,
                               isPending: true,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                  // People we have asked and are waiting on. Informational: the
+                  // answer is the invitee's to give, not the admin's.
+                  if (isAdmin && invited.isNotEmpty) ...[
+                    const SizedBox(height: BrandSpace.lg),
+                    BrandSectionHeader(
+                      icon: Icons.outgoing_mail,
+                      title: 'Invited',
+                      trailing: BrandPill(
+                        label: '${invited.length}',
+                        bold: true,
+                      ),
+                    ),
+                    const SizedBox(height: BrandSpace.sm),
+                    BrandCard(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: BrandSpace.md,
+                        vertical: BrandSpace.xs,
+                      ),
+                      child: Column(
+                        children: [
+                          for (final (i, m) in invited.indexed) ...[
+                            if (i > 0) const BrandRowDivider(),
+                            BrandListRow(
+                              icon: Icons.person_rounded,
+                              title:
+                                  '@${(m['profiles'] as Map<String, dynamic>?)?['username'] ?? 'unknown'}',
+                              subtitle: 'Waiting for them to accept',
+                              showChevron: false,
                             ),
                           ],
                         ],
@@ -713,14 +760,14 @@ class GroupDetailScreen extends ConsumerWidget {
               ),
             ),
           ),
-          // Only an admin may add members (RLS enforces it too), and the FAB
+          // Only an admin may invite (the RPC enforces it too), and the FAB
           // clears the home indicator on gesture-nav devices.
           if (isAdmin)
             Positioned(
               right: BrandSpace.md,
               bottom: BrandSpace.md,
               child: BrandPrimaryButton(
-                label: 'Add member',
+                label: 'Invite friend',
                 leadingIcon: Icons.person_add_rounded,
                 trailingIcon: null,
                 expand: false,

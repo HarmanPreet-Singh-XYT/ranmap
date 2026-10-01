@@ -39,6 +39,11 @@ class _DocumentViewerScreenState extends ConsumerState<DocumentViewerScreen> {
     return bytes;
   }
 
+  /// Only images can be rendered here or saved to the photo library; a PDF is
+  /// handed to another app instead (see [_Unsupported]).
+  bool get _isImage =>
+      !widget.document.storagePath.toLowerCase().endsWith('.pdf');
+
   Future<void> _openExternally() async {
     final url = await ref
         .read(documentRepositoryProvider)
@@ -52,9 +57,9 @@ class _DocumentViewerScreenState extends ConsumerState<DocumentViewerScreen> {
       header: BrandHeader(
         title: widget.document.name,
         onBack: () => Navigator.of(context).maybePop(),
-        actionIcon: Icons.download_rounded,
+        actionIcon: _isImage ? Icons.download_rounded : null,
         actionTooltip: 'Save to Photos',
-        onAction: _loaded == null
+        onAction: !_isImage || _loaded == null
             ? null
             : () => saveImageToGallery(
                 context,

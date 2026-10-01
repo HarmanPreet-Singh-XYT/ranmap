@@ -89,3 +89,33 @@ export async function listCommonTrips(
     .filter((t) => theirs.has(t.id))
     .map((t) => ({ id: t.id, title: t.title, status: t.status }));
 }
+
+export type PersonRelationship = "friend" | "riding" | "travelled" | "group";
+
+/** One row of `people_around_me()`: who, why they're in my orbit, may I DM. */
+export interface PersonAround {
+  user_id: string;
+  username: string | null;
+  display_name: string | null;
+  avatar_id: string | null;
+  vehicle_type: string | null;
+  relationship: PersonRelationship;
+  is_friend: boolean;
+  can_message: boolean;
+}
+
+export const RELATIONSHIP_LABEL: Record<PersonRelationship, string> = {
+  friend: "Friend",
+  riding: "Riding now",
+  travelled: "Rode together",
+  group: "Group",
+};
+
+/** Everyone the caller shares a friendship, trip or group with, strongest tie first. */
+export async function listPeopleAroundMe(
+  supabase: SupabaseClient,
+): Promise<PersonAround[]> {
+  const { data, error } = await supabase.rpc("people_around_me");
+  if (error) return [];
+  return (data ?? []) as PersonAround[];
+}

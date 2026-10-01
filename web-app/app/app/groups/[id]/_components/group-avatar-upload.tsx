@@ -5,9 +5,14 @@ import { useRouter } from "next/navigation";
 import { Camera, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { CUSTOM_AVATAR_PREFIX } from "@/lib/avatar";
+import {
+  imageMimeOf,
+  IMAGE_TOO_LARGE_MESSAGE,
+  isAllowedImage,
+  MAX_IMAGE_BYTES,
+  UNSUPPORTED_IMAGE_MESSAGE,
+} from "@/lib/data/image";
 import { setGroupAvatar } from "../../actions";
-
-const MAX_BYTES = 5 * 1024 * 1024;
 
 /**
  * Lets a group admin upload a crew photo. The file goes to the public `avatars`
@@ -24,12 +29,14 @@ export function GroupAvatarUpload({ groupId, userId }: { groupId: string; userId
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setError("Choose an image file.");
+    // The bucket enforces these (0055); checking here gives a specific
+    // message instead of a generic Storage rejection.
+    if (!isAllowedImage(file)) {
+      setError(UNSUPPORTED_IMAGE_MESSAGE);
       return;
     }
-    if (file.size > MAX_BYTES) {
-      setError("Image must be under 5 MB.");
+    if (file.size > MAX_IMAGE_BYTES) {
+      setError(IMAGE_TOO_LARGE_MESSAGE);
       return;
     }
 
@@ -41,7 +48,7 @@ export function GroupAvatarUpload({ groupId, userId }: { groupId: string; userId
       const path = `${userId}/group-${groupId}-${Date.now()}.${ext}`;
       const { error: uploadError } = await supabase.storage
         .from("avatars")
-        .upload(path, file, { contentType: file.type || "image/jpeg" });
+        .upload(path, file, { contentType: imageMimeOf(file) });
       if (uploadError) throw uploadError;
 
       await setGroupAvatar(groupId, `${CUSTOM_AVATAR_PREFIX}${path}`);

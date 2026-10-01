@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 const TABS = [
   { href: "/app/trips", label: "Trips", icon: Route },
   { href: "/app/groups", label: "Groups", icon: Users },
-  { href: "/app/friends", label: "Friends", icon: UserRoundPlus },
+  { href: "/app/people", label: "People", icon: UserRoundPlus },
   { href: "/app/chat", label: "Chat", icon: MessagesSquare },
   { href: "/app/photos", label: "Photos", icon: Images },
 ];

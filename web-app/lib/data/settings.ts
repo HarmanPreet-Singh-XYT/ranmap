@@ -30,6 +30,8 @@ export interface PrivateProfile {
   phone_number: string | null;
   phone_verified: boolean;
   socials: Record<string, string>;
+  /** Whether people who aren't friends may start a DM. Off by default. */
+  dm_from_strangers: boolean;
 }
 
 export async function getPrivateProfile(
@@ -40,11 +42,13 @@ export async function getPrivateProfile(
     phone_number?: string | null;
     phone_verified?: boolean;
     socials?: Record<string, string> | null;
+    dm_from_strangers?: boolean;
   };
   return {
     phone_number: row.phone_number ?? null,
     phone_verified: row.phone_verified ?? false,
     socials: row.socials ?? {},
+    dm_from_strangers: row.dm_from_strangers ?? false,
   };
 }
 

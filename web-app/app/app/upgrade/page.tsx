@@ -14,6 +14,7 @@ const PRO_FEATURES = [
   "Unlimited trips & stops",
   "Convoys up to 12 members",
   "Full photo library + downloads",
+  "Up to 10 images per expense",
   "AI assistant (10× the free allowance)",
   "Map search (2,000 / day)",
 ];

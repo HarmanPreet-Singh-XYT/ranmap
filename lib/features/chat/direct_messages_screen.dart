@@ -17,6 +17,7 @@ import '../../core/widgets/brand/brand_skeleton.dart';
 import '../../core/widgets/error_retry.dart';
 import '../../data/models/chat_message.dart';
 import '../../data/services/supabase_service.dart';
+import '../social/social_providers.dart';
 import 'chat_providers.dart';
 import 'chat_screen.dart';
 import 'new_chat_screen.dart';
@@ -82,6 +83,18 @@ class DirectMessagesScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(conversationsProvider);
     final myUid = SupabaseService.currentUser?.id;
+    // Who is a friend, so a thread with someone who isn't can say so: since 0050
+    // a conversation may exist with someone you have merely ridden or grouped
+    // with, and that's worth being obvious about.
+    final friendIds = <String>{};
+    for (final row
+        in ref.watch(friendsProvider).valueOrNull ??
+            const <Map<String, dynamic>>[]) {
+      final other = row['requester_id'] == myUid
+          ? row['addressee_id']
+          : row['requester_id'];
+      if (other is String) friendIds.add(other);
+    }
 
     final body = PullToRefresh(
       onRefresh: () => ref.refresh(conversationsProvider.future),
@@ -150,13 +163,27 @@ class DirectMessagesScreen extends ConsumerWidget {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      c.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: BrandText.titleSm.copyWith(
-                                        color: BrandColors.textHeadline,
-                                      ),
+                                    Row(
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            c.title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: BrandText.titleSm.copyWith(
+                                              color: BrandColors.textHeadline,
+                                            ),
+                                          ),
+                                        ),
+                                        if (!friendIds.contains(c.otherId)) ...[
+                                          const SizedBox(width: 6),
+                                          BrandPill(
+                                            label: 'Not a friend',
+                                            foreground:
+                                                BrandColors.textMuted,
+                                          ),
+                                        ],
+                                      ],
                                     ),
                                     Text(
                                       _preview(c, myUid),

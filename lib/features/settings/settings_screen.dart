@@ -24,11 +24,11 @@ import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import '../../core/widgets/brand/brand_sheet_surface.dart';
 import '../../core/widgets/brand/brand_text_field.dart';
-import '../../data/providers/repository_providers.dart';
 import '../../data/repositories/notification_repository.dart';
 import '../../data/services/supabase_service.dart';
 import '../map/map_engine/map_engine.dart';
 import '../premium/manage_subscription.dart';
+import '../profile/profile_providers.dart';
 import '../premium/premium_providers.dart';
 import '../profile/edit_profile_screen.dart';
 import 'change_credential_screen.dart';
@@ -43,6 +43,12 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(appSettingsProvider);
+    // Server-backed, unlike the local settings above: whether people I'm not
+    // friends with may start a DM lives on my profile (0050), so it follows me
+    // across devices and is what the server actually enforces.
+    final dmFromStrangers =
+        ref.watch(myPrivateProfileProvider).valueOrNull?.dmFromStrangers ??
+        false;
     final notifier = ref.read(appSettingsProvider.notifier);
     final profile = ref.watch(myProfileProvider).valueOrNull;
     final isPro = ref.watch(isProProvider);
@@ -337,6 +343,30 @@ class SettingsScreen extends ConsumerWidget {
                 trailing: HapticSwitch(
                   value: settings.voiceAutoJoin,
                   onChange: notifier.setVoiceAutoJoin,
+                ),
+              ),
+              const BrandRowDivider(),
+              BrandListRow(
+                icon: Icons.forum_outlined,
+                title: 'Messages from strangers',
+                subtitle: dmFromStrangers
+                    ? 'Anyone you have ridden or grouped with can start a chat'
+                    : 'Only friends can start a chat with you',
+                onTap: null,
+                trailing: HapticSwitch(
+                  value: dmFromStrangers,
+                  onChange: (allow) async {
+                    try {
+                      await ref
+                          .read(profileRepositoryProvider)
+                          .setDmFromStrangers(allow);
+                      ref.invalidate(myPrivateProfileProvider);
+                    } catch (e) {
+                      if (context.mounted) {
+                        showAppToast(context, friendlyError(e), error: true);
+                      }
+                    }
+                  },
                 ),
               ),
               const BrandRowDivider(),

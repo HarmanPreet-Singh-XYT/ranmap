@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/network/backend_client.dart';
+import '../../core/util/image_upload.dart';
 import '../models/checklist_item.dart';
 import '../models/profile.dart';
 import '../models/stop_proposal.dart';
@@ -503,10 +505,11 @@ class TripRepository {
     );
   }
 
-  /// Logs an expense. When [id] is supplied (offline-capable path) the insert
-  /// is idempotent on that id, so a lost response can't duplicate the row.
+  /// Logs an expense, then its attachments. When [id] is supplied
+  /// (offline-capable path) the insert is idempotent on that id, so a lost
+  /// response can't duplicate the row.
   Future<TripExpense?> logExpense(TripExpense expense, {String? id}) async {
-    final payload = {...expense.toInsertJson(), 'id': ?id};
+    final payload = {...expense.toRowJson(), 'id': ?id};
     final row = id == null
         ? await _client
               .from('trip_expenses')
@@ -518,19 +521,79 @@ class TripRepository {
               .upsert(payload, onConflict: 'id', ignoreDuplicates: true)
               .select()
               .maybeSingle();
-    return row == null ? null : TripExpense.fromJson(row);
+    if (row == null) return null;
+    final saved = TripExpense.fromJson(row);
+    try {
+      await attachExpenseMedia(saved.id, expense.attachments);
+    } catch (e) {
+      // The account's attachment cap refused them. Roll the expense back rather
+      // than leaving a row with no images behind: the caller shows the paywall,
+      // and a retry after upgrading must not log the money a second time.
+      try {
+        await _client.from('trip_expenses').delete().eq('id', saved.id);
+      } catch (cleanupError) {
+        debugPrint('logExpense: rollback failed: $cleanupError');
+      }
+      rethrow;
+    }
+    return saved.withAttachments(expense.attachments);
   }
 
-  /// Replays an offline-queued expense. Idempotent via the client-supplied
-  /// [id], so a retry after a lost response can't duplicate the row.
+  /// Replays an offline-queued expense, attachments included. Idempotent via the
+  /// client-supplied [id], so a retry after a lost response can't duplicate
+  /// either the row or its images.
   Future<void> replayExpense(String id, Map<String, dynamic> insertJson) async {
+    final payload = Map<String, dynamic>.from(insertJson);
+    final attachments =
+        (payload.remove('attachments') as List?)?.cast<String>() ?? const [];
     await _client
         .from('trip_expenses')
         .upsert(
-          {'id': id, ...insertJson},
+          {'id': id, ...payload},
           onConflict: 'id',
           ignoreDuplicates: true,
         );
+    await attachExpenseMedia(id, attachments);
+  }
+
+  /// Stores an expense's attachment paths, in order. Idempotent on
+  /// (expense, path) so a replay can't trip the unique index.
+  ///
+  /// [startAt] is the position of the first path — pass the number already
+  /// attached when adding more to an existing expense, so the new images land
+  /// after the old ones instead of interleaving with them.
+  Future<void> attachExpenseMedia(
+    String expenseId,
+    List<String> storagePaths, {
+    int startAt = 0,
+  }) async {
+    if (storagePaths.isEmpty) return;
+    await _client.from('trip_expense_media').upsert(
+      [
+        for (final (index, path) in storagePaths.indexed)
+          {
+            'expense_id': expenseId,
+            'storage_path': path,
+            'position': startAt + index,
+          },
+      ],
+      onConflict: 'expense_id,storage_path',
+      ignoreDuplicates: true,
+    );
+  }
+
+  /// Removes one attachment from an expense: the row, then the object. Owner
+  /// only, enforced by the media table's delete policy.
+  Future<void> removeExpenseAttachment({
+    required String expenseId,
+    required String storagePath,
+  }) async {
+    await _client
+        .from('trip_expense_media')
+        .delete()
+        .eq('expense_id', expenseId)
+        .eq('storage_path', storagePath);
+    await removeExpenseAttachments([storagePath]);
   }
 
   /// Replays an offline-queued stop, appending it to the trip's current order.
@@ -597,13 +660,99 @@ class TripRepository {
         .eq('trip_id', tripId)
         .order('logged_at')
         .limit(500);
-    return (rows as List)
-        .map((r) => TripExpense.fromJson(r as Map<String, dynamic>))
-        .toList();
+    final expenses = [
+      for (final row in rows as List)
+        TripExpense.fromJson(row as Map<String, dynamic>),
+    ];
+    if (expenses.isEmpty) return expenses;
+
+    // Every attachment on the trip in one query, grouped here: a query per
+    // expense would be an N+1 on a list that is always read as a whole. Ordering
+    // by position keeps each expense's images in the order they were added.
+    //
+    // Best-effort: the ledger is the point of this screen, so a failure to read
+    // the images shouldn't take the whole list down with it.
+    final byExpense = <String, List<String>>{};
+    try {
+      final media = await _client
+          .from('trip_expense_media')
+          .select('expense_id, storage_path')
+          .inFilter('expense_id', [for (final expense in expenses) expense.id])
+          .order('position');
+      for (final row in media as List) {
+        final entry = row as Map<String, dynamic>;
+        final expenseId = entry['expense_id'] as String?;
+        final path = entry['storage_path'] as String?;
+        if (expenseId == null || path == null) continue;
+        (byExpense[expenseId] ??= <String>[]).add(path);
+      }
+    } catch (e) {
+      debugPrint('expensesFor: attachment lookup failed: $e');
+    }
+    return [
+      for (final expense in expenses)
+        expense.withAttachments(byExpense[expense.id] ?? const []),
+    ];
   }
 
-  Future<void> deleteExpense(String expenseId) async {
+  Future<void> deleteExpense(
+    String expenseId, {
+    List<String> attachments = const [],
+  }) async {
     await _client.from('trip_expenses').delete().eq('id', expenseId);
+    // Best-effort: orphaned images cost storage, but a failed cleanup must not
+    // make the expense look undeletable. The media rows themselves go with the
+    // row (the foreign key cascades).
+    await removeExpenseAttachments(attachments);
+  }
+
+  /// Best-effort removal of uploaded attachment objects — used when an expense is
+  /// deleted, and when a save was refused after its images had already uploaded.
+  Future<void> removeExpenseAttachments(List<String> storagePaths) async {
+    if (storagePaths.isEmpty) return;
+    try {
+      await _client.storage.from('map-media').remove(storagePaths);
+    } catch (e) {
+      debugPrint('removeExpenseAttachments: cleanup failed: $e');
+    }
+  }
+
+  /// Uploads one expense image into the shared `map-media` bucket, under this
+  /// user's folder (the bucket's write policies are folder-scoped). Returns the
+  /// object path to attach to the expense; the read policy makes it visible to
+  /// everyone on the trip (0053).
+  Future<String> uploadExpenseAttachment({
+    required Uint8List imageBytes,
+    required String fileExtension,
+  }) async {
+    final uid = SupabaseService.currentUserId;
+    final extension = fileExtension.toLowerCase();
+    final validationError = imageUploadError(
+      byteLength: imageBytes.length,
+      extension: extension,
+    );
+    if (validationError != null) throw ImageUploadException(validationError);
+
+    final storagePath =
+        '$uid/expense-${DateTime.now().microsecondsSinceEpoch}.$extension';
+    await _client.storage
+        .from('map-media')
+        .uploadBinary(
+          storagePath,
+          imageBytes,
+          fileOptions: FileOptions(contentType: imageContentType(extension)),
+        );
+    return storagePath;
+  }
+
+  /// A time-limited URL for an expense image (the bucket is private).
+  Future<String> attachmentSignedUrl(
+    String storagePath, {
+    int expiresInSeconds = 3600,
+  }) {
+    return _client.storage
+        .from('map-media')
+        .createSignedUrl(storagePath, expiresInSeconds);
   }
 
   /// Leave a trip you were invited to (removes your own membership).

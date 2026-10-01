@@ -38,32 +38,52 @@ class GroupRepository {
     return Group.fromJson(row);
   }
 
-  /// The group's roster, including pending join requests and each member's
-  /// role. Readable by any member; only an admin sees other members' pending
-  /// rows (RLS).
+  /// The group's roster, including pending join requests / invitations and each
+  /// member's role. Readable by any member; only an admin sees other members'
+  /// pending rows (RLS).
+  ///
+  /// `invited_by` distinguishes the two kinds of pending row: an invitation
+  /// (someone was asked to join) from a join request (someone asked to join).
   Future<List<Map<String, dynamic>>> membersFor(String groupId) async {
     final rows = await _client
         .from('group_members')
         .select(
-          'user_id, role, status, joined_at, profiles($kProfilePublicColumns)',
+          'user_id, role, status, joined_at, invited_by, '
+          'profiles($kProfilePublicColumns)',
         )
         .eq('group_id', groupId);
     return (rows as List).cast<Map<String, dynamic>>();
   }
 
-  /// Adds a pre-existing friend to the group directly (an admin action). Fires
-  /// a best-effort push so the new member hears about it.
-  Future<void> addMember({
+  /// Invites a pre-existing friend to the group (an admin action). The row lands
+  /// as `pending` and the friend accepts — the same consent shape as a trip
+  /// invite, so nobody is silently made a member. Also fires a best-effort push.
+  Future<void> inviteMember({
     required String groupId,
     required String userId,
   }) async {
-    await _client.from('group_members').insert({
-      'group_id': groupId,
-      'user_id': userId,
-      'role': 'member',
-      'status': 'active',
-    });
+    await _client.rpc(
+      'invite_group_member',
+      params: {'p_group': groupId, 'p_user': userId},
+    );
     unawaited(_notifyGroupInvite(groupId: groupId, userId: userId));
+  }
+
+  /// The groups I have been invited to and haven't answered yet.
+  Future<List<Map<String, dynamic>>> myInvites() async {
+    final data = await _client.rpc('my_group_invites');
+    return (data as List?)?.cast<Map<String, dynamic>>() ?? const [];
+  }
+
+  /// Accepts or declines an invitation addressed to me.
+  Future<void> respondToInvite({
+    required String groupId,
+    required bool accept,
+  }) async {
+    await _client.rpc(
+      'respond_group_invite',
+      params: {'p_group': groupId, 'p_accept': accept},
+    );
   }
 
   /// Renames / re-describes / re-avatars a group. Admin only (enforced by the

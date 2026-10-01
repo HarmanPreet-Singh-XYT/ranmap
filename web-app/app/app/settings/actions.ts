@@ -54,3 +54,15 @@ export async function unblockUser(formData: FormData): Promise<void> {
   await supabase.rpc("unblock_user", { p_target: targetId });
   revalidatePath("/app/settings/blocked");
 }
+
+/** Who may start a DM: friends always, strangers only when this is on (0051). */
+export async function setDmFromStrangers(formData: FormData): Promise<void> {
+  const supabase = await createClient();
+  const userId = await currentUserId(supabase);
+  if (!userId) return;
+  await supabase
+    .from("profiles")
+    .update({ dm_from_strangers: bool(formData.get("allow")) })
+    .eq("id", userId);
+  revalidatePath("/app/settings");
+}

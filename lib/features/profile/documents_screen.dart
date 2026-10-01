@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import '../../core/widgets/pull_to_refresh.dart';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
@@ -10,6 +11,7 @@ import 'package:intl/intl.dart';
 import '../../core/constants/plan_limits.dart';
 import '../../core/theme/brand_palette.dart';
 import '../../core/theme/brand_typography.dart';
+import '../../core/util/document_upload.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/validation.dart';
 import '../../core/widgets/app_choice_sheet.dart';
@@ -89,17 +91,47 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
       return;
     }
 
+    // The wallet takes PDFs as well as photos, and the photo picker can't reach
+    // a PDF, so ask where the file lives before opening a picker.
+    final source = await showAppChoiceSheet<String>(
+      context,
+      title: 'Add from',
+      options: const [
+        (value: 'photo', label: 'Photo library'),
+        (value: 'file', label: 'PDF file'),
+      ],
+    );
+    if (source == null || !mounted) return;
+
     // The picker and the byte read can both throw (permission, IO); keep them
     // inside the guard so a failure surfaces as a toast, not an unhandled error.
     final Uint8List bytes;
     final String extension;
     try {
-      final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
-      if (picked == null || !mounted) return;
-      bytes = Uint8List.fromList(await picked.readAsBytes());
-      extension = picked.name.contains('.')
-          ? picked.name.split('.').last
-          : 'jpg';
+      if (source == 'file') {
+        // Only PDFs: the bucket refuses anything else there, and a document
+        // picker that offers every format invites a save that can't succeed.
+        final picked = await openFile(
+          acceptedTypeGroups: const [
+            XTypeGroup(
+              label: 'PDF',
+              extensions: ['pdf'],
+              mimeTypes: ['application/pdf'],
+              uniformTypeIdentifiers: ['com.adobe.pdf'],
+            ),
+          ],
+        );
+        if (picked == null || !mounted) return;
+        bytes = Uint8List.fromList(await picked.readAsBytes());
+        extension = documentExtensionOf(picked.name);
+      } else {
+        final picked = await ImagePicker().pickImage(
+          source: ImageSource.gallery,
+        );
+        if (picked == null || !mounted) return;
+        bytes = Uint8List.fromList(await picked.readAsBytes());
+        extension = documentExtensionOf(picked.name);
+      }
     } catch (e) {
       if (mounted) showAppToast(context, friendlyError(e), error: true);
       return;

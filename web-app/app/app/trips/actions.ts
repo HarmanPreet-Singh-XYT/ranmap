@@ -12,6 +12,13 @@ export interface TripActionState {
   error: string | null;
   /** True when the failure is a free-tier lock (show the paywall). */
   premium?: boolean;
+  /** The write succeeded — a form holding staged uploads can clear them. */
+  ok?: boolean;
+  /**
+   * The action removed uploads the form had staged (a refused save), so the form
+   * must drop them too: they no longer exist in the bucket.
+   */
+  uploadsDropped?: boolean;
 }
 
 /** A DB error the user should see — the plan-limit message, or a generic one. */
@@ -181,28 +188,126 @@ export async function moveStop(formData: FormData): Promise<void> {
   revalidatePath(`/app/trips/${tripId}`);
 }
 
-export async function addExpense(formData: FormData): Promise<void> {
+export async function addExpense(
+  _prev: TripActionState,
+  formData: FormData,
+): Promise<TripActionState> {
   const tripId = str(formData.get("trip_id"));
   const amount = num(formData.get("amount"));
-  if (!tripId || amount === null || amount <= 0) return;
+  if (!tripId || amount === null || amount <= 0) {
+    return { error: "Enter an amount first." };
+  }
 
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return;
+  if (!user) return { error: "You're signed out." };
 
-  await supabase.from("trip_expenses").insert({
-    trip_id: tripId,
-    user_id: user.id,
-    category: str(formData.get("category")) ?? "fuel",
-    amount,
-    currency: str(formData.get("currency")) ?? "USD",
-    fuel_liters: num(formData.get("fuel_liters")),
-    odometer_km: num(formData.get("odometer_km")),
-    note: str(formData.get("note")),
-    logged_at: new Date().toISOString(),
-  });
+  // All optional and shared with the trip: a place (name + point) and the images
+  // the form has already uploaded to the shared `map-media` bucket. The number
+  // of images is the account tier's allowance (0053).
+  const lat = num(formData.get("lat"));
+  const lng = num(formData.get("lng"));
+  const attachments = formData
+    .getAll("attachments")
+    .map((value) => String(value).trim())
+    .filter((value) => value.length > 0);
+
+  const { data: inserted, error } = await supabase
+    .from("trip_expenses")
+    .insert({
+      trip_id: tripId,
+      user_id: user.id,
+      category: str(formData.get("category")) ?? "fuel",
+      amount,
+      currency: str(formData.get("currency")) ?? "USD",
+      fuel_liters: num(formData.get("fuel_liters")),
+      odometer_km: num(formData.get("odometer_km")),
+      note: str(formData.get("note")),
+      point: lat !== null && lng !== null ? toEwkt(lat, lng) : null,
+      place_name: str(formData.get("place_name")),
+      logged_at: new Date().toISOString(),
+    })
+    .select("id")
+    .maybeSingle();
+  if (error) return dbErrorMessage(error);
+
+  const expenseId = (inserted as { id?: string } | null)?.id;
+  if (expenseId && attachments.length > 0) {
+    const { error: mediaError } = await supabase
+      .from("trip_expense_media")
+      .insert(
+        attachments.map((path, index) => ({
+          expense_id: expenseId,
+          storage_path: path,
+          position: index,
+        })),
+      );
+    if (mediaError) {
+      // The free/paid attachment cap is a trigger on this insert, and it raises
+      // the usual marker `dbErrorMessage` turns into the paywall. Roll the
+      // expense back with it, so a refused save leaves nothing half-created —
+      // and take the uploaded objects with it.
+      await supabase.from("trip_expenses").delete().eq("id", expenseId);
+      await supabase.storage.from("map-media").remove(attachments);
+      return { ...dbErrorMessage(mediaError), uploadsDropped: true };
+    }
+  }
+
+  revalidatePath(`/app/trips/${tripId}/expenses`);
+  return { error: null, ok: true };
+}
+
+/** Adds more images to an expense that is already logged. Owner only (RLS). */
+export async function attachExpenseMedia(
+  expenseId: string,
+  tripId: string,
+  storagePaths: string[],
+): Promise<TripActionState> {
+  const supabase = await createClient();
+  if (!(await currentUserId(supabase))) return { error: "You're signed out." };
+  if (storagePaths.length === 0) return { error: null };
+
+  // Continue the ordering after what is already attached.
+  const { count } = await supabase
+    .from("trip_expense_media")
+    .select("id", { count: "exact", head: true })
+    .eq("expense_id", expenseId);
+  const startAt = count ?? 0;
+
+  const { error } = await supabase.from("trip_expense_media").insert(
+    storagePaths.map((path, index) => ({
+      expense_id: expenseId,
+      storage_path: path,
+      position: startAt + index,
+    })),
+  );
+  if (error) {
+    // The cap refused them, so nothing will reference these objects — take them
+    // back out rather than leaving them orphaned in the bucket.
+    await supabase.storage.from("map-media").remove(storagePaths);
+    return { ...dbErrorMessage(error), uploadsDropped: true };
+  }
+
+  revalidatePath(`/app/trips/${tripId}/expenses`);
+  return { error: null, ok: true };
+}
+
+/** Removes one image from an expense: the row, then the object. Owner only. */
+export async function removeExpenseMedia(
+  expenseId: string,
+  tripId: string,
+  storagePath: string,
+): Promise<void> {
+  const supabase = await createClient();
+  if (!(await currentUserId(supabase))) return;
+  await supabase
+    .from("trip_expense_media")
+    .delete()
+    .eq("expense_id", expenseId)
+    .eq("storage_path", storagePath);
+  await supabase.storage.from("map-media").remove([storagePath]);
   revalidatePath(`/app/trips/${tripId}/expenses`);
 }
 
@@ -212,7 +317,22 @@ export async function deleteExpense(formData: FormData): Promise<void> {
   if (!tripId || !expenseId) return;
   const supabase = await createClient();
   if (!(await currentUserId(supabase))) return;
+  // Read the attachments first, so deleting the row doesn't leave the images
+  // behind in the bucket with nothing pointing at them.
+  const { data: media } = await supabase
+    .from("trip_expense_media")
+    .select("storage_path")
+    .eq("expense_id", expenseId);
   await supabase.from("trip_expenses").delete().eq("id", expenseId);
+  const paths = ((media ?? []) as { storage_path: string }[]).map(
+    (row) => row.storage_path,
+  );
+  if (paths.length > 0) {
+    // Best-effort: orphaned objects cost storage, but a failure here must not
+    // make the expense look undeletable. The media rows go with the expense row
+    // (the foreign key cascades).
+    await supabase.storage.from("map-media").remove(paths);
+  }
   revalidatePath(`/app/trips/${tripId}/expenses`);
 }
 

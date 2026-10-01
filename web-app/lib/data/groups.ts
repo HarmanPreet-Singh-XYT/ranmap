@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   Group,
+  GroupInvite,
   GroupMember,
   GroupPreview,
   GroupRole,
@@ -102,15 +103,16 @@ export async function listGroupMembers(
   }));
 }
 
-export async function listPendingRequests(
+const PENDING_SELECT =
+  "group_id, user_id, role, status, joined_at, invited_by, profiles(id, username, display_name, avatar_id, vehicle_type)";
+
+async function listPending(
   supabase: SupabaseClient,
   groupId: string,
 ): Promise<GroupMember[]> {
   const { data, error } = await supabase
     .from("group_members")
-    .select(
-      "group_id, user_id, role, status, joined_at, profiles(id, username, display_name, avatar_id, vehicle_type)",
-    )
+    .select(PENDING_SELECT)
     .eq("group_id", groupId)
     .eq("status", "pending");
   if (error) return [];
@@ -120,8 +122,34 @@ export async function listPendingRequests(
     role: row.role as GroupMember["role"],
     status: row.status as GroupMember["status"],
     joined_at: (row.joined_at as string | null) ?? null,
+    invited_by: (row.invited_by as string | null) ?? null,
     profile: (row.profiles as GroupMember["profile"]) ?? null,
   }));
+}
+
+/** People who asked to join — the admin's to answer. */
+export async function listPendingRequests(
+  supabase: SupabaseClient,
+  groupId: string,
+): Promise<GroupMember[]> {
+  return (await listPending(supabase, groupId)).filter((m) => !m.invited_by);
+}
+
+/** People an admin has invited — the invitee's to answer. */
+export async function listSentInvites(
+  supabase: SupabaseClient,
+  groupId: string,
+): Promise<GroupMember[]> {
+  return (await listPending(supabase, groupId)).filter((m) => Boolean(m.invited_by));
+}
+
+/** Groups the signed-in user has been invited to and not yet answered. */
+export async function listMyGroupInvites(
+  supabase: SupabaseClient,
+): Promise<GroupInvite[]> {
+  const { data, error } = await supabase.rpc("my_group_invites");
+  if (error) return [];
+  return (data ?? []) as GroupInvite[];
 }
 
 export async function groupInvitePreview(

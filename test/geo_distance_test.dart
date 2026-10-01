@@ -27,4 +27,27 @@ void main() {
       expect(meters, closeTo(111.2, 1));
     });
   });
+
+  group('bearingDegrees', () {
+    test('north, east, south and west read as 0, 90, 180, 270', () {
+      expect(bearingDegrees(0, 0, 1, 0), closeTo(0, 0.5));
+      expect(bearingDegrees(0, 0, 0, 1), closeTo(90, 0.5));
+      expect(bearingDegrees(1, 0, 0, 0), closeTo(180, 0.5));
+      expect(bearingDegrees(0, 1, 0, 0), closeTo(270, 0.5));
+    });
+
+    test('always reports 0..360, never a negative heading', () {
+      final west = bearingDegrees(0, 1, 0, 0);
+      expect(west, greaterThanOrEqualTo(0));
+      expect(west, lessThan(360));
+    });
+
+    test('follows the great circle rather than the flat-map angle', () {
+      // Due east along the equator really is due east...
+      expect(bearingDegrees(0, 0, 0, 10), closeTo(90, 0.5));
+      // ...but a long leg at high latitude starts north-east and ends up
+      // curving, which is the point of using the initial bearing.
+      expect(bearingDegrees(60, 0, 60, 10), lessThan(90));
+    });
+  });
 }

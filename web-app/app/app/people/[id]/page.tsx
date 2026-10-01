@@ -18,6 +18,7 @@ import {
   getPublicProfile,
   listCommonGroups,
   listCommonTrips,
+  listPeopleAroundMe,
 } from "@/lib/data/people";
 import { AvatarView } from "@/app/(account)/_components/avatar-view";
 import { Button } from "@/components/ui/button";
@@ -50,10 +51,13 @@ const TRIP_STATUS: Record<string, string> = {
 
 export default async function PersonPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ notice?: string }>;
 }) {
   const { id } = await params;
+  const { notice } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -61,11 +65,12 @@ export default async function PersonPage({
   if (!user) return null;
   if (id === user.id) redirect("/app/profile");
 
-  const [profile, friendship, groups, trips] = await Promise.all([
+  const [profile, friendship, groups, trips, around] = await Promise.all([
     getPublicProfile(supabase, id),
     getFriendshipWith(supabase, user.id, id),
     listCommonGroups(supabase, user.id, id),
     listCommonTrips(supabase, user.id, id),
+    listPeopleAroundMe(supabase),
   ]);
   if (!profile) notFound();
 
@@ -74,17 +79,20 @@ export default async function PersonPage({
     ? (VEHICLE_LABELS[profile.vehicle_type] ?? profile.vehicle_type)
     : null;
   const isFriend = friendship?.status === "accepted";
+  // Friends can always be messaged; anyone else only if they opted in to
+  // messages from people they've met (and nobody has blocked anybody).
+  const canMessage = around.find((p) => p.user_id === id)?.can_message ?? isFriend;
   const iRequested = friendship?.requester_id === user.id;
   const pending = friendship?.status === "pending";
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6">
       <Link
-        href="/app/friends"
+        href="/app/people"
         className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-emerald-700"
       >
         <ArrowLeft className="size-3.5" aria-hidden />
-        Friends
+        People
       </Link>
 
       <Card>
@@ -107,8 +115,19 @@ export default async function PersonPage({
             </span>
           )}
 
+          {notice === "cant-message" && (
+            <p
+              role="alert"
+              className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900"
+            >
+              {isFriend
+                ? "You can't message this person right now."
+                : "This person only accepts messages from friends. Send a friend request instead."}
+            </p>
+          )}
+
           <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
-            {isFriend && (
+            {canMessage && (
               <form action={startDirectConversation}>
                 <input type="hidden" name="user_id" value={profile.id} />
                 <Button type="submit">

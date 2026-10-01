@@ -62,6 +62,15 @@ export interface TripExpense {
   fuel_liters: number | null;
   odometer_km: number | null;
   note: string | null;
+  /** Optional picked location (PostGIS point), with its name. */
+  point: unknown | null;
+  place_name: string | null;
+  /**
+   * Bill/sticker images in the shared `map-media` bucket, in the order they were
+   * added (`trip_expense_media`, 0053). Readable by everyone on the trip, and
+   * filled in by `listTripExpenses` rather than coming from this row.
+   */
+  attachments: string[];
   logged_at: string | null;
 }
 
@@ -100,7 +109,17 @@ export interface GroupMember {
   role: GroupRole;
   status: MemberStatus;
   joined_at: string | null;
+  /** Set on an invitation (an admin asked them); null on a join request. */
+  invited_by?: string | null;
   profile: PublicProfile | null;
+}
+
+/** A pending invitation addressed to the signed-in user (`my_group_invites`). */
+export interface GroupInvite {
+  group_id: string;
+  name: string;
+  invited_by: string | null;
+  inviter_username: string | null;
 }
 
 export interface GroupSummary extends Group {

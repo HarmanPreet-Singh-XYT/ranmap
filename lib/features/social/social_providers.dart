@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/models/group.dart';
+import '../../data/models/person.dart';
 import '../../data/models/trip.dart';
 import '../trip/trip_providers.dart';
 import '../../data/models/profile.dart';
@@ -8,12 +9,22 @@ import '../../data/providers/repository_providers.dart';
 import '../../data/repositories/friend_repository.dart';
 import '../../data/repositories/group_repository.dart';
 import '../../data/repositories/moderation_repository.dart';
+import '../../data/repositories/people_repository.dart';
 
 final friendRepositoryProvider = Provider<FriendRepository>(
   (ref) => FriendRepository(),
 );
 final groupRepositoryProvider = Provider<GroupRepository>(
   (ref) => GroupRepository(),
+);
+final peopleRepositoryProvider = Provider<PeopleRepository>(
+  (ref) => PeopleRepository(),
+);
+
+/// Everyone the user shares a context with, in one query — the People screen's
+/// source. See `people_around_me()` (0050).
+final peopleAroundMeProvider = FutureProvider.autoDispose<List<Person>>(
+  (ref) => ref.watch(peopleRepositoryProvider).aroundMe(),
 );
 final moderationRepositoryProvider = Provider<ModerationRepository>(
   (ref) => ModerationRepository(),
@@ -58,6 +69,12 @@ final profileByUsernameProvider = FutureProvider.autoDispose
 final myGroupsProvider = FutureProvider.autoDispose<List<Group>>(
   (ref) => ref.watch(groupRepositoryProvider).myGroups(),
 );
+
+/// Group invitations waiting on an answer from me.
+final groupInvitesProvider =
+    FutureProvider.autoDispose<List<Map<String, dynamic>>>(
+      (ref) => ref.watch(groupRepositoryProvider).myInvites(),
+    );
 
 /// A single group's current row (RLS: members only). Watched by the detail
 /// screen so renames / invite changes re-render without passing fresh state

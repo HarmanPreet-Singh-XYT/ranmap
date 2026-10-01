@@ -2,11 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Bell, KeyRound, LogOut, ShieldAlert, UserRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getNotificationPrefs } from "@/lib/data/settings";
+import { getNotificationPrefs, getPrivateProfile } from "@/lib/data/settings";
 import { signOut } from "@/app/(account)/actions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { updateNotificationPrefs } from "./actions";
+import { setDmFromStrangers, updateNotificationPrefs } from "./actions";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -29,7 +29,11 @@ export default async function SettingsPage() {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const prefs = await getNotificationPrefs(supabase, user.id);
+  const [prefs, privateProfile] = await Promise.all([
+    getNotificationPrefs(supabase, user.id),
+    getPrivateProfile(supabase),
+  ]);
+  const dmFromStrangers = privateProfile.dm_from_strangers;
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
@@ -65,6 +69,26 @@ export default async function SettingsPage() {
             <Button type="submit" size="sm">
               <Bell aria-hidden />
               Save preferences
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Messages from strangers</CardTitle>
+          <CardDescription>
+            {dmFromStrangers
+              ? "Anyone you have ridden or grouped with can start a chat."
+              : "Only friends can start a chat with you."}{" "}
+            Friends can always write, and blocking still closes a thread.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={setDmFromStrangers}>
+            <input type="hidden" name="allow" value={dmFromStrangers ? "0" : "1"} />
+            <Button type="submit" size="sm" variant="outline">
+              {dmFromStrangers ? "Only allow friends" : "Allow messages from people I've met"}
             </Button>
           </form>
         </CardContent>

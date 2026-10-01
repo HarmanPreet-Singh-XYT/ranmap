@@ -803,6 +803,12 @@ class _ComparisonTable extends StatelessWidget {
       'Up to ${_n(kExtremeMapPostLimit)}',
     ),
     _ComparisonRow(
+      'Images per expense',
+      'Up to $kFreeExpenseMediaLimit',
+      'Up to ${_n(kProExpenseMediaLimit)}',
+      'Up to ${_n(kExtremeExpenseMediaLimit)}',
+    ),
+    _ComparisonRow(
       'AI assistant',
       'Basic',
       '${kProAiTokens ~/ kFreeAiTokens}× more',

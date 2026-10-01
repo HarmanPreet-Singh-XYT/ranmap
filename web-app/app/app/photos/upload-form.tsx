@@ -5,6 +5,13 @@ import { useRouter } from "next/navigation";
 import { ImagePlus, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { toEwkt } from "@/lib/data/geo";
+import {
+  imageMimeOf,
+  IMAGE_TOO_LARGE_MESSAGE,
+  isAllowedImage,
+  MAX_IMAGE_BYTES,
+  UNSUPPORTED_IMAGE_MESSAGE,
+} from "@/lib/data/image";
 import { classifyPlanMessage } from "@/lib/data/plan";
 import { PaywallNotice } from "../_components/paywall-notice";
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,6 +34,18 @@ export function UploadForm({ userId }: { userId: string }) {
 
   async function upload() {
     if (!file || !place || busy) return;
+    // The bucket enforces these (0054); checking here gives a specific message
+    // instead of a generic Storage rejection.
+    if (!isAllowedImage(file)) {
+      setError(UNSUPPORTED_IMAGE_MESSAGE);
+      setPremium(false);
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setError(IMAGE_TOO_LARGE_MESSAGE);
+      setPremium(false);
+      return;
+    }
     setBusy(true);
     setError(null);
     setPremium(false);
@@ -39,7 +58,7 @@ export function UploadForm({ userId }: { userId: string }) {
 
       const { error: uploadError } = await supabase.storage
         .from("map-media")
-        .upload(path, file, { contentType: file.type || "image/jpeg" });
+        .upload(path, file, { contentType: imageMimeOf(file) });
       if (uploadError) throw uploadError;
 
       const { error: insertError } = await supabase.from("map_posts").insert({

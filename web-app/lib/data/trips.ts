@@ -281,7 +281,36 @@ export async function listTripExpenses(
     .eq("trip_id", tripId)
     .order("logged_at", { ascending: false });
   if (error) return [];
-  return (data ?? []) as TripExpense[];
+
+  const expenses = (data ?? []) as TripExpense[];
+  if (expenses.length === 0) return expenses;
+
+  // Every attachment on the trip in one query, grouped here: a query per expense
+  // would be an N+1 on a list that is always read as a whole. Ordering by
+  // position keeps each expense's images in the order they were added.
+  const { data: media } = await supabase
+    .from("trip_expense_media")
+    .select("expense_id, storage_path")
+    .in(
+      "expense_id",
+      expenses.map((expense) => expense.id),
+    )
+    .order("position");
+
+  const byExpense = new Map<string, string[]>();
+  for (const row of (media ?? []) as {
+    expense_id: string;
+    storage_path: string;
+  }[]) {
+    const paths = byExpense.get(row.expense_id) ?? [];
+    paths.push(row.storage_path);
+    byExpense.set(row.expense_id, paths);
+  }
+
+  return expenses.map((expense) => ({
+    ...expense,
+    attachments: byExpense.get(expense.id) ?? [],
+  }));
 }
 
 export async function listTripChecklist(

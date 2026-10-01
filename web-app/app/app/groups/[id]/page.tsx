@@ -7,7 +7,9 @@ import {
   getMyRole,
   listGroupMembers,
   listPendingRequests,
+  listSentInvites,
 } from "@/lib/data/groups";
+import { listFriends } from "@/lib/data/friends";
 import { limitFor, tierFromPlan } from "@/lib/data/plan";
 import { siteUrl } from "@/lib/site";
 import { AvatarView } from "@/app/(account)/_components/avatar-view";
@@ -24,6 +26,7 @@ import {
 } from "../actions";
 import { CopyButton } from "./_components/copy-button";
 import { GroupAvatarUpload } from "./_components/group-avatar-upload";
+import { InviteFriendForm } from "./_components/invite-friend-form";
 import { JoinRequestActions } from "./_components/join-request-actions";
 
 const fieldClass =
@@ -46,15 +49,30 @@ export default async function GroupDetailPage({
   if (!group || !role) notFound();
 
   const isAdmin = role === "owner" || role === "admin";
-  const [members, pending, planResult] = await Promise.all([
+  const [members, pending, invited, friends, planResult] = await Promise.all([
     listGroupMembers(supabase, id),
     isAdmin ? listPendingRequests(supabase, id) : Promise.resolve([]),
+    isAdmin ? listSentInvites(supabase, id) : Promise.resolve([]),
+    isAdmin ? listFriends(supabase, user.id) : Promise.resolve([]),
     supabase.rpc("my_plan").maybeSingle(),
   ]);
   const tier = tierFromPlan(
     (planResult.data ?? null) as { is_pro?: boolean; is_extreme?: boolean } | null,
   );
   const memberLimit = limitFor("members", tier);
+
+  // Friends who aren't already in, invited to, or asking to join this group.
+  const taken = new Set(
+    [...members, ...pending, ...invited].map((m) => m.user_id),
+  );
+  const invitable = friends
+    .filter((f) => f.other && f.status === "accepted" && !taken.has(f.other.id))
+    .map((f) => ({
+      id: f.other!.id,
+      label: f.other!.display_name
+        ? `${f.other!.display_name} (@${f.other!.username})`
+        : `@${f.other!.username}`,
+    }));
 
   const inviteLink = group.invite_code
     ? `${siteUrl}/app/groups/join/${group.invite_code}`
@@ -165,6 +183,11 @@ export default async function GroupDetailPage({
             <CardTitle>Invite people</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+            <InviteFriendForm groupId={id} friends={invitable} />
+            <p className="text-xs text-muted-foreground">
+              Friends you invite accept first, so the {memberLimit}-member{" "}
+              {tier} cap only counts people who say yes.
+            </p>
             {group.invite_code && inviteLink ? (
               <div className="flex flex-wrap items-center gap-2">
                 <code className="rounded-lg bg-muted px-3 py-1.5 text-sm font-semibold tracking-wide">
@@ -251,6 +274,26 @@ export default async function GroupDetailPage({
                   </span>
                 </span>
                 <JoinRequestActions groupId={id} userId={request.user_id} />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {isAdmin && invited.length > 0 && (
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle>Invited ({invited.length})</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {invited.map((invite) => (
+              <div key={invite.user_id} className="text-sm">
+                <span className="block truncate font-medium">
+                  {invite.profile?.display_name || invite.profile?.username}
+                </span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  @{invite.profile?.username} · Waiting for them to accept
+                </span>
               </div>
             ))}
           </CardContent>

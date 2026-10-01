@@ -6,6 +6,7 @@ import '../../core/widgets/app_action_sheet.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
 import '../social/friends_screen.dart';
 import '../social/invite_share.dart';
+import '../social/people_screen.dart';
 import '../social/social_providers.dart';
 import 'ai_conversations_screen.dart';
 import 'chat_channels_screen.dart';
@@ -52,6 +53,15 @@ class _ChatHubScreenState extends ConsumerState<ChatHubScreen> {
       context,
       title: 'People',
       actions: [
+        // The full list: friends, whoever you're riding with now, and everyone
+        // you've ridden or grouped with — with message/add actions on each row.
+        AppSheetAction(
+          label: 'People you know',
+          icon: Icons.diversity_3_rounded,
+          onSelected: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const PeopleScreen()),
+          ),
+        ),
         AppSheetAction(
           label: 'New message',
           icon: Icons.edit_outlined,

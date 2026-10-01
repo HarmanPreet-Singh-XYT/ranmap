@@ -8,7 +8,7 @@ voice, planning shared stops, splitting expenses, and pinning photos to the
 route, while an AI assistant plans the trip for you.
 
 <p align="center">
-  <img src="submission/app-icon-1024.png" width="144" alt="Ranmap app icon">
+  <img src="assets/images/logo/ranmap_logo_transparent.png" width="150" alt="Ranmap logo">
 </p>
 
 <p align="center">
@@ -59,13 +59,60 @@ are on the trip — live positions, voice, shared stops, voting, a shared ledger
 
 ## Screenshots
 
-<!-- TODO: drop the 1179x2556 screenshots into submission/ and uncomment.
 <p align="center">
-  <img src="submission/screenshot-map.png" width="240" alt="Live 3D convoy map">
-  <img src="submission/screenshot-trip.png" width="240" alt="Trip detail">
-  <img src="submission/screenshot-ai.png" width="240" alt="AI trip assistant">
+  <img src="submission/app-images/readme/03.jpg" width="200" alt="Live 3D convoy map">
+  <img src="submission/app-images/readme/08.jpg" width="200" alt="Teammates and photo pins on the live map">
+  <img src="submission/app-images/readme/21.jpg" width="200" alt="AI trip assistant">
+  <img src="submission/app-images/readme/25.jpg" width="200" alt="Profile and Ranmap Pro">
 </p>
--->
+
+<details>
+<summary><b>All 26 screenshots</b></summary>
+
+<table>
+  <tr>
+    <td align="center"><img src="submission/app-images/readme/01.jpg" width="180" alt="Welcome"><br><sub>Welcome</sub></td>
+    <td align="center"><img src="submission/app-images/readme/02.jpg" width="180" alt="Onboarding"><br><sub>Onboarding</sub></td>
+    <td align="center"><img src="submission/app-images/readme/03.jpg" width="180" alt="Map home"><br><sub>Map home</sub></td>
+    <td align="center"><img src="submission/app-images/readme/04.jpg" width="180" alt="New trip"><br><sub>New trip</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="submission/app-images/readme/05.jpg" width="180" alt="Trips"><br><sub>Trips</sub></td>
+    <td align="center"><img src="submission/app-images/readme/06.jpg" width="180" alt="Trip started, join the voice channel"><br><sub>Trip started</sub></td>
+    <td align="center"><img src="submission/app-images/readme/07.jpg" width="180" alt="Live trip map"><br><sub>Live trip map</sub></td>
+    <td align="center"><img src="submission/app-images/readme/08.jpg" width="180" alt="Live convoy and photo pins"><br><sub>Live convoy</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="submission/app-images/readme/09.jpg" width="180" alt="Turn-by-turn navigation"><br><sub>Navigation</sub></td>
+    <td align="center"><img src="submission/app-images/readme/10.jpg" width="180" alt="Route planning"><br><sub>Route planning</sub></td>
+    <td align="center"><img src="submission/app-images/readme/11.jpg" width="180" alt="Map style and layers"><br><sub>Map layers</sub></td>
+    <td align="center"><img src="submission/app-images/readme/12.jpg" width="180" alt="Trip stats"><br><sub>Trip stats</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="submission/app-images/readme/13.jpg" width="180" alt="Fuel and efficiency"><br><sub>Fuel &amp; efficiency</sub></td>
+    <td align="center"><img src="submission/app-images/readme/14.jpg" width="180" alt="Stops and next-stop ETA"><br><sub>Stops &amp; ETA</sub></td>
+    <td align="center"><img src="submission/app-images/readme/15.jpg" width="180" alt="Crew"><br><sub>Crew</sub></td>
+    <td align="center"><img src="submission/app-images/readme/16.jpg" width="180" alt="Expenses ledger"><br><sub>Expenses</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="submission/app-images/readme/17.jpg" width="180" alt="Packing list"><br><sub>Pack</sub></td>
+    <td align="center"><img src="submission/app-images/readme/18.jpg" width="180" alt="Trip menu, recap and live link"><br><sub>Trip menu</sub></td>
+    <td align="center"><img src="submission/app-images/readme/19.jpg" width="180" alt="Trip photos"><br><sub>Trip photos</sub></td>
+    <td align="center"><img src="submission/app-images/readme/20.jpg" width="180" alt="Offline maps"><br><sub>Offline maps</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="submission/app-images/readme/21.jpg" width="180" alt="AI trip assistant"><br><sub>AI assistant</sub></td>
+    <td align="center"><img src="submission/app-images/readme/22.jpg" width="180" alt="Trip chat and voice"><br><sub>Trip chat</sub></td>
+    <td align="center"><img src="submission/app-images/readme/23.jpg" width="180" alt="Direct chat"><br><sub>Direct chat</sub></td>
+    <td align="center"><img src="submission/app-images/readme/24.jpg" width="180" alt="Friend profile"><br><sub>Friend profile</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="submission/app-images/readme/25.jpg" width="180" alt="Profile and Ranmap Pro"><br><sub>Profile &amp; Pro</sub></td>
+    <td align="center"><img src="submission/app-images/readme/26.jpg" width="180" alt="Place details"><br><sub>Place details</sub></td>
+  </tr>
+</table>
+
+</details>
 
 ## Product focus
 
@@ -445,12 +492,13 @@ but have no UPDATE grant on it.
   `is_pro` means **paid** (pro OR extreme), so Extreme inherits every Pro gate;
   `is_extreme` marks the top tier. One paid member still unlocks the whole
   trip/group.
-- **Gated, hard caps** (`0010_plan_limits.sql` + `0032`/`0033`/`0034`, enforced
-  by DB triggers so a modified client can't bypass them). Free: **3** active
-  trips, **25** photos, **1** document, **1** saved route, groups capped at **6**.
-  Pro raises these to **100** trips, **5,000** photos, **100** documents, **100**
-  saved routes and **100** members; Extreme to **250**, **20,000**, **500**,
-  **500** and **250** respectively. Generous ceilings, not literally unlimited
+- **Gated, hard caps** (`0010_plan_limits.sql` + `0032`/`0033`/`0034`/`0053`,
+  enforced by DB triggers so a modified client can't bypass them). Free: **3**
+  active trips, **25** photos, **1** document, **1** saved route, **1** image per
+  expense, groups capped at **6**. Pro raises these to **100** trips, **5,000**
+  photos, **100** documents, **100** saved routes, **10** images per expense and
+  **100** members; Extreme to **250**, **20,000**, **500**, **500**, **25** and
+  **250** respectively. Generous ceilings, not literally unlimited
   (`0033_pro_fair_use_limits.sql`, `0034_extreme_tier.sql`). Raising one group
   member to a paid tier lifts that group's cap for everyone.
 - **Gated, display-only**: full trip stats & history.

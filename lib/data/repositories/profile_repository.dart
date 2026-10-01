@@ -141,14 +141,26 @@ class ProfileRepository {
   }
 
   /// The current user's private fields (phone_number / socials /
-  /// phone_verified), which are not readable through a normal select (see
-  /// 0002_rls_hardening.sql).
-  Future<({String? phoneNumber, Map<String, String> socials, bool phoneVerified})>
-      fetchMyPrivate() async {
+  /// phone_verified / who may message them), which are not readable through a
+  /// normal select (see 0002_rls_hardening.sql and 0050).
+  Future<
+    ({
+      String? phoneNumber,
+      Map<String, String> socials,
+      bool phoneVerified,
+      bool dmFromStrangers,
+    })
+  >
+  fetchMyPrivate() async {
     final data = await _client.rpc('my_private_profile');
     final rows = (data as List).cast<Map<String, dynamic>>();
     if (rows.isEmpty) {
-      return (phoneNumber: null, socials: const <String, String>{}, phoneVerified: false);
+      return (
+        phoneNumber: null,
+        socials: const <String, String>{},
+        phoneVerified: false,
+        dmFromStrangers: false,
+      );
     }
     final row = rows.first;
     return (
@@ -157,6 +169,7 @@ class ProfileRepository {
               ?.map((k, v) => MapEntry(k, v as String)) ??
           const <String, String>{},
       phoneVerified: row['phone_verified'] as bool? ?? false,
+      dmFromStrangers: row['dm_from_strangers'] as bool? ?? false,
     );
   }
 
@@ -166,6 +179,16 @@ class ProfileRepository {
   Future<void> updateMySocials(Map<String, String> socials) async {
     final uid = SupabaseService.currentUserId;
     await _client.from('profiles').update({'socials': socials}).eq('id', uid);
+  }
+
+  /// Whether people who aren't friends may start a DM. Friends can always write;
+  /// this only decides the stranger case (see `get_or_create_conversation`).
+  Future<void> setDmFromStrangers(bool allow) async {
+    final uid = SupabaseService.currentUserId;
+    await _client
+        .from('profiles')
+        .update({'dm_from_strangers': allow})
+        .eq('id', uid);
   }
 
   /// PostgREST `ilike` treats `%` and `_` as wildcards — escape them so a

@@ -459,6 +459,7 @@ class _SocialChips extends StatelessWidget {
     String? phoneNumber,
     Map<String, String> socials,
     bool phoneVerified,
+    bool dmFromStrangers,
   })?
   private;
 

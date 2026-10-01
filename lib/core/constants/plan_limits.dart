@@ -19,6 +19,9 @@ const int kFreeDocumentLimit = 1;
 /// Saved route templates a free account may keep.
 const int kFreeRouteTemplateLimit = 1;
 
+/// Images a free account may attach to one expense — the bill photo.
+const int kFreeExpenseMediaLimit = 1;
+
 // ---------------------------------------------------------------------------
 // Pro fair-use ceilings. Pro is metered, not "unlimited": provider quota and
 // storage cost real money, so each resource has a generous but finite ceiling.
@@ -40,6 +43,9 @@ const int kProDocumentLimit = 100;
 /// Saved route templates a Pro account may keep.
 const int kProRouteTemplateLimit = 100;
 
+/// Images a Pro account may attach to one expense.
+const int kProExpenseMediaLimit = 10;
+
 // Extreme tier: the top plan, a strict superset of Pro with higher ceilings.
 // Mirrors `plan_limit()`'s *_extreme keys in supabase/migrations/0034.
 const int kExtremeTripLimit = 250;
@@ -47,6 +53,7 @@ const int kExtremeGroupMemberLimit = 250;
 const int kExtremeMapPostLimit = 20000;
 const int kExtremeDocumentLimit = 500;
 const int kExtremeRouteTemplateLimit = 500;
+const int kExtremeExpenseMediaLimit = 25;
 
 // Metered allowances, mirroring server/src/lib/allowances.ts (free first, then
 // the Pro and Extreme ceilings). Kept here so the paywall comparison can't drift

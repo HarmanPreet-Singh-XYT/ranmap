@@ -10,7 +10,12 @@ export '../../data/providers/repository_providers.dart';
 /// phone_verified), fetched through the `my_private_profile` RPC.
 final myPrivateProfileProvider =
     FutureProvider.autoDispose<
-      ({String? phoneNumber, Map<String, String> socials, bool phoneVerified})
+      ({
+        String? phoneNumber,
+        Map<String, String> socials,
+        bool phoneVerified,
+        bool dmFromStrangers,
+      })
     >((ref) {
       return ref.watch(profileRepositoryProvider).fetchMyPrivate();
     });

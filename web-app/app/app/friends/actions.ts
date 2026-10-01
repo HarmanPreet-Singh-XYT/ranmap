@@ -20,9 +20,12 @@ export async function startDirectConversation(formData: FormData): Promise<void>
   const { data, error } = await supabase.rpc("get_or_create_conversation", {
     p_other: targetId,
   });
-  // The RPC returns the conversation id, or null when messaging isn't allowed
-  // (e.g. no longer friends) — never redirect to a "null" thread.
-  if (error || typeof data !== "string" || !data) return;
+  // The RPC refuses when the person only takes messages from friends (and we
+  // aren't), or when either side has blocked the other. Land on their profile
+  // with the reason rather than failing silently — never redirect to "null".
+  if (error || typeof data !== "string" || !data) {
+    redirect(`/app/people/${targetId}?notice=cant-message`);
+  }
   redirect(`/app/chat/direct/${data}`);
 }
 

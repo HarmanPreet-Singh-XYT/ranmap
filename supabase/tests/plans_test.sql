@@ -8,7 +8,7 @@
 
 begin;
 
-select plan(19);
+select plan(23);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures. alice / bob / carol plus seven plain members for the group cap.
@@ -134,6 +134,50 @@ select lives_ok(
      values ('aaaaaaaa-0000-0000-0000-000000000000',
              '00000000-0000-0000-0000-000000000007') $$,
   'a Pro member lifts the group cap'
+);
+
+-- ---------------------------------------------------------------------------
+-- Expense attachment cap (bob is free — his Pro plan expired above). The cap is
+-- per expense, not per account.
+-- ---------------------------------------------------------------------------
+insert into public.trips (id, created_by, title)
+values ('bbbbbbbb-0000-0000-0000-000000000000',
+        '22222222-2222-2222-2222-222222222222', 'Bob trip');
+
+insert into public.trip_expenses (id, trip_id, user_id, amount)
+values ('cccccccc-0000-0000-0000-000000000000',
+        'bbbbbbbb-0000-0000-0000-000000000000',
+        '22222222-2222-2222-2222-222222222222', 10);
+
+select lives_ok(
+  $$ insert into public.trip_expense_media (expense_id, storage_path)
+     values ('cccccccc-0000-0000-0000-000000000000', 'bob/receipt-1.jpg') $$,
+  'a free expense can carry one image'
+);
+
+select throws_ok(
+  $$ insert into public.trip_expense_media (expense_id, storage_path)
+     values ('cccccccc-0000-0000-0000-000000000000', 'bob/receipt-2.jpg') $$,
+  'P0001',
+  null,
+  'a free expense cannot carry a second image'
+);
+
+update public.profiles set plan = 'pro' where id = '22222222-2222-2222-2222-222222222222';
+
+select lives_ok(
+  $$ insert into public.trip_expense_media (expense_id, storage_path)
+     select 'cccccccc-0000-0000-0000-000000000000', 'bob/receipt-' || g || '.jpg'
+     from generate_series(2, 10) g $$,
+  'Pro lifts the expense image cap to ten'
+);
+
+select throws_ok(
+  $$ insert into public.trip_expense_media (expense_id, storage_path)
+     values ('cccccccc-0000-0000-0000-000000000000', 'bob/receipt-11.jpg') $$,
+  'P0001',
+  null,
+  'a Pro expense is capped at ten images'
 );
 
 -- ---------------------------------------------------------------------------

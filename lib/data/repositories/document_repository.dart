@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/util/document_upload.dart';
 import '../../core/util/image_upload.dart';
 import '../models/user_document.dart';
 import '../services/supabase_service.dart';
@@ -37,7 +38,7 @@ class DocumentRepository {
   }) async {
     final uid = SupabaseService.currentUserId;
     final ext = fileExtension.toLowerCase();
-    final validationError = imageUploadError(
+    final validationError = documentUploadError(
       byteLength: bytes.length,
       extension: ext,
     );
@@ -49,7 +50,7 @@ class DocumentRepository {
         .uploadBinary(
           path,
           bytes,
-          fileOptions: FileOptions(contentType: imageContentType(ext)),
+          fileOptions: FileOptions(contentType: documentContentType(ext)),
         );
 
     try {
