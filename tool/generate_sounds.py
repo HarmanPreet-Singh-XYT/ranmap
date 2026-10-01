@@ -75,6 +75,10 @@ write("voice_join", seq(note(G5, 0.09, 0.45), note(C6, 0.16, 0.45, decay=5)))
 write("voice_leave", seq(note(C6, 0.09, 0.4), note(G5, 0.16, 0.4, decay=5)))
 write("mute", note(660, 0.1, 0.4, decay=5, sweep=440, harmonics=(1.0, 0.1)))
 write("unmute", note(440, 0.1, 0.4, decay=5, sweep=700, harmonics=(1.0, 0.1)))
+# Deafen: the same idea as mute (a low, closing tone) but a two-note fall, so
+# it's clearly distinct from the single swept mute glide. Undeafen rises back.
+write("deafen", seq(note(E5, 0.08, 0.4), note(A4, 0.2, 0.45, decay=5, harmonics=(1.0, 0.2))))
+write("undeafen", seq(note(A4, 0.08, 0.4), note(E5, 0.2, 0.45, decay=5, harmonics=(1.0, 0.2))))
 write("trip_start", seq(note(C5, 0.1, 0.45), note(E5, 0.1, 0.45), note(G5, 0.1, 0.45),
                         note(C6, 0.34, 0.5, decay=4, harmonics=(1.0, 0.4, 0.15))))
 write("trip_end", seq(note(G5, 0.12, 0.42), note(E5, 0.12, 0.42), note(C5, 0.36, 0.45, decay=4)))

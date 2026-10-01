@@ -17,6 +17,8 @@ enum Sfx {
   voiceLeave('voice_leave'),
   mute('mute'),
   unmute('unmute'),
+  deafen('deafen'),
+  undeafen('undeafen'),
   tripStart('trip_start'),
   tripEnd('trip_end'),
   navStart('nav_start'),

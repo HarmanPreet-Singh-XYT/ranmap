@@ -296,9 +296,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
   /// that produces the same post ids would skip the redraw and the pins would
   /// silently never come back.
   PointAnnotationManager? _renderedPostManager;
-
-  /// Last post count logged, so the diagnostic prints on change, not per build.
-  int _loggedPhotoPostCount = -1;
   String? _renderedPlaceId;
 
   // Set once after an overlay sync fails, so the user isn't left wondering why
@@ -308,13 +305,20 @@ class _MapScreenState extends ConsumerState<MapScreen>
   /// Surfaces a persistently-failing overlay sync instead of swallowing it: the
   /// user gets one notice rather than an overlay that silently never renders.
   void _reportOverlaySyncFailure(String what, Object error) {
+    debugPrint('map overlay: $what sync failed: $error');
     if (_overlaySyncErrorShown || !mounted) return;
     _overlaySyncErrorShown = true;
-    showAppToast(
-      context,
-      "Some map details couldn't be shown. Reopen the map to try again.",
-      error: true,
-    );
+    // These syncs are kicked off from build, so a synchronously-failing overlay
+    // would otherwise call setState on the toaster mid-build and abort the
+    // frame. Defer to after it.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showAppToast(
+        context,
+        "Some map details couldn't be shown. Reopen the map to try again.",
+        error: true,
+      );
+    });
   }
 
   // Decoding the route polyline on every build is wasteful for a long route,
@@ -3079,17 +3083,8 @@ class _MapScreenState extends ConsumerState<MapScreen>
     List<MapPost> posts,
     double devicePixelRatio,
   ) async {
-    // Log the feed whenever its size changes, so a missing pin is traceable to
-    // "the map never got the posts" vs "the posts were never drawn".
-    if (posts.length != _loggedPhotoPostCount) {
-      _loggedPhotoPostCount = posts.length;
-      debugPrint('photo pins: map has ${posts.length} post(s)');
-    }
     final manager = _photoPoints;
-    if (manager == null) {
-      debugPrint('photo pins: no manager yet (style not ready) — skipped');
-      return;
-    }
+    if (manager == null) return;
     final ids = [for (final post in posts) post.id];
     // Skip only when the *same* manager already shows exactly these posts. A
     // replaced manager (style reload / map rebuild) must redraw even if the ids
@@ -3098,32 +3093,16 @@ class _MapScreenState extends ConsumerState<MapScreen>
         listEquals(ids, _renderedPostIds)) {
       return;
     }
-    debugPrint('photo pins: drawing ${posts.length} post(s)');
 
     try {
       final color = NavColors.of(context).highway;
 
       // Photos pinned at nearly the same spot stack under one pin that carries a
-      // count, instead of hiding behind each other. Clustering by real distance
-      // (not rounded coordinates) keeps two close-together photos in one stack
-      // wherever the rounding boundary would otherwise fall.
-      final stacks = <List<MapPost>>[];
-      for (final post in posts) {
-        List<MapPost>? stack;
-        for (final candidate in stacks) {
-          final anchor = candidate.first;
-          if (haversineMeters(anchor.lat, anchor.lng, post.lat, post.lng) <=
-              _photoStackRadiusMeters) {
-            stack = candidate;
-            break;
-          }
-        }
-        (stack ?? (stacks..add(<MapPost>[]))).add(post);
-      }
-      for (final stack in stacks) {
-        // Oldest first, so the swipe order matches the order they were taken.
-        stack.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-      }
+      // count, instead of hiding behind each other.
+      final stacks = stackPhotoPins(
+        posts,
+        radiusMeters: _photoStackRadiusMeters,
+      );
       final images = <int, Uint8List>{};
       for (final stack in stacks) {
         images[stack.length] ??= await MapMarkers.pin(
@@ -3161,7 +3140,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
       _renderedPostManager = manager;
     } catch (error) {
       // A failed overlay sync must not take the map down — but don't hide it.
-      debugPrint('photo pins: sync failed: $error');
       _reportOverlaySyncFailure('photo pins', error);
     }
   }

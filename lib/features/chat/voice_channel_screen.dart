@@ -201,8 +201,14 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
                     onChanged: (on) => _report(controller.setPtt(on)),
                   ),
                   const SizedBox(height: BrandSpace.md),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  // A Wrap, not a Row: the controls grow (the flip-camera toggle
+                  // only exists while video is on) and a fixed Row ran off the
+                  // right edge on narrow phones.
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: BrandSpace.sm,
+                    runSpacing: BrandSpace.sm,
                     children: [
                       if (session.ptt)
                         _HoldToTalkButton(
@@ -223,7 +229,6 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
                           ),
                           onPressed: () => _report(controller.toggleMute()),
                         ),
-                      const SizedBox(width: BrandSpace.sm),
                       _IconToggle(
                         icon: session.deafened
                             ? Icons.headset_off_rounded
@@ -232,7 +237,6 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
                         active: session.deafened,
                         onPressed: () => controller.toggleDeafen(),
                       ),
-                      const SizedBox(width: BrandSpace.sm),
                       _IconToggle(
                         icon: session.cameraOn
                             ? Icons.videocam_rounded
@@ -241,16 +245,13 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
                         active: session.cameraOn,
                         onPressed: () => _report(controller.toggleCamera()),
                       ),
-                      if (session.cameraOn) ...[
-                        const SizedBox(width: BrandSpace.sm),
+                      if (session.cameraOn)
                         _IconToggle(
                           icon: Icons.cameraswitch_rounded,
                           label: 'Flip camera',
                           active: false,
                           onPressed: () => _report(controller.switchCamera()),
                         ),
-                      ],
-                      const SizedBox(width: BrandSpace.md),
                       _LeaveButton(onPressed: _leave),
                     ],
                   ),

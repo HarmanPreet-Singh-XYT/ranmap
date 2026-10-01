@@ -17,6 +17,7 @@ export 'headlight_beam.dart';
 export 'route_lines.dart';
 export 'map_markers.dart';
 export 'map_style.dart';
+export 'photo_stacks.dart';
 export 'mapbox_token.dart';
 export 'ranmap_map.dart';
 export 'scene_3d.dart';

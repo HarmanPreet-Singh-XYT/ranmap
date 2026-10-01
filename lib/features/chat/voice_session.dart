@@ -2,6 +2,7 @@ import 'dart:async';
 import '../../core/feedback/app_feedback.dart';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 
@@ -403,6 +404,7 @@ class VoiceSession extends Notifier<VoiceSessionState> {
     }
     state = state.copyWith(deafened: next);
     AppFeedback.selection();
+    AppFeedback.play(next ? Sfx.deafen : Sfx.undeafen, volume: 0.6);
   }
 
   /// Which way the camera faces; flipped by [switchCamera].
@@ -441,14 +443,20 @@ class VoiceSession extends Notifier<VoiceSessionState> {
     try {
       await participant.setCameraEnabled(next);
     } catch (e) {
+      // Usually a blocked camera: with no permission there's no capture device,
+      // so LiveKit can't create a video track and throws TrackCreateException.
+      // [cameraDenied] already puts an explanation on screen with Settings and
+      // Retry, so returning a message here would double up — and the raw LiveKit
+      // exception means nothing to a user.
+      debugPrint('voice: camera toggle failed: $e');
       state = state.copyWith(cameraDenied: true);
-      return friendlyError(e);
+      return null;
     }
     if (_room == null) return null;
-    state = state.copyWith(
-      cameraOn: next,
-      cameraDenied: next ? state.cameraDenied : false,
-    );
+    // The toggle succeeded, so access works: clear the hint even when turning
+    // video on, or a Retry after enabling the camera in Settings would leave the
+    // "blocked" notice up over a working tile.
+    state = state.copyWith(cameraOn: next, cameraDenied: false);
     return null;
   }
 
@@ -480,8 +488,12 @@ class VoiceSession extends Notifier<VoiceSessionState> {
     try {
       await participant.setMicrophoneEnabled(!muted);
     } catch (e) {
+      // Same shape as the camera: a blocked mic can't create a track, and
+      // [micDenied] already puts the hint (with Settings + Retry) on screen, so
+      // log the LiveKit exception instead of showing it.
+      debugPrint('voice: microphone toggle failed: $e');
       state = state.copyWith(micDenied: true);
-      return friendlyError(e);
+      return null;
     }
     if (_room == null) return null;
     if (!keepState) {

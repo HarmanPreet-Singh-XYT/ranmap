@@ -66,8 +66,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   /// Session latch for the pending-invite prompt, so it's presented once.
   bool _invitePromptActive = false;
 
-  /// Whether the launch-time active trip has been offered auto-join.
-  bool _voiceChecked = false;
+  /// The trip the voice sync has already acted on. The launch-time check and
+  /// the provider listener can both fire for the same trip (one that resolves
+  /// just after mount, say), and without this latch they double-offered — and
+  /// double-joined — the voice channel.
+  String? _voiceSyncedTripId;
 
   /// Joins voice for a trip that just became active and leaves when it ends.
   /// Deferred a frame: it changes another provider, which isn't allowed while
@@ -77,6 +80,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       if (!mounted) return;
       final voice = ref.read(voiceSessionProvider.notifier);
       if (next != null && next.id != previous?.id) {
+        // Act once per trip: the launch check and the listener both reach here.
+        if (next.id == _voiceSyncedTripId) return;
+        _voiceSyncedTripId = next.id;
         // A voice channel is for a crew: a solo ride has nobody to talk to, so
         // neither join nor offer it.
         try {
@@ -97,6 +103,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         if (current.inCall && current.channel != channel) return;
         unawaited(voice.join(channel, title: next.title, auto: true));
       } else if (next == null && previous != null) {
+        // Release the latch so the same trip can be offered again if it is
+        // started anew later in the session.
+        if (previous.id == _voiceSyncedTripId) _voiceSyncedTripId = null;
         final current = ref.read(voiceSessionProvider);
         if (current.channel == ChatChannel.trip(previous.id)) {
           unawaited(voice.leave(byUser: false));
@@ -343,13 +352,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       _syncVoiceToActiveTrip(previous?.valueOrNull, next.valueOrNull);
     });
     // The provider may already hold an active trip when the shell mounts (a
-    // trip started earlier); ref.listen only fires on change.
-    if (!_voiceChecked) {
+    // trip started earlier); ref.listen only fires on change. The sync is
+    // latched per trip, so this can't double up with the listener.
+    if (_voiceSyncedTripId == null) {
       final active = ref.watch(activeTripProvider).valueOrNull;
-      if (active != null) {
-        _voiceChecked = true;
-        _syncVoiceToActiveTrip(null, active);
-      }
+      if (active != null) _syncVoiceToActiveTrip(null, active);
     }
 
     // Inbound signals had no home: a trip invite or friend request sat unseen
