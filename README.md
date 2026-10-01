@@ -18,7 +18,7 @@ route, while an AI assistant plans the trip for you.
   <img alt="RevenueCat" src="https://img.shields.io/badge/monetization-RevenueCat-F25A5A?logo=revenuecat&logoColor=white">
 </p>
 
-> **Shipaton 2026 — Next Gen Award entry.** Demo video: <!-- TODO: paste YouTube/Vimeo link --> · Devpost: <!-- TODO: paste Devpost submission link -->
+> **Shipaton 2026 — Next Gen Award entry.** [Demo video](https://www.youtube.com/watch?v=Buv2vJIRKiM) · [Devpost](https://devpost.com/software/ranmap-one-map-for-the-whole-crew)
 
 ## The idea
 
@@ -109,6 +109,35 @@ are on the trip — live positions, voice, shared stops, voting, a shared ledger
   <tr>
     <td align="center"><img src="submission/app-images/readme/25.jpg" width="180" alt="Profile and Ranmap Pro"><br><sub>Profile &amp; Pro</sub></td>
     <td align="center"><img src="submission/app-images/readme/26.jpg" width="180" alt="Place details"><br><sub>Place details</sub></td>
+  </tr>
+</table>
+
+</details>
+
+### Web companion
+
+<p align="center">
+  <img src="submission/web-images/readme/01.jpg" width="320" alt="Web dashboard home">
+</p>
+
+<details>
+<summary><b>All 9 desktop screenshots</b></summary>
+
+<table>
+  <tr>
+    <td align="center"><img src="submission/web-images/readme/01.jpg" width="260" alt="Home"><br><sub>Home</sub></td>
+    <td align="center"><img src="submission/web-images/readme/02.jpg" width="260" alt="Trips"><br><sub>Trips</sub></td>
+    <td align="center"><img src="submission/web-images/readme/03.jpg" width="260" alt="Groups"><br><sub>Groups</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="submission/web-images/readme/04.jpg" width="260" alt="People"><br><sub>People</sub></td>
+    <td align="center"><img src="submission/web-images/readme/05.jpg" width="260" alt="Chat"><br><sub>Chat</sub></td>
+    <td align="center"><img src="submission/web-images/readme/06.jpg" width="260" alt="Saved places"><br><sub>Places</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="submission/web-images/readme/07.jpg" width="260" alt="Photos"><br><sub>Photos</sub></td>
+    <td align="center"><img src="submission/web-images/readme/08.jpg" width="260" alt="Notifications"><br><sub>Notifications</sub></td>
+    <td align="center"><img src="submission/web-images/readme/09.jpg" width="260" alt="Profile and plan"><br><sub>Profile</sub></td>
   </tr>
 </table>
 

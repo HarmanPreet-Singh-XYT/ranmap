@@ -1,3 +1,10 @@
+> **Shipaton 2026 — Next Gen Award entry.** Judged on this video and the open-source
+> repo (AGPL-3.0): https://github.com/HarmanPreet-Singh-XYT/ranmap — Flutter app in
+> `lib/`, Node backend in `server/`, Next.js site in `web-app/`, migrations in
+> `supabase/migrations/`. Setup steps are in the README. No store release is
+> required for this category, so the demo video shows the app running on a real
+> Android device.
+
 ## Inspiration
 
 Navigation and fitness apps are built for one person. You type a destination,
@@ -39,6 +46,12 @@ everything it needs to move as a unit.
 - **Group convoy** — a persistent crew screen that works independently of any
   trip, with SOS to the whole group, "regroup here" with automatic check-in at a
   meeting point, and quick statuses like "Wait up" and "Need fuel".
+- **Receipts on every expense** — attach photos of bills to a shared expense
+  (1 per expense on Free, 10 on Pro, 25 on Extreme), visible to everyone on the trip.
+- **Consent-based crews** — friends are invited to groups and trips and must
+  accept, so nobody is added silently; per-user DM privacy controls who can message you.
+- **Web companion** — a Next.js site (`web-app/`) where the crew can chat, plan
+  trips, split expenses and view profiles from a laptop.
 - **A link anyone can follow** — the trip creator can mint a public, read-only
   page that family at home can watch with no account and no app.
 - **Offline-first** — writes made without signal queue in a persisted outbox and
@@ -118,6 +131,14 @@ never an upsell.
 - **Background location on both platforms** — an Android foreground service and
   iOS background location, each with their own constraints and disclosures.
 
+## Testing the RevenueCat flow
+
+Clone the repo, follow the README setup, and add your own RevenueCat public SDK
+key and a `pro` entitlement with a default offering. The paywall reads that
+offering, purchases go through the RevenueCat SDK, and the server webhook
+(`POST /billing/revenuecat`) writes `profiles.plan`, which the database triggers
+then enforce.
+
 ## Accomplishments that we're proud of
 
 - A genuinely **end-to-end working app**: auth, onboarding, friends and groups,
@@ -158,8 +179,8 @@ never an upsell.
   debounced geocoding.
 - **A proper job queue** for the scheduled-trip poller in production, instead of
   an in-process loop.
-- **Store release** — the app is MVP-ready and being prepared for the App Store
-  and Google Play, with a growth plan around the crew-first viral loop: every
+- **Store release** — the app is a working MVP and runs on Android today; the App
+  Store and Google Play launch comes after the hackathon, with a growth plan around the crew-first viral loop: every
   trip a user starts invites more of their friends into the same live map.
 
 ## Built With
