@@ -88,7 +88,12 @@ export async function listGroupMembers(
   const { data, error } = await supabase
     .from("group_members")
     .select(
-      "group_id, user_id, role, status, joined_at, profiles(id, username, display_name, avatar_id, vehicle_type)",
+      // The FK hint is load-bearing: `invited_by` (0051) added a second foreign
+      // key from group_members to profiles, so a bare `profiles(...)` embed is
+      // ambiguous and PostgREST rejects the whole query with PGRST201. Keep this
+      // one string literal — supabase-js parses the select at the type level and
+      // concatenation collapses the inferred row shape.
+      "group_id, user_id, role, status, joined_at, profiles!group_members_user_id_fkey(id, username, display_name, avatar_id, vehicle_type)",
     )
     .eq("group_id", groupId)
     .eq("status", "active");

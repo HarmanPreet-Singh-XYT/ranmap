@@ -67,7 +67,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Ranmap uses the microphone for voice chat and calls with your group.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Ranmap uses the camera so you can share photos pinned to the map.</string>
+	<string>Ranmap uses your camera to share photos pinned to the map and for video in group calls.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Ranmap saves photos and documents you download to your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

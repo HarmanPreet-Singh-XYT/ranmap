@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../../core/network/backend_client.dart';
 import '../models/group.dart';
 import '../models/profile.dart';
@@ -45,14 +48,26 @@ class GroupRepository {
   /// `invited_by` distinguishes the two kinds of pending row: an invitation
   /// (someone was asked to join) from a join request (someone asked to join).
   Future<List<Map<String, dynamic>>> membersFor(String groupId) async {
-    final rows = await _client
-        .from('group_members')
-        .select(
-          'user_id, role, status, joined_at, invited_by, '
-          'profiles($kProfilePublicColumns)',
-        )
-        .eq('group_id', groupId);
-    return (rows as List).cast<Map<String, dynamic>>();
+    try {
+      final rows = await _client
+          .from('group_members')
+          .select(
+            'user_id, role, status, joined_at, invited_by, '
+            // The FK hint is load-bearing, not decoration: `invited_by` (0051)
+            // added a second foreign key from group_members to profiles, so a
+            // bare `profiles(...)` embed became ambiguous — PostgREST rejects it
+            // with PGRST201 and the whole roster fails to load.
+            'profiles!group_members_user_id_fkey($kProfilePublicColumns)',
+          )
+          .eq('group_id', groupId);
+      return (rows as List).cast<Map<String, dynamic>>();
+    } on PostgrestException catch (e) {
+      // A schema-level failure here (an ambiguous embed, a dropped column) can
+      // only reach the user as the generic "Something went wrong", so leave the
+      // code in the log where it's diagnosable.
+      debugPrint('group members($groupId) failed: ${e.code} ${e.message}');
+      rethrow;
+    }
   }
 
   /// Invites a pre-existing friend to the group (an admin action). The row lands

@@ -163,7 +163,12 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
             ),
           if (session.cameraDenied)
             AppPermissionHint(
-              message: 'Camera access is blocked — enable it in Settings to share video.',
+              // Not "blocked": the toggle can also fail because another app holds
+              // the camera, and asserting a denial the user didn't make is worse
+              // than leaving it as the first thing to check.
+              message:
+                  "Couldn't start the camera — check camera access in Settings, "
+                  'then retry.',
               retryLabel: 'Retry',
               onRetry: () => _report(controller.toggleCamera()),
             ),

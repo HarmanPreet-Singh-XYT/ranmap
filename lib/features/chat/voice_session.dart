@@ -433,21 +433,43 @@ class VoiceSession extends Notifier<VoiceSessionState> {
   /// in Settings and came back. Re-applies the current mute intent.
   Future<String?> retryMicrophone() => _setMicrophone(muted: state.muted);
 
-  /// Turns this device's camera on/off. Video is opt-in and additive: a denied
-  /// camera sets [cameraDenied] (the call stays audio-only) rather than failing.
-  /// Returns a user-facing message on failure, or null.
+  /// Whether this device reports a camera at all.
+  ///
+  /// LiveKit throws the same [lk.TrackCreateException] when there is no capture
+  /// device as it does for a blocked camera, so without this a device with no
+  /// camera (an iOS simulator, say) would be told to enable a permission that
+  /// cannot help. Erring true when enumeration isn't available just leaves the
+  /// toggle attempt to decide, as before.
+  Future<bool> _hasCamera() async {
+    try {
+      return (await lk.Hardware.instance.videoInputs()).isNotEmpty;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Turns this device's camera on/off. Video is opt-in and additive: a camera
+  /// that won't start sets [cameraDenied] (the call stays audio-only) rather
+  /// than failing. Returns a user-facing message, or null.
   Future<String?> toggleCamera() async {
     final participant = _room?.localParticipant;
     if (participant == null) return null;
     final next = !state.cameraOn;
+
+    // Turning video on: first, is there anything to turn on?
+    if (next && !await _hasCamera()) {
+      if (_room == null) return null;
+      state = state.copyWith(cameraOn: false, cameraDenied: false);
+      return 'This device has no camera to share.';
+    }
+
     try {
       await participant.setCameraEnabled(next);
     } catch (e) {
-      // Usually a blocked camera: with no permission there's no capture device,
-      // so LiveKit can't create a video track and throws TrackCreateException.
-      // [cameraDenied] already puts an explanation on screen with Settings and
-      // Retry, so returning a message here would double up — and the raw LiveKit
-      // exception means nothing to a user.
+      // A capture device exists but the track still wouldn't start — most often
+      // a denied permission, occasionally another app holding the camera.
+      // [cameraDenied] shows the hint (Settings + Retry), so log the LiveKit
+      // exception rather than putting it in front of the user.
       debugPrint('voice: camera toggle failed: $e');
       state = state.copyWith(cameraDenied: true);
       return null;
