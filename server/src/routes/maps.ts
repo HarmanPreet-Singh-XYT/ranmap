@@ -16,7 +16,9 @@ import {
 } from "../lib/mapbox.js";
 import type { NormalizedDetour, NormalizedPlace } from "../lib/mapbox.js";
 import { createMapboxTokenVendor } from "../lib/mapbox-token.js";
+import { isGroupMember, isTripParticipant } from "../lib/membership-store.js";
 import { planTier, isPro } from "../lib/plan-store.js";
+import { isPresenceScope, presenceStore } from "../lib/presence.js";
 import { rateLimit } from "../lib/rate-limit.js";
 import { consumeUsage } from "../lib/usage.js";
 import { chargeMeteredAllowance, requirePro } from "../middleware/require-plan.js";
@@ -773,5 +775,111 @@ mapsRouter.get(
     } catch (err) {
       fail(res, err, 502, "Could not load that photo.", "maps: place photo");
     }
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Live presence — ephemeral, Redis only
+//
+// The live feed itself is a Supabase Realtime broadcast (no store involved).
+// These two routes exist so a map that has just been opened can draw its crew
+// immediately rather than waiting for each rider's next heartbeat: GET returns
+// the current snapshot, POST refreshes this device's entry.
+//
+// Presence changes every few seconds per rider, so it belongs in Redis with a
+// TTL — never a durable Postgres row. Both routes are auth-gated and
+// membership-checked; the publisher is the verified token, never a body field,
+// so a client can only ever announce its own position.
+// ---------------------------------------------------------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** True when the caller belongs to the trip/group they're reading or writing. */
+async function isPresenceMember(
+  scope: "trip" | "group",
+  id: string,
+  userId: string,
+): Promise<boolean> {
+  return scope === "trip"
+    ? isTripParticipant(id, userId)
+    : isGroupMember(id, userId);
+}
+
+// GET /maps/presence?scope=trip|group&id=<uuid>
+// -> { members: [{ userId, lat, lng, speedMps, heading, recordedAt }] }
+mapsRouter.get(
+  "/presence",
+  asyncHandler(async (req, res) => {
+    const scope = String(req.query.scope ?? "").trim();
+    const id = String(req.query.id ?? "").trim();
+    if (!isPresenceScope(scope) || !UUID_RE.test(id)) {
+      res.status(400).json({ error: "scope must be trip|group and id a uuid" });
+      return;
+    }
+    if (!(await isPresenceMember(scope, id, req.userId))) {
+      res.status(403).json({ error: "You are not a member of this trip or group." });
+      return;
+    }
+    // No Redis (or a Redis blip) means no snapshot, not an error: presence is an
+    // optimization, and the live Realtime feed carries the map either way.
+    let members: unknown[] = [];
+    try {
+      members = await presenceStore.list(scope, id);
+    } catch (err) {
+      console.error(
+        "maps: presence read failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+    res.json({ members });
+  }),
+);
+
+// POST /maps/presence  { scope, id, lat, lng, speedMps?, heading? }
+// -> { ok: true }
+mapsRouter.post(
+  "/presence",
+  asyncHandler(async (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const scope = body.scope;
+    const id = typeof body.id === "string" ? body.id.trim() : "";
+    if (!isPresenceScope(scope) || !UUID_RE.test(id)) {
+      res.status(400).json({ error: "scope must be trip|group and id a uuid" });
+      return;
+    }
+    const lat = Number(body.lat);
+    const lng = Number(body.lng);
+    if (
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lng) ||
+      Math.abs(lat) > 90 ||
+      Math.abs(lng) > 180
+    ) {
+      res.status(400).json({ error: "lat and lng must be valid coordinates" });
+      return;
+    }
+    if (!(await isPresenceMember(scope, id, req.userId))) {
+      res.status(403).json({ error: "You are not a member of this trip or group." });
+      return;
+    }
+
+    try {
+      await presenceStore.publish(scope, id, {
+        userId: req.userId,
+        lat,
+        lng,
+        speedMps: typeof body.speedMps === "number" ? body.speedMps : null,
+        heading: typeof body.heading === "number" ? body.heading : null,
+        recordedAt: Date.now(),
+      });
+    } catch (err) {
+      // The live broadcast is the primary path and has already gone out; this is
+      // only the cold-start snapshot, so a Redis blip must not fail the client.
+      console.error(
+        "maps: presence publish failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+    res.json({ ok: true });
   }),
 );

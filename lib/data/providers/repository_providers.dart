@@ -6,6 +6,7 @@ import '../repositories/convoy_repository.dart';
 import '../repositories/notification_repository.dart';
 import '../repositories/notifications_feed_repository.dart';
 import '../repositories/phone_repository.dart';
+import '../repositories/presence_repository.dart';
 import '../repositories/premium_repository.dart';
 import '../repositories/profile_repository.dart';
 import '../repositories/usage_repository.dart';
@@ -41,6 +42,9 @@ final usageRepositoryProvider = Provider<UsageRepository>(
 );
 final convoyRepositoryProvider = Provider<ConvoyRepository>(
   (ref) => ConvoyRepository(),
+);
+final presenceRepositoryProvider = Provider<PresenceRepository>(
+  (ref) => const PresenceRepository(),
 );
 final weatherRepositoryProvider = Provider<WeatherRepository>(
   (ref) => WeatherRepository(),

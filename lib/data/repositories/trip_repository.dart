@@ -332,16 +332,6 @@ class TripRepository {
     ]);
   }
 
-  /// Latest ping per member for a trip (one row per user), fetched via RPC so
-  /// the client never streams the whole ping history.
-  Future<List<Map<String, dynamic>>> memberLocations(String tripId) async {
-    final data = await _client.rpc(
-      'trip_member_locations',
-      params: {'p_trip': tripId},
-    );
-    return (data as List).cast<Map<String, dynamic>>();
-  }
-
   /// Publishes this device's position to the trip's live channel (see
   /// 0023_broadcast_position.sql). The server checks membership and stamps the
   /// sender's user id, so a client can't forge another member's position — and

@@ -10,7 +10,6 @@ import '../../core/providers/app_prefs_provider.dart';
 import '../../core/router/auth_state_provider.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../data/models/group_alert.dart';
-import '../../data/models/trip.dart';
 import '../../data/providers/repository_providers.dart';
 import '../../data/repositories/trip_repository.dart';
 import '../../data/services/supabase_service.dart';
@@ -34,18 +33,6 @@ class MemberLocation {
   final double? heading;
   final DateTime recordedAt;
 
-  factory MemberLocation.fromRow(Map<String, dynamic> row) {
-    final point = LatLngPoint.requirePostgrest(row['point']);
-    return MemberLocation(
-      userId: row['user_id'] as String,
-      lat: point.lat,
-      lng: point.lng,
-      speedMps: (row['speed_mps'] as num?)?.toDouble(),
-      heading: (row['heading'] as num?)?.toDouble(),
-      recordedAt: DateTime.parse(row['recorded_at'] as String),
-    );
-  }
-
   /// Parses a live-position broadcast payload. The server sets the sender's id
   /// (see `broadcast_position`), so [userId] is trustworthy. Throws on a
   /// malformed payload; callers skip it rather than blanking the teammate list.
@@ -65,6 +52,22 @@ class MemberLocation {
       recordedAt: at is String
           ? (DateTime.tryParse(at) ?? DateTime.now())
           : DateTime.now(),
+    );
+  }
+
+  /// Parses an entry from the server's Redis presence snapshot (see
+  /// `server/src/lib/presence.ts`). Throws on a malformed entry; callers skip it
+  /// rather than blanking the teammate list.
+  factory MemberLocation.fromPresence(Map<String, dynamic> row) {
+    return MemberLocation(
+      userId: row['userId'] as String,
+      lat: (row['lat'] as num).toDouble(),
+      lng: (row['lng'] as num).toDouble(),
+      speedMps: (row['speedMps'] as num?)?.toDouble(),
+      heading: (row['heading'] as num?)?.toDouble(),
+      recordedAt: DateTime.fromMillisecondsSinceEpoch(
+        (row['recordedAt'] as num).toInt(),
+      ),
     );
   }
 }
@@ -247,15 +250,22 @@ final locationPermissionProvider = FutureProvider.autoDispose<LocationAccess>((
 /// so this throttles the live feed to a rate the map still reads as smooth.
 const _minBroadcastInterval = Duration(seconds: 2);
 
+/// Minimum gap between handshake announcements — "I just opened the map" and
+/// "I just heard from a peer I hadn't seen". Short, because the whole point is
+/// a fast cold start, but not zero, so a burst of simultaneous joins can't
+/// storm the channel.
+const _handshakeMinGap = Duration(seconds: 1);
+
 /// How often a position is persisted to `location_pings`. Live positions no
 /// longer touch the database, so this is deliberately coarse — the persisted
 /// trail exists only to back `computeTripStats` and trip history.
 const _persistInterval = Duration(seconds: 45);
 
-/// How often the (trip-independent) group presence snapshot is refreshed. The
-/// live feed is broadcast-only; this is what heals a cold start, so it stays
-/// coarse to keep DB writes rare.
-const _presencePersistInterval = Duration(seconds: 30);
+/// How often a stationary device re-announces its position. The GPS stream is
+/// distance-filtered, so it goes quiet once the rider stops — this heartbeat is
+/// what keeps them showing as online, with no database presence row. Short
+/// enough that opening the map finds a parked teammate promptly.
+const _presenceKeepalive = Duration(seconds: 15);
 
 /// Coarse persisted pings between each `trip_stats` recompute. Recomputing
 /// re-reads the trip's whole ping history, so it must not run per ping.
@@ -266,11 +276,11 @@ const _statsRecomputeEveryNPings = 4;
 const _maxPendingPings = 500;
 
 /// How long a teammate's last-known position stays on the live map before it
-/// ages out. Without this, a member who lost signal or stopped sharing lingers
-/// as "live" forever (the map only updates on new broadcasts/snapshots).
-/// Groups use the same ~15-minute presence window as `group_member_locations`.
-const _tripStaleAfter = Duration(minutes: 5);
-const _groupStaleAfter = Duration(minutes: 15);
+/// ages out. Presence is Realtime-only now, so these only need to ride out a
+/// missed heartbeat or two (see [_presenceKeepalive]) rather than a stale
+/// persisted row — hence far tighter than the old DB-backed windows.
+const _tripStaleAfter = Duration(seconds: 45);
+const _groupStaleAfter = Duration(seconds: 60);
 
 /// The Realtime channel name for a trip's live positions. It must be identical
 /// on every client (the RLS policy authorizes by the trip id in the topic), so
@@ -304,16 +314,18 @@ class _LiveChannel {
   final Map<String, MemberLocation> latest = {};
   final List<void Function()> _listeners = [];
 
-  /// Set when the last seed failed (and cleared once one succeeds), so
+  /// Set when the subscribe failed (and cleared once a broadcast arrives), so
   /// consumers can surface "live teammates aren't updating".
   Object? error;
 
-  /// Periodic reconcile against the authoritative snapshot (see `reconcile` in
-  /// [_liveChannelFor]). Merges rather than clears, so it heals a missed
-  /// broadcast / a member accepted after this device subscribed without ever
-  /// regressing a live position.
-  Future<void> Function()? reseed;
-  Timer? reseedTimer;
+  /// Called once the channel (re)subscribes, so the owner can announce itself
+  /// straight away instead of waiting for its next heartbeat.
+  void Function()? onSubscribed;
+
+  /// Called when a broadcast arrives from a teammate this device hasn't heard
+  /// from in this session. Answering it is what makes a newcomer's map populate
+  /// on the first round trip rather than at the next heartbeat.
+  void Function()? onUnseenPeer;
 
   void attach(void Function() onUpdate) => _listeners.add(onUpdate);
   void detach(void Function() onUpdate) => _listeners.remove(onUpdate);
@@ -357,8 +369,6 @@ void _scheduleChannelEviction(String key) {
     final current = _liveChannels[key];
     if (current == null || current.listenerCount > 0) return;
     _liveChannels.remove(key);
-    current.reseedTimer?.cancel();
-    current.reseed = null;
     unawaited(SupabaseService.client.removeChannel(current.channel));
   });
 }
@@ -369,7 +379,6 @@ void _scheduleChannelEviction(String key) {
 _LiveChannel _liveChannelFor({
   required String key,
   required String topic,
-  required Future<List<Map<String, dynamic>>> Function() seedRows,
 }) {
   final userId = SupabaseService.currentUser?.id;
   final existing = _liveChannels[key];
@@ -380,8 +389,6 @@ _LiveChannel _liveChannelFor({
   if (existing != null) {
     _liveChannels.remove(key);
     _channelEvictionTimers.remove(key)?.cancel();
-    existing.reseedTimer?.cancel();
-    existing.reseed = null;
     unawaited(SupabaseService.client.removeChannel(existing.channel));
   }
 
@@ -396,75 +403,25 @@ _LiveChannel _liveChannelFor({
   );
   final holder = _LiveChannel(key: key, userId: userId, channel: channel);
 
-  /// Reconciles against the authoritative latest-per-user snapshot. Runs on
-  /// every (re)subscribe, so a reconnect (or a missed broadcast) is healed.
-  Future<void> seed() async {
-    try {
-      final rows = await seedRows();
-      holder.latest.clear();
-      for (final row in rows) {
-        // One malformed row must not blank the whole teammate list.
-        try {
-          final loc = MemberLocation.fromRow(row);
-          if (loc.userId == userId) continue;
-          holder.latest[loc.userId] = loc;
-        } catch (_) {
-          continue;
-        }
-      }
-      holder.error = null;
-    } catch (e) {
-      holder.error = e;
-    }
-    holder.notify();
-  }
-
-  // Merges the authoritative snapshot into the live map without clearing, so a
-  // teammate who was accepted after this device subscribed — or whose broadcast
-  // was missed — still appears, and a fresher broadcast position is never
-  // regressed to an older persisted ping. Runs on a timer below; the
-  // clear-and-reload [seed] stays for cold start / reconnect.
-  Future<void> reconcile() async {
-    try {
-      final rows = await seedRows();
-      var changed = false;
-      for (final row in rows) {
-        try {
-          final loc = MemberLocation.fromRow(row);
-          if (loc.userId == userId) continue;
-          final existing = holder.latest[loc.userId];
-          if (existing == null || loc.recordedAt.isAfter(existing.recordedAt)) {
-            holder.latest[loc.userId] = loc;
-            changed = true;
-          }
-        } catch (_) {
-          continue;
-        }
-      }
-      holder.error = null;
-      if (changed) holder.notify();
-    } catch (e) {
-      holder.error = e;
-      holder.notify();
-    }
-  }
-
-  holder.reseed = reconcile;
-  // Every 20s, while someone is watching: heals a dropped private broadcast and
-  // surfaces teammates who joined after subscribe (the one-shot seed at
-  // subscribe time otherwise leaves both sides "riding solo" for the session).
-  holder.reseedTimer = Timer.periodic(const Duration(seconds: 20), (_) {
-    if (holder.listenerCount > 0) unawaited(reconcile());
-  });
-
+  // Presence is Realtime-only: a teammate is "online" purely because their
+  // server-attested broadcast is still fresh (see [_presenceKeepalive] and the
+  // prune in [_liveSync]). Nothing about who is online touches the database, so
+  // a device that stops announcing itself drops off immediately instead of
+  // lingering on a persisted snapshot — and there are no presence writes.
   channel.onBroadcast(
     event: 'position',
     callback: (payload) {
       try {
         final loc = MemberLocation.fromBroadcast(payload);
         if (loc.userId == userId) return;
+        final seenBefore = holder.latest.containsKey(loc.userId);
         holder.latest[loc.userId] = loc;
+        holder.error = null;
         holder.notify();
+        // Someone we hadn't seen has announced themselves — usually a device
+        // that just opened the map. Answer at once so their roster fills in
+        // now, rather than up to a heartbeat later.
+        if (!seenBefore) holder.onUnseenPeer?.call();
       } catch (_) {
         // A malformed broadcast must not blank the teammate list.
       }
@@ -472,8 +429,8 @@ _LiveChannel _liveChannelFor({
   );
 
   channel.subscribe((status, error) {
-    if (status == RealtimeSubscribeStatus.subscribed) unawaited(seed());
     if (error != null) holder.error = error;
+    if (status == RealtimeSubscribeStatus.subscribed) holder.onSubscribed?.call();
     holder.notify();
   });
 
@@ -485,15 +442,19 @@ _LiveChannel _liveChannelFor({
 /// Live teammate positions for a scope (excluding self), plus this device's own
 /// outgoing position sharing.
 ///
-/// One channel, two jobs:
+/// One channel, two jobs — both ephemeral, neither touching the database to
+/// decide who is online:
 ///   * **Inbound** — a private Realtime **broadcast** delivers each teammate's
-///     position as it changes, with no database write. The snapshot RPC is
-///     still fetched on every (re)subscribe as the authoritative cold-start /
-///     reconcile path, because a broadcast is fire-and-forget.
-///   * **Outbound** — the device's GPS fixes are broadcast (throttled) for the
-///     live map. Trips additionally persist a coarse trail to `location_pings`
-///     for statistics/history; groups refresh a latest-only presence snapshot
-///     at a coarse cadence.
+///     position as it changes. "Online" is exactly "has broadcast recently", so
+///     a device that goes quiet drops off the map instead of lingering on a
+///     persisted presence snapshot.
+///   * **Outbound** — the device's GPS fixes are broadcast (throttled), plus a
+///     slow heartbeat while stationary so a parked rider still reads as
+///     present. Opening the map is itself a handshake: we announce where we are
+///     and answer any peer we hadn't seen, so a newly-opened map fills in on the
+///     first round trip rather than at the next heartbeat. Trips additionally
+///     persist a coarse trail to `location_pings` for statistics/history; that
+///     trail is never used for presence.
 ///
 /// Kept alive by whoever watches it.
 Stream<Map<String, MemberLocation>> _liveSync(
@@ -504,11 +465,15 @@ Stream<Map<String, MemberLocation>> _liveSync(
   final key = isTrip ? 'trip:$id' : 'group:$id';
   final tripRepo = ref.watch(tripRepositoryProvider);
   final convoyRepo = ref.watch(convoyRepositoryProvider);
+  final presenceRepo = ref.watch(presenceRepositoryProvider);
+  // Age out teammates we stop hearing from, so the live layer (and the "N live"
+  // count) don't keep showing a rider who lost signal or stopped sharing. With
+  // no persisted snapshot to merge back in, this is the only way a teammate
+  // leaves the live layer.
+  final staleAfter = isTrip ? _tripStaleAfter : _groupStaleAfter;
   final holder = _liveChannelFor(
     key: key,
     topic: isTrip ? tripLocationsTopic(id) : groupLocationsTopic(id),
-    seedRows: () =>
-        isTrip ? tripRepo.memberLocations(id) : convoyRepo.memberLocations(id),
   );
 
   final controller = StreamController<Map<String, MemberLocation>>();
@@ -526,6 +491,36 @@ Stream<Map<String, MemberLocation>> _liveSync(
 
   holder.attach(onUpdate);
   onUpdate();
+
+  // Cold start from the server's Redis presence snapshot: a freshly opened map
+  // draws the whole crew at once instead of waiting for each rider's next
+  // heartbeat — including anyone whose app is suspended and so can't answer a
+  // handshake. Entries expire server-side, so an offline rider can't linger.
+  Future<void> seedFromPresence() async {
+    try {
+      final rows = await presenceRepo.fetch(isTrip: isTrip, id: id);
+      var changed = false;
+      for (final row in rows) {
+        try {
+          final loc = MemberLocation.fromPresence(row);
+          if (loc.userId == holder.userId) continue;
+          final existing = holder.latest[loc.userId];
+          if (existing == null || loc.recordedAt.isAfter(existing.recordedAt)) {
+            holder.latest[loc.userId] = loc;
+            changed = true;
+          }
+        } catch (_) {
+          // One malformed entry must not blank the whole crew.
+          continue;
+        }
+      }
+      if (changed && !disposed) holder.notify();
+    } catch (_) {
+      // No snapshot (Redis unconfigured, offline) just means the live feed fills
+      // the map in as riders announce themselves.
+    }
+  }
+  unawaited(seedFromPresence());
 
   // --- outbound ---
   DateTime? lastBroadcastAt;
@@ -557,7 +552,7 @@ Stream<Map<String, MemberLocation>> _liveSync(
 
   /// Publishes via the server RPC, which stamps the sender id — the client
   /// never authors a broadcast, so it can't forge another member's position.
-  Future<void> broadcast(Position pos, {required bool persist}) async {
+  Future<void> broadcast(Position pos) async {
     try {
       if (isTrip) {
         await tripRepo.broadcastPosition(
@@ -568,46 +563,112 @@ Stream<Map<String, MemberLocation>> _liveSync(
           heading: pos.heading,
         );
       } else {
+        // Never persist: the group's presence lives only on the channel, so a
+        // broadcast leaves no `group_member_locations` row behind.
         await convoyRepo.broadcastPosition(
           groupId: id,
           lat: pos.latitude,
           lng: pos.longitude,
           speedMps: pos.speed >= 0 ? pos.speed : null,
           heading: pos.heading,
-          persist: persist,
         );
       }
     } catch (e) {
       // Best-effort, but no longer silent: a repeatedly failing publish (e.g.
       // the server RPC / `realtime.send` not being available) is exactly what
-      // leaves every rider "riding solo", so log it. The 20s reconcile heals a
-      // one-off drop.
+      // leaves every rider "riding solo", so log it. The heartbeat retries.
       debugPrint('live sync: position broadcast failed: $e');
     }
   }
 
-  ref.listen(devicePositionProvider, (previous, next) {
-    final pos = next.valueOrNull;
-    if (pos == null) return;
-    // Re-read at fire time so pausing sharing, or switching convoys, takes
-    // effect without rebuilding this provider.
-    if (!ref.read(appSettingsProvider).shareLocation) return;
-    if (isTrip) {
-      if (ref.read(activeTripProvider).valueOrNull?.id != id) return;
-    } else {
-      if (ref.read(convoyGroupIdProvider) != id) return;
+  DateTime? lastPresenceAt;
+
+  /// Refreshes this device's entry in the server's Redis presence snapshot, so
+  /// someone opening the map sees us at once. Best-effort: the live broadcast is
+  /// the primary path, so a failure here only costs a stale cold start.
+  Future<void> publishPresence(Position pos) async {
+    try {
+      await presenceRepo.publish(isTrip: isTrip, id: id, position: pos);
+    } catch (_) {
+      // Nothing to do — see above.
     }
+  }
 
+  /// Publishes at most once per [_presenceKeepalive], so the snapshot stays
+  /// fresh without an HTTP write on every GPS fix.
+  void maybePublishPresence(Position pos) {
     final now = DateTime.now();
+    if (lastPresenceAt != null &&
+        now.difference(lastPresenceAt!) < _presenceKeepalive) {
+      return;
+    }
+    lastPresenceAt = now;
+    unawaited(publishPresence(pos));
+  }
 
-    if (isTrip) {
-      // Live: ephemeral, server-attested broadcast, throttled.
-      if (lastBroadcastAt == null ||
-          now.difference(lastBroadcastAt!) >= _minBroadcastInterval) {
-        lastBroadcastAt = now;
-        unawaited(broadcast(pos, persist: false));
-      }
-      // Persisted trail: coarse, and the only thing that touches the DB.
+  // The last fix we were allowed to share, kept so the heartbeat and the
+  // handshake can re-announce it without a new GPS fix (the stream is
+  // distance-filtered, so it goes quiet when nothing is moving).
+  Position? lastShareablePosition;
+
+  /// Whether this device should still be announcing itself for this scope: an
+  /// active trip, or the convoy the user joined, with sharing not paused.
+  bool sharingHere() {
+    if (!ref.read(appSettingsProvider).shareLocation) return false;
+    return isTrip
+        ? ref.read(activeTripProvider).valueOrNull?.id == id
+        : ref.read(convoyGroupIdProvider) == id;
+  }
+
+  /// Broadcasts the current position unless we already announced within
+  /// [minGap]. Every outbound path funnels through here, so the throttle lives
+  /// in one place.
+  Future<void> announce(Position pos, Duration minGap) async {
+    if (disposed || !sharingHere()) return;
+    final now = DateTime.now();
+    if (lastBroadcastAt != null && now.difference(lastBroadcastAt!) < minGap) {
+      return;
+    }
+    lastBroadcastAt = now;
+    await broadcast(pos);
+  }
+
+  /// Re-announces the last known fix right away, so a peer who just opened the
+  /// map sees us on the first round trip instead of at our next heartbeat.
+  void announceNow() {
+    if (disposed) return;
+    final pos = lastShareablePosition;
+    if (pos == null) return;
+    unawaited(announce(pos, _handshakeMinGap));
+  }
+
+  // Opening the map is a handshake: whenever this channel (re)subscribes, or a
+  // teammate we hadn't seen announces themselves, answer with our position.
+  holder.onSubscribed = announceNow;
+  holder.onUnseenPeer = announceNow;
+
+  ref.listen(
+    devicePositionProvider,
+    (previous, next) {
+      final pos = next.valueOrNull;
+      if (pos == null) return;
+      // Re-read at fire time so pausing sharing, or switching convoys, takes
+      // effect without rebuilding this provider.
+      if (!sharingHere()) return;
+      lastShareablePosition = pos;
+      maybePublishPresence(pos);
+
+      // Live: ephemeral, server-attested broadcast, throttled. Groups broadcast
+      // exactly the same way — presence is never written to the database. Fires
+      // immediately with the cached fix, which is what makes a freshly opened
+      // map announce itself without waiting for the next GPS update.
+      unawaited(announce(pos, _minBroadcastInterval));
+
+      if (!isTrip) return;
+
+      final now = DateTime.now();
+      // Persisted trail: coarse, and the only thing that touches the DB. It
+      // backs trip statistics/history only — never who is online.
       if (lastPersistedAt == null ||
           now.difference(lastPersistedAt!) >= _persistInterval) {
         lastPersistedAt = now;
@@ -626,24 +687,21 @@ Stream<Map<String, MemberLocation>> _liveSync(
         );
         unawaited(flushPings());
       }
-    } else {
-      // Group convoy: one throttled broadcast, refreshing the presence
-      // snapshot only occasionally (the DB write is the expensive part).
-      final dueToPersist =
-          lastPersistedAt == null ||
-          now.difference(lastPersistedAt!) >= _presencePersistInterval;
-      if (lastBroadcastAt == null ||
-          now.difference(lastBroadcastAt!) >= _minBroadcastInterval) {
-        lastBroadcastAt = now;
-        if (dueToPersist) lastPersistedAt = now;
-        unawaited(broadcast(pos, persist: dueToPersist));
-      }
-    }
+    },
+    fireImmediately: true,
+  );
+
+  // Heartbeat: re-announce the last position every [_presenceKeepalive] so a
+  // rider who is parked (and so emitting no GPS fixes) still reads as online to
+  // everyone else. Without it, "online" would mean "moving right now".
+  final keepaliveTimer = Timer.periodic(_presenceKeepalive, (_) {
+    if (disposed) return;
+    final pos = lastShareablePosition;
+    if (pos == null) return;
+    unawaited(announce(pos, _presenceKeepalive));
+    maybePublishPresence(pos);
   });
 
-  // Age out teammates we stop hearing from, so the live layer (and the "N live"
-  // count) don't keep showing a rider who lost signal or stopped sharing.
-  final staleAfter = isTrip ? _tripStaleAfter : _groupStaleAfter;
   Timer? pruneTimer;
   void pruneStale() {
     if (disposed || holder.latest.isEmpty) return;
@@ -664,6 +722,13 @@ Stream<Map<String, MemberLocation>> _liveSync(
   ref.onDispose(() {
     disposed = true;
     pruneTimer?.cancel();
+    keepaliveTimer.cancel();
+    // The channel (and its callbacks) outlive this provider by the eviction
+    // grace period, so drop our hooks rather than leaving a closure that would
+    // touch a disposed ref. Only one provider per key can hold this channel, so
+    // clearing unconditionally can't clobber a newer attachment.
+    holder.onSubscribed = null;
+    holder.onUnseenPeer = null;
     holder.detach(onUpdate);
     controller.close();
     // Release the channel once nobody is watching it, so opening many trips or

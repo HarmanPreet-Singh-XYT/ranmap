@@ -296,6 +296,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
   /// that produces the same post ids would skip the redraw and the pins would
   /// silently never come back.
   PointAnnotationManager? _renderedPostManager;
+
+  /// Last post count logged, so the diagnostic prints on change, not per build.
+  int _loggedPhotoPostCount = -1;
   String? _renderedPlaceId;
 
   // Set once after an overlay sync fails, so the user isn't left wondering why
@@ -1687,34 +1690,38 @@ class _MapScreenState extends ConsumerState<MapScreen>
                           // Live roster: each teammate's avatar + how far away they are,
                           // tap to navigate to them.
                           if (_nav == null && teammates.isNotEmpty) ...[
-                            SizedBox(
-                              height: 68,
-                              child: ListView.separated(
-                                scrollDirection: Axis.horizontal,
-                                itemCount: teammates.length,
-                                separatorBuilder: (_, _) =>
-                                    const SizedBox(width: BrandSpace.md),
-                                itemBuilder: (context, i) {
-                                  final teammate = teammates[i];
-                                  return _TeammateChip(
-                                    teammate: teammate,
-                                    meters: haversineMeters(
-                                      deviceLat,
-                                      deviceLng,
-                                      teammate.lat,
-                                      teammate.lng,
+                            // Sized by its content, not a fixed height: the chip
+                            // is avatar + name + distance, so a fixed box
+                            // overflowed as soon as the text scale grew.
+                            SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: [
+                                  for (final (i, teammate)
+                                      in teammates.indexed) ...[
+                                    if (i > 0)
+                                      const SizedBox(width: BrandSpace.md),
+                                    _TeammateChip(
+                                      teammate: teammate,
+                                      meters: haversineMeters(
+                                        deviceLat,
+                                        deviceLng,
+                                        teammate.lat,
+                                        teammate.lng,
+                                      ),
+                                      // Real initial bearing so the arrow points
+                                      // at them.
+                                      bearing: _initialBearingRadians(
+                                        deviceLat,
+                                        deviceLng,
+                                        teammate.lat,
+                                        teammate.lng,
+                                      ),
+                                      unit: unit,
+                                      onTap: () => _openTeammate(teammate),
                                     ),
-                                    // Real initial bearing so the arrow points at them.
-                                    bearing: _initialBearingRadians(
-                                      deviceLat,
-                                      deviceLng,
-                                      teammate.lat,
-                                      teammate.lng,
-                                    ),
-                                    unit: unit,
-                                    onTap: () => _openTeammate(teammate),
-                                  );
-                                },
+                                  ],
+                                ],
                               ),
                             ),
                             const SizedBox(height: BrandSpace.sm),
@@ -3072,6 +3079,12 @@ class _MapScreenState extends ConsumerState<MapScreen>
     List<MapPost> posts,
     double devicePixelRatio,
   ) async {
+    // Log the feed whenever its size changes, so a missing pin is traceable to
+    // "the map never got the posts" vs "the posts were never drawn".
+    if (posts.length != _loggedPhotoPostCount) {
+      _loggedPhotoPostCount = posts.length;
+      debugPrint('photo pins: map has ${posts.length} post(s)');
+    }
     final manager = _photoPoints;
     if (manager == null) {
       debugPrint('photo pins: no manager yet (style not ready) — skipped');

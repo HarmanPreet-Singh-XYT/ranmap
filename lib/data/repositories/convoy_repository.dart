@@ -9,27 +9,15 @@ import '../services/supabase_service.dart';
 class ConvoyRepository {
   final _client = SupabaseService.client;
 
-  /// The current presence snapshot for a group: latest known position per
-  /// member, stale entries dropped server-side.
-  Future<List<Map<String, dynamic>>> memberLocations(String groupId) async {
-    final data = await _client.rpc(
-      'group_member_locations',
-      params: {'p_group': groupId},
-    );
-    return (data as List).cast<Map<String, dynamic>>();
-  }
-
   /// Publishes this device's position to the group's convoy channel. The
   /// server stamps the sender id, so a client can't forge another member's
-  /// position. [persist] refreshes the durable presence snapshot — set it at a
-  /// coarse cadence, not on every fix.
+  /// position. Nothing is persisted: group presence lives only on the channel.
   Future<void> broadcastPosition({
     required String groupId,
     required double lat,
     required double lng,
     double? speedMps,
     double? heading,
-    bool persist = false,
   }) async {
     await _client.rpc(
       'broadcast_group_position',
@@ -39,7 +27,7 @@ class ConvoyRepository {
         'p_lng': lng,
         'p_speed': speedMps,
         'p_heading': heading,
-        'p_persist': persist,
+        'p_persist': false,
       },
     );
   }
