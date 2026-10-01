@@ -130,8 +130,12 @@ export class LiveRooms {
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** A position frame is tiny; anything larger is not one of ours. */
-const MAX_PAYLOAD_BYTES = 1_024;
+/**
+ * The largest frame we accept. A position is ~150 bytes, but the join frame
+ * carries a whole Supabase JWT (~1 KB on its own), so a 1 KB cap closed the
+ * connection the instant a client joined.
+ */
+const MAX_PAYLOAD_BYTES = 4_096;
 /** A socket that never joins is dropped rather than held open. */
 const JOIN_TIMEOUT_MS = 10_000;
 /** Keepalive ping cadence; a missed pong costs the connection. */

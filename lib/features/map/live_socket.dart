@@ -34,6 +34,7 @@ class LiveSocket {
   WebSocket? _socket;
   Timer? _retry;
   int _attempts = 0;
+  int? _lastCloseCode;
   bool _joined = false;
   bool _closed = false;
 
@@ -49,8 +50,10 @@ class LiveSocket {
     final token = SupabaseService.client.auth.currentSession?.accessToken;
     // Signed out: nothing to join. The provider is torn down on sign-out anyway.
     if (token == null) return;
+    final url = _url();
     try {
-      final socket = await WebSocket.connect(_url());
+      debugPrint('live socket: dialing $url');
+      final socket = await WebSocket.connect(url);
       if (_closed) {
         unawaited(socket.close());
         return;
@@ -64,15 +67,24 @@ class LiveSocket {
       );
       socket.listen(
         _onFrame,
-        onDone: _onDone,
+        onDone: () {
+          // The close code is the useful part: 4401/4403 mean the server
+          // refused the join, 1006 is a dead connection (proxy or TLS).
+          debugPrint(
+            'live socket: closed code=${socket.closeCode} '
+            'reason="${socket.closeReason}"',
+          );
+          _lastCloseCode = socket.closeCode;
+          _onDone();
+        },
         onError: (Object error) {
-          debugPrint('live socket: $error');
+          debugPrint('live socket: error: $error');
           _onDone();
         },
         cancelOnError: true,
       );
     } catch (error) {
-      debugPrint('live socket: connect failed: $error');
+      debugPrint('live socket: connect failed for $url: $error');
       _scheduleRetry();
     }
   }
@@ -115,7 +127,10 @@ class LiveSocket {
       return; // A frame we can't parse isn't worth a reconnect.
     }
     if (frame == null) return;
-    if (frame['type'] == 'joined') _joined = true;
+    if (frame['type'] == 'joined') {
+      _joined = true;
+      debugPrint('live socket: joined $scope:$id');
+    }
     _frames.add(frame);
   }
 
@@ -132,7 +147,9 @@ class LiveSocket {
     if (_closed || _retry != null) return;
     _attempts++;
     if (_attempts == 3) {
-      _frames.addError(StateError('live positions unavailable'));
+      _frames.addError(
+        StateError('live positions unavailable (code ${_lastCloseCode ?? 'none'})'),
+      );
     }
     final seconds = math.min(1 << (_attempts - 1), 15);
     _retry = Timer(Duration(seconds: seconds), () {
