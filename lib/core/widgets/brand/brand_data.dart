@@ -21,13 +21,23 @@ class BrandStatGrid extends StatelessWidget {
     for (var i = 0; i < tiles.length; i += 2) {
       final hasSecond = i + 1 < tiles.length;
       rows.add(
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(child: tiles[i]),
-            SizedBox(width: spacing),
-            Expanded(child: hasSecond ? tiles[i + 1] : const SizedBox.shrink()),
-          ],
+        // The tiles stretch so a two-line neighbour doesn't leave a short one
+        // floating — but `stretch` needs a bounded height, and this grid sits in
+        // scrollables (a ListView hands down an unbounded one), so measure the
+        // row's intrinsic height first. Without this the layout throws
+        // "BoxConstraints forces an infinite height" and the whole body of the
+        // screen fails to paint.
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: tiles[i]),
+              SizedBox(width: spacing),
+              Expanded(
+                child: hasSecond ? tiles[i + 1] : const SizedBox.shrink(),
+              ),
+            ],
+          ),
         ),
       );
       if (i + 2 < tiles.length) rows.add(SizedBox(height: spacing));
