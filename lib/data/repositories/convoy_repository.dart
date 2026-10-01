@@ -9,29 +9,6 @@ import '../services/supabase_service.dart';
 class ConvoyRepository {
   final _client = SupabaseService.client;
 
-  /// Publishes this device's position to the group's convoy channel. The
-  /// server stamps the sender id, so a client can't forge another member's
-  /// position. Nothing is persisted: group presence lives only on the channel.
-  Future<void> broadcastPosition({
-    required String groupId,
-    required double lat,
-    required double lng,
-    double? speedMps,
-    double? heading,
-  }) async {
-    await _client.rpc(
-      'broadcast_group_position',
-      params: {
-        'p_group': groupId,
-        'p_lat': lat,
-        'p_lng': lng,
-        'p_speed': speedMps,
-        'p_heading': heading,
-        'p_persist': false,
-      },
-    );
-  }
-
   /// The group's alerts, newest first, each with its arrival check-ins and the
   /// creator's handle.
   Future<List<GroupAlert>> fetchAlerts(String groupId, {int limit = 40}) async {

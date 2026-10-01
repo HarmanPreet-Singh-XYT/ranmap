@@ -5,6 +5,7 @@ import type { NextFunction, Request, Response } from "express";
 import { env } from "./lib/env.js";
 import { rateLimit } from "./lib/rate-limit.js";
 import { useSharedRateLimit } from "./lib/rate-limit-store.js";
+import { attachLiveSocket } from "./lib/live-rooms.js";
 import { getRedis, closeRedis } from "./lib/redis.js";
 import { startPruner, startScheduler } from "./lib/scheduler.js";
 import { accountRouter } from "./routes/account.js";
@@ -148,6 +149,9 @@ const server = app.listen(env.port, () => {
   console.log(`ranmap-server listening on :${env.port}`);
 });
 
+// The live map's room server, on the same listener at /live (see LiveRooms).
+const stopLiveRooms = attachLiveSocket(server);
+
 // Close keep-alive sockets a little ahead of Node's 5s default timeout so a
 // slow upstream (Gemini/Twilio) can't pin a connection indefinitely.
 server.keepAliveTimeout = 65_000;
@@ -157,6 +161,9 @@ server.requestTimeout = 120_000;
 // Drain in-flight requests on redeploy instead of cutting them mid-response.
 function shutdown(signal: string) {
   console.log(`received ${signal}, shutting down…`);
+  // Drop the live rooms first: their sockets aren't part of the HTTP drain, and
+  // clients reconnect on their own.
+  stopLiveRooms();
   // Release the Redis connection too (no-op when it isn't configured).
   void closeRedis();
   server.close(() => process.exit(0));

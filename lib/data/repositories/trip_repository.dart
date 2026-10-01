@@ -332,29 +332,6 @@ class TripRepository {
     ]);
   }
 
-  /// Publishes this device's position to the trip's live channel (see
-  /// 0023_broadcast_position.sql). The server checks membership and stamps the
-  /// sender's user id, so a client can't forge another member's position — and
-  /// nothing is written to `location_pings`.
-  Future<void> broadcastPosition({
-    required String tripId,
-    required double lat,
-    required double lng,
-    double? speedMps,
-    double? heading,
-  }) async {
-    await _client.rpc(
-      'broadcast_position',
-      params: {
-        'p_trip': tripId,
-        'p_lat': lat,
-        'p_lng': lng,
-        'p_speed': speedMps,
-        'p_heading': heading,
-      },
-    );
-  }
-
   /// Appends the stop at the end of the trip's current ordering. When [id] is
   /// supplied (offline-capable path) the insert is idempotent on that id.
   Future<TripStop?> addStop(TripStop stop, {String? id}) async {

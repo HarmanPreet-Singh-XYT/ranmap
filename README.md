@@ -37,9 +37,12 @@ are on the trip — live positions, voice, shared stops, voting, a shared ledger
 - **Live 3D convoy map** — Mapbox Standard's extruded buildings, terrain and
   time-of-day lighting, with each teammate drawn as a bundled 3D vehicle model
   (car / bike / scooter / SUV), rotated to their heading.
-- **Live sync & tracking** — positions stream over a private, per-trip Supabase
-  Realtime broadcast (server-attested, so a member can't forge another's
-  position) and keep updating while the app is backgrounded.
+- **Live sync & tracking** — each device holds one websocket to ranmap-server
+  and joins its trip's or group's room, which relays positions between members
+  (`lib/live-rooms.ts`). The server verifies the token and membership at join and
+  stamps the sender, so a member can't forge another's position, and presence is
+  simply the connection — a member who drops is gone immediately. Positions are
+  held in memory only, and keep updating while the app is backgrounded.
 - **Voice and chat** — LiveKit voice rooms with push-to-talk and speaking
   indicators, plus realtime group text, per trip and per group.
 - **Shared trip toolkit** — reorderable stops with next-stop ETAs, weather en
@@ -97,6 +100,17 @@ Ranmap is subscription-first, and the whole thing runs through **RevenueCat**.
 Three tiers (`free` < `pro` < `extreme`) are sold as monthly / annual products
 with a 7-day annual trial; the paywall (`lib/features/premium/`) reads real store
 prices from the RevenueCat offering instead of hard-coding them.
+
+**Plans** (the store prices are the source of truth; these are the recommended
+list the marketing copy mirrors):
+
+- **Free** — metered AI + search; up to **3** active trips, **25** photos, **1**
+  document, **1** saved route, and groups capped at **6** members.
+- **Pro — $4.99/mo / $39.99/yr** (7-day trial on annual) — **100** trips,
+  **5,000** photos, **100** documents, **100** saved routes, **100** members, plus
+  the full trip stats & history.
+- **Extreme — $9.99/mo / $79.99/yr** — **250** trips, **20,000** photos, **500**
+  documents, **500** saved routes, **250** members.
 
 - **The client** configures the RevenueCat SDK with a *public* key, logs the user
   in with their Supabase id, and drives the paywall off the `pro` / `extreme`

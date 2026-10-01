@@ -44,10 +44,33 @@ everything it needs to move as a unit.
 - **Offline-first** — writes made without signal queue in a persisted outbox and
   replay idempotently; map tiles for a route can be downloaded for use with no
   connection at all.
-- **Monetized with RevenueCat** — a free tier with metered AI and search, and
-  `pro` / `extreme` subscriptions (monthly and annual, with a 7-day trial).
-  Because Pro is evaluated per trip and per group, **one subscription covers the
-  whole crew**.
+
+## Monetization
+
+Ranmap is subscription-first, built end to end on **RevenueCat**, with three
+tiers and a generous free on-ramp so the app is useful before anyone pays.
+
+- **Free** — full solo navigation plus the core crew features, with metered AI
+  and search, capped at **3** active trips, **25** pinned photos and **6** group
+  members.
+- **Pro — $4.99/mo or $39.99/yr** — raises the caps (~100 trips, 5,000 photos,
+  100 members), unlocks the full trip stats and history, and a much larger AI and
+  search allowance.
+- **Extreme — $9.99/mo or $79.99/yr** — the same features with the highest
+  ceilings (~250 trips, 20,000 photos, 250 members).
+- Both paid tiers include a **7-day free trial on the annual plans**, and the
+  paywall reads live store prices from the RevenueCat offering rather than
+  hard-coding them.
+
+Two things make the monetization fit the product instead of fighting it. First,
+**one subscription covers the whole crew**: because Pro is evaluated per trip and
+per group, a single subscriber unlocks voice and lifts the caps for everyone they
+travel with — so paying benefits your friends, who then want it too. Second, the
+gates are real: entitlement truth is written only by our server from the
+RevenueCat v2 API, and the hard caps are enforced by database triggers, so a
+patched client can't unlock anything. A free user hitting a limit gets a
+contextual paywall; a paid user hitting a fair-use ceiling gets a plain error,
+never an upsell.
 
 ## How we built it
 
