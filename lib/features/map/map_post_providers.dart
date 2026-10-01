@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/models/group.dart';
 import '../../data/models/map_post.dart';
+import '../../data/models/map_post_share.dart';
 import '../../data/models/trip.dart';
 import '../../data/repositories/map_post_repository.dart';
 import '../../data/services/supabase_service.dart';
@@ -39,6 +40,13 @@ final sharedWithMePostsProvider = FutureProvider.autoDispose<List<MapPost>>((
 final mapPostSignedUrlProvider = FutureProvider.autoDispose
     .family<String, String>((ref, storagePath) {
       return ref.watch(mapPostRepositoryProvider).signedUrl(storagePath);
+    });
+
+/// Who a pin is currently shared with — drives the viewer's "Shared with" list
+/// (owner-only in practice; RLS scopes what a non-owner can see).
+final mapPostSharesProvider = FutureProvider.autoDispose
+    .family<List<MapPostShare>, String>((ref, postId) {
+      return ref.watch(mapPostRepositoryProvider).sharesForPost(postId);
     });
 
 /// A photo in the library, with where it reached the user from.

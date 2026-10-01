@@ -220,20 +220,51 @@ class TripRepository {
     return (rows as List).cast<Map<String, dynamic>>();
   }
 
+  /// Starts a planned trip, resumes a paused one, or starts a completed trip
+  /// again. A resumed (paused) trip keeps the time it first started; a trip
+  /// started again after completion is a fresh run, so it starts now.
   Future<void> startTrip(String tripId) async {
-    // Only a planned trip can start: a completed one must not be revived, and a
-    // blocked update (zero rows) must not look like success.
+    final current = await _client
+        .from('trips')
+        .select('status, started_at')
+        .eq('id', tripId)
+        .maybeSingle();
+    final status = current?['status'] as String?;
+    if (status != 'planned' && status != 'completed') {
+      throw Exception(
+        current == null
+            ? 'This trip can no longer be started.'
+            : 'This trip is already running.',
+      );
+    }
+    final restarting = status == 'completed';
     final updated = await _client
         .from('trips')
         .update({
           'status': 'active',
-          'started_at': DateTime.now().toUtc().toIso8601String(),
+          // A restart begins a new run, so clear the previous finish.
+          'ended_at': null,
+          if (restarting || current!['started_at'] == null)
+            'started_at': DateTime.now().toUtc().toIso8601String(),
         })
         .eq('id', tripId)
-        .eq('status', 'planned')
         .select('id');
     if ((updated as List).isEmpty) {
-      throw Exception('This trip can no longer be started.');
+      throw Exception('Only a trip member can start this trip.');
+    }
+  }
+
+  /// Pauses a running trip. It stops being live but keeps its [started_at], so
+  /// it can be resumed later (see `Trip.isPaused`).
+  Future<void> pauseTrip(String tripId) async {
+    final updated = await _client
+        .from('trips')
+        .update({'status': 'planned'})
+        .eq('id', tripId)
+        .eq('status', 'active')
+        .select('id');
+    if ((updated as List).isEmpty) {
+      throw Exception('Only a running trip can be paused.');
     }
   }
 

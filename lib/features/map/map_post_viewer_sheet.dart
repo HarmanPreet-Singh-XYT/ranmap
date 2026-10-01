@@ -17,6 +17,7 @@ import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_sheet_surface.dart';
 import '../../data/models/group.dart';
 import '../../data/models/map_post.dart';
+import '../../data/models/map_post_share.dart';
 import '../../data/services/supabase_service.dart';
 import '../chat/chat_share.dart';
 import '../social/moderation_actions.dart';
@@ -353,6 +354,8 @@ class _MapPostViewerSheetState extends ConsumerState<_MapPostViewerSheet> {
               onPressed: () => _shareToFriend(context, ref),
             ),
             const SizedBox(height: BrandSpace.sm),
+            _SharedWithList(postId: post.id),
+            const SizedBox(height: BrandSpace.sm),
             BrandPressable(
               onTap: () async {
                 final confirmed = await showAppConfirmDialog(
@@ -423,6 +426,90 @@ class _MapPostViewerSheetState extends ConsumerState<_MapPostViewerSheet> {
         ],
       ),
     );
+  }
+}
+
+/// The owner's view of who a pin is shared with, each with a remove action.
+/// RLS scopes the rows to the owner's own post, so this is only rendered for
+/// `isMine`; after a removal the photo providers are invalidated so the
+/// recipient's galleries update.
+class _SharedWithList extends ConsumerWidget {
+  const _SharedWithList({required this.postId});
+
+  final String postId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final shares =
+        ref.watch(mapPostSharesProvider(postId)).valueOrNull ?? const [];
+    if (shares.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(BrandSpace.sm),
+      decoration: BoxDecoration(
+        color: BrandColors.neutralButton,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Shared with',
+            style: BrandText.labelSm.copyWith(color: BrandColors.textMuted),
+          ),
+          const SizedBox(height: 4),
+          for (final share in shares)
+            Row(
+              children: [
+                Icon(
+                  share.isGroup ? Icons.groups_rounded : Icons.person_rounded,
+                  size: 16,
+                  color: BrandColors.textMuted,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    share.label,
+                    style: BrandText.bodySm.copyWith(
+                      color: BrandColors.textBody,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Remove',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  onPressed: () => _remove(context, ref, share),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _remove(
+    BuildContext context,
+    WidgetRef ref,
+    MapPostShare share,
+  ) async {
+    try {
+      final repo = ref.read(mapPostRepositoryProvider);
+      if (share.isGroup) {
+        await repo.unshareFromGroup(postId: postId, groupId: share.groupId!);
+      } else {
+        await repo.unshareFromUser(postId: postId, userId: share.userId!);
+      }
+      ref.invalidate(mapPostSharesProvider(postId));
+      ref.invalidate(groupSharedPostsProvider);
+      ref.invalidate(sharedWithMePostsProvider);
+      if (context.mounted) showAppToast(context, 'Share removed');
+    } catch (e) {
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+    }
   }
 }
 

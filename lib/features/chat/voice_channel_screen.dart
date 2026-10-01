@@ -11,6 +11,7 @@ import '../../core/widgets/brand/brand_buttons.dart';
 import '../../core/widgets/brand/brand_card.dart';
 import '../../core/widgets/brand/brand_list_row.dart';
 import '../../core/widgets/brand/brand_scaffold.dart';
+import '../../core/permissions/app_permission_hint.dart';
 import '../premium/paywall.dart';
 import '../premium/premium_providers.dart';
 import 'chat_providers.dart';
@@ -156,15 +157,15 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
             ),
           ],
           if (session.micDenied)
-            const Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: BrandSpace.md,
-                vertical: BrandSpace.xs,
-              ),
-              child: BrandAlert(
-                variant: BrandAlertVariant.info,
-                message: 'Microphone access is blocked — enable it in Settings to talk.',
-              ),
+            AppPermissionHint(
+              message: 'Microphone access is blocked — enable it in Settings to talk.',
+              onRetry: () => _report(controller.retryMicrophone()),
+            ),
+          if (session.cameraDenied)
+            AppPermissionHint(
+              message: 'Camera access is blocked — enable it in Settings to share video.',
+              retryLabel: 'Retry',
+              onRetry: () => _report(controller.toggleCamera()),
             ),
           if (proUnlocked)
             const Padding(
@@ -177,7 +178,7 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
                 message: 'Pro voice — unlocked for everyone here',
               ),
             ),
-          Expanded(child: _ParticipantList(room: room)),
+          Expanded(child: _ParticipantArea(room: room)),
         ],
       );
     }
@@ -222,6 +223,33 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
                           ),
                           onPressed: () => _report(controller.toggleMute()),
                         ),
+                      const SizedBox(width: BrandSpace.sm),
+                      _IconToggle(
+                        icon: session.deafened
+                            ? Icons.headset_off_rounded
+                            : Icons.headset_rounded,
+                        label: session.deafened ? 'Undeafen' : 'Deafen',
+                        active: session.deafened,
+                        onPressed: () => controller.toggleDeafen(),
+                      ),
+                      const SizedBox(width: BrandSpace.sm),
+                      _IconToggle(
+                        icon: session.cameraOn
+                            ? Icons.videocam_rounded
+                            : Icons.videocam_off_rounded,
+                        label: session.cameraOn ? 'Stop video' : 'Start video',
+                        active: session.cameraOn,
+                        onPressed: () => _report(controller.toggleCamera()),
+                      ),
+                      if (session.cameraOn) ...[
+                        const SizedBox(width: BrandSpace.sm),
+                        _IconToggle(
+                          icon: Icons.cameraswitch_rounded,
+                          label: 'Flip camera',
+                          active: false,
+                          onPressed: () => _report(controller.switchCamera()),
+                        ),
+                      ],
                       const SizedBox(width: BrandSpace.md),
                       _LeaveButton(onPressed: _leave),
                     ],
@@ -230,6 +258,215 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Shows a video grid when anyone (self or a teammate) is publishing video;
+/// otherwise the plain participant list. Video is opt-in per member, so this
+/// degrades to the audio-only list when nobody has a camera on.
+class _ParticipantArea extends StatelessWidget {
+  const _ParticipantArea({required this.room});
+
+  final lk.Room room;
+
+  static lk.VideoTrack? _localVideo(lk.LocalParticipant p) {
+    for (final pub in p.videoTrackPublications) {
+      final track = pub.track;
+      if (track != null) return track;
+    }
+    return null;
+  }
+
+  static lk.VideoTrack? _remoteVideo(lk.RemoteParticipant p) {
+    for (final pub in p.videoTrackPublications) {
+      final track = pub.track;
+      if (track != null) return track;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tiles = <_TileData>[];
+    final local = room.localParticipant;
+    if (local != null) {
+      tiles.add(
+        _TileData(
+          name: 'You',
+          track: _localVideo(local),
+          speaking: local.isSpeaking,
+          muted: local.isMuted,
+        ),
+      );
+    }
+    for (final p in room.remoteParticipants.values) {
+      tiles.add(
+        _TileData(
+          name: p.name.isNotEmpty ? p.name : p.identity,
+          track: _remoteVideo(p),
+          speaking: p.isSpeaking,
+          muted: p.isMuted,
+        ),
+      );
+    }
+    if (!tiles.any((t) => t.track != null)) {
+      return _ParticipantList(room: room);
+    }
+    return GridView.count(
+      crossAxisCount: 2,
+      padding: const EdgeInsets.all(BrandSpace.sm),
+      mainAxisSpacing: BrandSpace.sm,
+      crossAxisSpacing: BrandSpace.sm,
+      children: [for (final tile in tiles) _VideoTile(data: tile)],
+    );
+  }
+}
+
+/// Everything one video tile needs about a participant.
+class _TileData {
+  const _TileData({
+    required this.name,
+    required this.track,
+    required this.speaking,
+    required this.muted,
+  });
+
+  final String name;
+  final lk.VideoTrack? track;
+  final bool speaking;
+  final bool muted;
+}
+
+/// One participant's tile: their video (or a placeholder), a name + mic badge,
+/// and a speaker highlight. Tapping a live tile opens it full-screen.
+class _VideoTile extends StatelessWidget {
+  const _VideoTile({required this.data});
+
+  final _TileData data;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: data.track == null
+          ? null
+          : () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => _FullScreenVideo(data: data)),
+            ),
+      child: Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: BrandColors.neutralButton,
+          borderRadius: BorderRadius.circular(12),
+          border: data.speaking
+              ? Border.all(color: BrandColors.primary, width: 2)
+              : null,
+        ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (data.track != null)
+              lk.VideoTrackRenderer(data.track!)
+            else
+              Center(
+                child: Icon(
+                  Icons.person_rounded,
+                  size: 32,
+                  color: BrandColors.textMuted,
+                ),
+              ),
+            Positioned(
+              left: 6,
+              bottom: 6,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    data.muted ? Icons.mic_off_rounded : Icons.mic_rounded,
+                    size: 14,
+                    color: BrandColors.textHeadline,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    data.name,
+                    style: BrandText.labelSm.copyWith(
+                      color: BrandColors.textHeadline,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One participant's video full-screen (tapped from a grid tile).
+class _FullScreenVideo extends StatelessWidget {
+  const _FullScreenVideo({required this.data});
+
+  final _TileData data;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Text(data.name),
+      ),
+      body: Center(
+        child: data.track == null
+            ? const Text('Camera off', style: TextStyle(color: Colors.white))
+            : lk.VideoTrackRenderer(data.track!),
+      ),
+    );
+  }
+}
+
+/// A round icon control (deafen, camera) for the call action row.
+class _IconToggle extends StatelessWidget {
+  const _IconToggle({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        label: label,
+        button: true,
+        child: BrandPressable(
+          onTap: onPressed,
+          child: Container(
+            height: 56,
+            width: 56,
+            decoration: BoxDecoration(
+              color: active
+                  ? BrandColors.primaryContainer
+                  : BrandColors.neutralButton,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              size: 22,
+              color: active ? BrandColors.onPrimary : BrandColors.textHeadline,
+            ),
+          ),
+        ),
       ),
     );
   }

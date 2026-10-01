@@ -453,16 +453,21 @@ class _TripCardState extends ConsumerState<_TripCard> {
     showAppActionSheet(
       context,
       title: trip.title,
-      subtitle: _statusLabel(trip.status),
+      subtitle: trip.isPaused ? 'Paused' : _statusLabel(trip.status),
       actions: [
         AppSheetAction(
           label: 'Open',
           icon: Icons.open_in_new_rounded,
           onSelected: _open,
         ),
-        if (trip.status == TripStatus.planned)
+        if (trip.status == TripStatus.planned ||
+            trip.status == TripStatus.completed)
           AppSheetAction(
-            label: 'Start now',
+            label: trip.status == TripStatus.completed
+                ? 'Start again'
+                : trip.isPaused
+                ? 'Resume trip'
+                : 'Start now',
             icon: Icons.play_arrow_rounded,
             onSelected: _start,
           ),
@@ -533,7 +538,9 @@ class _TripCardState extends ConsumerState<_TripCard> {
                     ),
                     const SizedBox(height: 6),
                     BrandPill(
-                      label: _statusLabel(trip.status),
+                      label: trip.isPaused
+                          ? 'Paused'
+                          : _statusLabel(trip.status),
                       background: _pillBackground(trip.status),
                       foreground: _pillForeground(trip.status),
                       bold: true,

@@ -143,8 +143,9 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
     );
   }
 
-  /// Nudges Mapbox's built-in ornaments clear of the system bars. Applied on
-  /// every (re)load, since a style change recreates them.
+  /// Nudges Mapbox's built-in ornaments clear of the system bars, or turns off
+  /// the ones the app doesn't want. Applied on every (re)load, since a style
+  /// change recreates them.
   Future<void> _applyOrnaments(MapboxMap map) async {
     try {
       await map.scaleBar.updateSettings(
@@ -158,6 +159,16 @@ class RanmapMapViewState extends ConsumerState<RanmapMapView> {
       );
     } catch (_) {
       // Ornaments are decorative; a failure here must not take the map down.
+    }
+    try {
+      // The native compass is drawn by the SDK at the top-right, where it sat
+      // over the status bar / notch and into the app's own top-right map
+      // controls. The heading is already shown by the location puck and the
+      // headlight beam, so the ornament is redundant — hide it rather than try
+      // to find it a clear corner (all four are occupied by app UI).
+      await map.compass.updateSettings(CompassSettings(enabled: false));
+    } catch (_) {
+      // Decorative only.
     }
   }
 

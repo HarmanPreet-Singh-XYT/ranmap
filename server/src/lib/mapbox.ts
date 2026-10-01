@@ -188,6 +188,50 @@ export function normalizeCategorySearch(body: unknown): NormalizedPlace[] | null
   return places;
 }
 
+/** One autocomplete suggestion (no coordinates — resolve with `/retrieve`). */
+export interface NormalizedSuggestion {
+  id: string;
+  name: string;
+  address: string | null;
+}
+
+/**
+ * Normalizes a Mapbox Search Box `/suggest` FeatureCollection. Unlike
+ * `/forward` or `/retrieve`, a suggestion carries **no geometry** — only the
+ * `mapbox_id` to resolve with `/retrieve` later — so a missing point is
+ * expected, not an error.
+ */
+export function normalizeSuggest(body: unknown): NormalizedSuggestion[] | null {
+  const response = asRecord(body);
+  if (!response) return null;
+  const features = response.features;
+  if (!Array.isArray(features)) return null;
+
+  const suggestions: NormalizedSuggestion[] = [];
+  for (const entry of features) {
+    const feature = asRecord(entry);
+    const properties = asRecord(feature?.properties);
+    if (!feature || !properties) continue;
+
+    const id = properties.mapbox_id;
+    if (typeof id !== "string" || !id) continue;
+
+    const address = properties.place_formatted;
+    const name = properties.name;
+    suggestions.push({
+      id,
+      name:
+        typeof name === "string" && name
+          ? name
+          : typeof address === "string" && address
+            ? address
+            : "Unnamed place",
+      address: typeof address === "string" && address ? address : null,
+    });
+  }
+  return suggestions;
+}
+
 /** One geocoded address/place, as the client receives it. */
 export interface NormalizedGeocode {
   name: string;

@@ -124,6 +124,13 @@ export default async function TripRecapPage({
         ))}
       </div>
 
+      {distanceKm <= 0 && seconds <= 0 && photoCount === 0 && spend <= 0 && (
+        <p className="rounded-xl bg-white p-4 text-sm text-muted-foreground ring-1 ring-foreground/10">
+          Nothing has been recorded for this trip yet — no distance, spend, or
+          photos. That usually means location sharing was off while riding.
+        </p>
+      )}
+
       {accepted.length > 0 && (
         <Card size="sm">
           <CardContent className="flex items-center gap-3">

@@ -149,32 +149,52 @@ class TripRecapScreen extends ConsumerWidget {
           // recording one. The speed profile and spend analysis below stay Pro.
           BrandCard(
             padding: const EdgeInsets.all(BrandSpace.md),
-            child: BrandStatGrid(
-              tiles: [
-                BrandStatTile(
-                  label: 'Distance',
-                  value: formatDistance(
-                    stats?.totalDistanceKm ?? 0,
-                    unit,
-                    decimals: 0,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                BrandStatGrid(
+                  tiles: [
+                    BrandStatTile(
+                      label: 'Distance',
+                      value: formatDistance(
+                        stats?.totalDistanceKm ?? 0,
+                        unit,
+                        decimals: 0,
+                      ),
+                      icon: Icons.straighten_rounded,
+                    ),
+                    BrandStatTile(
+                      label: 'Moving time',
+                      value: _duration(stats?.durationSeconds ?? 0),
+                      icon: Icons.schedule_rounded,
+                    ),
+                    BrandStatTile(
+                      label: 'Top speed',
+                      value: formatSpeed(stats?.maxSpeedKmh ?? 0, unit),
+                      icon: Icons.speed_rounded,
+                    ),
+                    BrandStatTile(
+                      label: 'Average',
+                      value: formatSpeed(stats?.avgSpeedKmh ?? 0, unit),
+                      icon: Icons.trending_flat_rounded,
+                    ),
+                  ],
+                ),
+                // A recap of an all-zero ride reads as "broken" unless we say
+                // why: the numbers come from the persisted location trail, so
+                // nothing was recorded when location sharing was off or the
+                // ride was too short to log a ping.
+                if (stats == null ||
+                    (stats.totalDistanceKm <= 0 && stats.durationSeconds <= 0)) ...[
+                  const SizedBox(height: BrandSpace.sm),
+                  Text(
+                    'No location was recorded for this ride — make sure location '
+                    'sharing is on and drive for a moment before ending it.',
+                    style: BrandText.bodySm.copyWith(
+                      color: BrandColors.textMuted,
+                    ),
                   ),
-                  icon: Icons.straighten_rounded,
-                ),
-                BrandStatTile(
-                  label: 'Moving time',
-                  value: _duration(stats?.durationSeconds ?? 0),
-                  icon: Icons.schedule_rounded,
-                ),
-                BrandStatTile(
-                  label: 'Top speed',
-                  value: formatSpeed(stats?.maxSpeedKmh ?? 0, unit),
-                  icon: Icons.speed_rounded,
-                ),
-                BrandStatTile(
-                  label: 'Average',
-                  value: formatSpeed(stats?.avgSpeedKmh ?? 0, unit),
-                  icon: Icons.trending_flat_rounded,
-                ),
+                ],
               ],
             ),
           ),

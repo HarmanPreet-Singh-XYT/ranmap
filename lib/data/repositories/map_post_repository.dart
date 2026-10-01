@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/constants/defaults.dart';
 import '../../core/util/image_upload.dart';
 import '../models/map_post.dart';
+import '../models/map_post_share.dart';
 import '../models/trip.dart';
 import '../services/supabase_service.dart';
 
@@ -212,6 +213,60 @@ class MapPostRepository {
       'post_id': postId,
       'shared_with_user': userId,
     });
+  }
+
+  /// Who a pin is currently shared with. Owner-only by RLS
+  /// (`map_post_shares_select_related`, 0002), so a non-owner simply sees the
+  /// rows they're allowed to (their own grant). Reads the target plus the
+  /// recipient's group name / username for display.
+  Future<List<MapPostShare>> sharesForPost(String postId) async {
+    final rows = await _client
+        .from('map_post_shares')
+        .select(
+          'post_id, shared_with_user, shared_with_group, '
+          'profiles(username), groups(name)',
+        )
+        .eq('post_id', postId)
+        .order('created_at', ascending: true);
+    return [
+      for (final row in (rows as List))
+        MapPostShare(
+          postId: postId,
+          userId: row['shared_with_user'] as String?,
+          groupId: row['shared_with_group'] as String?,
+          username: (row['profiles'] as Map?)?['username'] as String?,
+          groupName: (row['groups'] as Map?)?['name'] as String?,
+        ),
+    ];
+  }
+
+  /// Removes a share, revoking that recipient's access. Identified by
+  /// (post_id, target) — the table has no id, and the partial unique indexes
+  /// (0008) guarantee a single matching row. Owner-only by RLS.
+  ///
+  /// Note: this removes the *grant*. A `public` pin, or a `visibility='group'`
+  /// pin seen through trip membership, stays visible via that other branch of
+  /// `can_view_map_post` — un-sharing only truly hides a private pin.
+  Future<void> unshareFromUser({
+    required String postId,
+    required String userId,
+  }) async {
+    await _client
+        .from('map_post_shares')
+        .delete()
+        .eq('post_id', postId)
+        .eq('shared_with_user', userId);
+  }
+
+  Future<void> unshareFromGroup({
+    required String postId,
+    required String groupId,
+  }) async {
+    await _client
+        .from('map_post_shares')
+        .delete()
+        .eq('post_id', postId)
+        .eq('shared_with_group', groupId);
   }
 
   /// Deletes the post and its backing storage object, so the private bucket

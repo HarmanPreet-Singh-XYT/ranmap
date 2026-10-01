@@ -100,8 +100,14 @@ export async function updateTripStatus(
   const supabase = await createClient();
   if (!(await currentUserId(supabase))) return { error: "You're signed out." };
 
+  // Starting, resuming or restarting a trip clears the previous finish;
+  // completing stamps one. Pausing is stored as "planned" (the app keeps
+  // started_at to tell a paused trip from one that never ran).
+  const patch: { status: TripStatus; ended_at?: string | null } = { status };
+  if (status === "active") patch.ended_at = null;
+  if (status === "completed") patch.ended_at = new Date().toISOString();
   // Re-activating a trip re-runs the trip cap trigger, so surface it.
-  const { error } = await supabase.from("trips").update({ status }).eq("id", tripId);
+  const { error } = await supabase.from("trips").update(patch).eq("id", tripId);
   revalidatePath(`/app/trips/${tripId}`);
   revalidatePath("/app/trips");
   if (error) return dbErrorMessage(error);

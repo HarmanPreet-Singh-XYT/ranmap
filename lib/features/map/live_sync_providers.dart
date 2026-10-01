@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -307,6 +308,13 @@ class _LiveChannel {
   /// consumers can surface "live teammates aren't updating".
   Object? error;
 
+  /// Periodic reconcile against the authoritative snapshot (see `reconcile` in
+  /// [_liveChannelFor]). Merges rather than clears, so it heals a missed
+  /// broadcast / a member accepted after this device subscribed without ever
+  /// regressing a live position.
+  Future<void> Function()? reseed;
+  Timer? reseedTimer;
+
   void attach(void Function() onUpdate) => _listeners.add(onUpdate);
   void detach(void Function() onUpdate) => _listeners.remove(onUpdate);
 
@@ -349,6 +357,8 @@ void _scheduleChannelEviction(String key) {
     final current = _liveChannels[key];
     if (current == null || current.listenerCount > 0) return;
     _liveChannels.remove(key);
+    current.reseedTimer?.cancel();
+    current.reseed = null;
     unawaited(SupabaseService.client.removeChannel(current.channel));
   });
 }
@@ -370,6 +380,8 @@ _LiveChannel _liveChannelFor({
   if (existing != null) {
     _liveChannels.remove(key);
     _channelEvictionTimers.remove(key)?.cancel();
+    existing.reseedTimer?.cancel();
+    existing.reseed = null;
     unawaited(SupabaseService.client.removeChannel(existing.channel));
   }
 
@@ -406,6 +418,44 @@ _LiveChannel _liveChannelFor({
     }
     holder.notify();
   }
+
+  // Merges the authoritative snapshot into the live map without clearing, so a
+  // teammate who was accepted after this device subscribed — or whose broadcast
+  // was missed — still appears, and a fresher broadcast position is never
+  // regressed to an older persisted ping. Runs on a timer below; the
+  // clear-and-reload [seed] stays for cold start / reconnect.
+  Future<void> reconcile() async {
+    try {
+      final rows = await seedRows();
+      var changed = false;
+      for (final row in rows) {
+        try {
+          final loc = MemberLocation.fromRow(row);
+          if (loc.userId == userId) continue;
+          final existing = holder.latest[loc.userId];
+          if (existing == null || loc.recordedAt.isAfter(existing.recordedAt)) {
+            holder.latest[loc.userId] = loc;
+            changed = true;
+          }
+        } catch (_) {
+          continue;
+        }
+      }
+      holder.error = null;
+      if (changed) holder.notify();
+    } catch (e) {
+      holder.error = e;
+      holder.notify();
+    }
+  }
+
+  holder.reseed = reconcile;
+  // Every 20s, while someone is watching: heals a dropped private broadcast and
+  // surfaces teammates who joined after subscribe (the one-shot seed at
+  // subscribe time otherwise leaves both sides "riding solo" for the session).
+  holder.reseedTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+    if (holder.listenerCount > 0) unawaited(reconcile());
+  });
 
   channel.onBroadcast(
     event: 'position',
@@ -527,9 +577,12 @@ Stream<Map<String, MemberLocation>> _liveSync(
           persist: persist,
         );
       }
-    } catch (_) {
-      // Best-effort: a dropped broadcast heals on the next tick (or the
-      // next reconnect-seed).
+    } catch (e) {
+      // Best-effort, but no longer silent: a repeatedly failing publish (e.g.
+      // the server RPC / `realtime.send` not being available) is exactly what
+      // leaves every rider "riding solo", so log it. The 20s reconcile heals a
+      // one-off drop.
+      debugPrint('live sync: position broadcast failed: $e');
     }
   }
 

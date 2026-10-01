@@ -7,6 +7,7 @@ import {
   normalizeCategorySearch,
   normalizeDirections,
   normalizeGeocode,
+  normalizeSuggest,
 } from "./mapbox.js";
 import type { NormalizedPlace } from "./mapbox.js";
 
@@ -201,6 +202,51 @@ test("normalizeCategorySearch maps a Search Box /forward FeatureCollection", () 
       category: "restaurant",
     },
   ]);
+});
+
+test("normalizeSuggest maps a /suggest FeatureCollection (no geometry)", () => {
+  // /suggest returns no coordinates — only an id to resolve with /retrieve.
+  const suggestions = normalizeSuggest({
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        properties: {
+          mapbox_id: "mbx-sushi",
+          name: "Sushi Ran",
+          place_formatted: "Sushi Ran, 107 Caledonia St, Sausalito, CA",
+        },
+      },
+      {
+        type: "Feature",
+        properties: { mapbox_id: "mbx-2", name: "Sushi" },
+      },
+    ],
+  });
+
+  assert.deepEqual(suggestions, [
+    {
+      id: "mbx-sushi",
+      name: "Sushi Ran",
+      address: "Sushi Ran, 107 Caledonia St, Sausalito, CA",
+    },
+    { id: "mbx-2", name: "Sushi", address: null },
+  ]);
+});
+
+test("normalizeSuggest skips entries without an id and non-responses", () => {
+  assert.deepEqual(
+    normalizeSuggest({
+      type: "FeatureCollection",
+      features: [
+        { type: "Feature", properties: { name: "no id" } },
+        null,
+      ],
+    }),
+    [],
+  );
+  assert.equal(normalizeSuggest({ message: "Not authorized" }), null);
+  assert.equal(normalizeSuggest(null), null);
 });
 
 test("attachDetours attaches only the detours that were measured", () => {

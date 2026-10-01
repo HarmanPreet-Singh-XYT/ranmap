@@ -290,6 +290,12 @@ class _MapScreenState extends ConsumerState<MapScreen>
   // Guards so overlays are only rebuilt when their data actually changes.
   List<String>? _renderedSavedPlaceIds;
   List<String>? _renderedPostIds;
+
+  /// The manager those ids were drawn on. A style/map rebuild replaces the
+  /// manager, so the guard must also key on its identity — otherwise a rebuild
+  /// that produces the same post ids would skip the redraw and the pins would
+  /// silently never come back.
+  PointAnnotationManager? _renderedPostManager;
   String? _renderedPlaceId;
 
   // Set once after an overlay sync fails, so the user isn't left wondering why
@@ -351,6 +357,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
     _beam.reset();
     _postByAnnotationId.clear();
     _renderedPostIds = null;
+    _renderedPostManager = null;
     _renderedSavedPlaceIds = null;
     _routeRenderer.reset();
     _renderedPlaceId = null;
@@ -3066,9 +3073,19 @@ class _MapScreenState extends ConsumerState<MapScreen>
     double devicePixelRatio,
   ) async {
     final manager = _photoPoints;
-    if (manager == null) return;
+    if (manager == null) {
+      debugPrint('photo pins: no manager yet (style not ready) — skipped');
+      return;
+    }
     final ids = [for (final post in posts) post.id];
-    if (listEquals(ids, _renderedPostIds)) return;
+    // Skip only when the *same* manager already shows exactly these posts. A
+    // replaced manager (style reload / map rebuild) must redraw even if the ids
+    // are unchanged.
+    if (identical(manager, _renderedPostManager) &&
+        listEquals(ids, _renderedPostIds)) {
+      return;
+    }
+    debugPrint('photo pins: drawing ${posts.length} post(s)');
 
     try {
       final color = NavColors.of(context).highway;
@@ -3128,8 +3145,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
       // Commit the guard only after the work succeeded, so a failure is retried
       // on the next rebuild instead of being permanently suppressed.
       _renderedPostIds = ids;
+      _renderedPostManager = manager;
     } catch (error) {
       // A failed overlay sync must not take the map down — but don't hide it.
+      debugPrint('photo pins: sync failed: $error');
       _reportOverlaySyncFailure('photo pins', error);
     }
   }

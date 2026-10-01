@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -50,13 +51,21 @@ class _PickLocationScreenState extends State<PickLocationScreen> {
   final _searchCtrl = TextEditingController();
   Timer? _debounce;
 
-  List<GeocodeResult> _results = const [];
+  List<PlaceSuggestion> _suggestions = const [];
   GeocodeResult? _selected;
   bool _searching = false;
   String? _searchError;
 
   /// Discards results from a query the user has since edited.
   int _searchToken = 0;
+
+  /// The Mapbox Search Box session, opened on the first keystroke of a burst and
+  /// closed once a suggestion is resolved (see [retrieve]).
+  String? _sessionToken;
+
+  String _newSessionToken() =>
+      '${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}'
+      '${math.Random().nextInt(1 << 32).toRadixString(16)}';
 
   @override
   void dispose() {
@@ -71,35 +80,39 @@ class _PickLocationScreenState extends State<PickLocationScreen> {
     if (query.length < 2) {
       _searchToken++;
       setState(() {
-        _results = const [];
+        _suggestions = const [];
         _searching = false;
         _searchError = null;
       });
       return;
     }
+    // Open the autocomplete session as soon as the user starts typing.
+    _sessionToken ??= _newSessionToken();
     _debounce = Timer(const Duration(milliseconds: 400), () => _search(query));
   }
 
   Future<void> _search(String query) async {
     final token = ++_searchToken;
+    final session = _sessionToken ??= _newSessionToken();
     setState(() {
       _searching = true;
       _searchError = null;
     });
     try {
-      final results = await GoogleMapsApiService.geocode(
+      final suggestions = await GoogleMapsApiService.suggest(
         query,
+        sessionToken: session,
         near: widget.initialCenter,
       );
       if (!mounted || token != _searchToken) return;
       setState(() {
-        _results = results;
-        _searchError = results.isEmpty ? 'No matches for "$query".' : null;
+        _suggestions = suggestions;
+        _searchError = suggestions.isEmpty ? 'No matches for "$query".' : null;
       });
     } catch (e) {
       if (!mounted || token != _searchToken) return;
       setState(() {
-        _results = const [];
+        _suggestions = const [];
         _searchError = friendlyError(e);
       });
     } finally {
@@ -107,17 +120,54 @@ class _PickLocationScreenState extends State<PickLocationScreen> {
     }
   }
 
-  void _choose(GeocodeResult result) {
+  /// Resolves a suggestion to coordinates (completing the session), then moves
+  /// the pin there. A suggestion carries no geometry, so this needs the extra
+  /// retrieve round-trip.
+  Future<void> _choose(PlaceSuggestion suggestion) async {
     FocusScope.of(context).unfocus();
-    _searchToken++;
+    final token = ++_searchToken;
+    final session = _sessionToken ??= _newSessionToken();
     setState(() {
-      _selected = result;
-      _results = const [];
+      _searching = true;
+      _searchError = null;
+    });
+
+    GeocodeResult? resolved;
+    try {
+      resolved = await GoogleMapsApiService.retrieve(
+        suggestion.id,
+        sessionToken: session,
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _searching = false;
+          _searchError = friendlyError(e);
+        });
+      }
+      return;
+    }
+    if (!mounted || token != _searchToken) return;
+
+    // The session ends once a suggestion is chosen.
+    _sessionToken = null;
+
+    if (resolved == null) {
+      setState(() {
+        _searching = false;
+        _searchError = 'Could not load that place.';
+      });
+      return;
+    }
+    final place = resolved;
+    setState(() {
+      _selected = place;
+      _suggestions = const [];
       _searching = false;
       _searchError = null;
-      _searchCtrl.text = result.name;
+      _searchCtrl.text = place.name;
     });
-    unawaited(_mapKey.currentState?.flyTo(result.location, zoom: 15));
+    unawaited(_mapKey.currentState?.flyTo(place.location, zoom: 15));
   }
 
   Future<void> _confirm() async {
@@ -144,7 +194,8 @@ class _PickLocationScreenState extends State<PickLocationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final showPanel = _searching || _results.isNotEmpty || _searchError != null;
+    final showPanel =
+        _searching || _suggestions.isNotEmpty || _searchError != null;
     return BrandScaffold(
       header: BrandHeader(
         title: widget.title,
@@ -228,9 +279,9 @@ class _PickLocationScreenState extends State<PickLocationScreen> {
                             : ListView.builder(
                                 shrinkWrap: true,
                                 padding: EdgeInsets.zero,
-                                itemCount: _results.length,
+                                itemCount: _suggestions.length,
                                 itemBuilder: (context, i) {
-                                  final r = _results[i];
+                                  final r = _suggestions[i];
                                   return ListTile(
                                     dense: true,
                                     leading: Icon(

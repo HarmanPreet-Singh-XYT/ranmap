@@ -26,6 +26,9 @@ class VoiceSessionState {
     this.ptt = false,
     this.talking = false,
     this.micDenied = false,
+    this.cameraDenied = false,
+    this.deafened = false,
+    this.cameraOn = false,
     this.premiumRequired = false,
     this.error,
     this.revision = 0,
@@ -45,6 +48,16 @@ class VoiceSessionState {
   /// still hear others); a hint is shown instead of failing the join.
   final bool micDenied;
 
+  /// The OS blocked camera access (video opt-in failed). The call continues
+  /// audio-only; a hint offers a route to re-enable it in Settings.
+  final bool cameraDenied;
+
+  /// All incoming audio is muted (remote audio publications unsubscribed).
+  final bool deafened;
+
+  /// This device is publishing video (camera on).
+  final bool cameraOn;
+
   /// The channel needs Pro and no member has it. Shown as a paywall for an
   /// explicit join, ignored for an automatic one.
   final bool premiumRequired;
@@ -62,6 +75,9 @@ class VoiceSessionState {
     bool? ptt,
     bool? talking,
     bool? micDenied,
+    bool? cameraDenied,
+    bool? deafened,
+    bool? cameraOn,
     bool? premiumRequired,
     Object? error = _keep,
     int? revision,
@@ -74,6 +90,9 @@ class VoiceSessionState {
     ptt: ptt ?? this.ptt,
     talking: talking ?? this.talking,
     micDenied: micDenied ?? this.micDenied,
+    cameraDenied: cameraDenied ?? this.cameraDenied,
+    deafened: deafened ?? this.deafened,
+    cameraOn: cameraOn ?? this.cameraOn,
     premiumRequired: premiumRequired ?? this.premiumRequired,
     error: identical(error, _keep) ? this.error : error as String?,
     revision: revision ?? this.revision,
@@ -181,6 +200,15 @@ class VoiceSession extends Notifier<VoiceSessionState> {
       } catch (_) {
         micDenied = true;
       }
+      // Re-apply the camera on a reconnect so a live video tile doesn't drop.
+      var cameraDenied = false;
+      if (state.cameraOn) {
+        try {
+          await room.localParticipant?.setCameraEnabled(true);
+        } catch (_) {
+          cameraDenied = true;
+        }
+      }
       if (generation != _generation) {
         await _dispose(room);
         return;
@@ -192,6 +220,7 @@ class VoiceSession extends Notifier<VoiceSessionState> {
         status: VoiceStatus.connected,
         reconnecting: false,
         micDenied: micDenied,
+        cameraDenied: cameraDenied,
         error: null,
       );
       // You're in — the same rising two-note cue Discord plays.
@@ -260,6 +289,21 @@ class VoiceSession extends Notifier<VoiceSessionState> {
     });
     // Fresh `audioLevel`s as members start/stop speaking.
     events.on<lk.ActiveSpeakersChangedEvent>((_) => _onRoomChanged());
+    // Tracks coming and going change the video grid / participant list, and a
+    // member who joins while deafened must still be silenced.
+    events.on<lk.TrackSubscribedEvent>((event) {
+      if (generation != _generation) return;
+      if (state.deafened && event.publication.kind == lk.TrackType.AUDIO) {
+        unawaited(event.publication.unsubscribe());
+      }
+      _onRoomChanged();
+    });
+    events.on<lk.TrackUnsubscribedEvent>((_) {
+      if (generation == _generation) _onRoomChanged();
+    });
+    events.on<lk.LocalTrackPublishedEvent>((_) {
+      if (generation == _generation) _onRoomChanged();
+    });
     _events = events;
   }
 
@@ -335,6 +379,78 @@ class VoiceSession extends Notifier<VoiceSessionState> {
   }
 
   Future<String?> toggleMute() => _setMicrophone(muted: !state.muted);
+
+  /// Mutes or restores all *incoming* audio by unsubscribing / re-subscribing
+  /// each remote participant's audio publications. The mic is untouched — this
+  /// is "deafen", not "mute".
+  Future<void> toggleDeafen() async {
+    final next = !state.deafened;
+    final room = _room;
+    if (room != null) {
+      for (final participant in room.remoteParticipants.values) {
+        for (final publication in participant.audioTrackPublications) {
+          try {
+            if (next) {
+              await publication.unsubscribe();
+            } else {
+              await publication.subscribe();
+            }
+          } catch (_) {
+            // One track failing must not block the rest.
+          }
+        }
+      }
+    }
+    state = state.copyWith(deafened: next);
+    AppFeedback.selection();
+  }
+
+  /// Which way the camera faces; flipped by [switchCamera].
+  lk.CameraPosition _cameraPosition = lk.CameraPosition.front;
+
+  /// Flips between the front and back camera while video is on. Returns a
+  /// user-facing message on failure, or null.
+  Future<String?> switchCamera() async {
+    final participant = _room?.localParticipant;
+    if (participant == null) return null;
+    for (final publication in participant.videoTrackPublications) {
+      final track = publication.track;
+      if (track == null) continue;
+      _cameraPosition = _cameraPosition.switched();
+      try {
+        await track.setCameraPosition(_cameraPosition);
+      } catch (e) {
+        return friendlyError(e);
+      }
+      return null;
+    }
+    return null;
+  }
+
+  /// Re-attempts the microphone after a denial — e.g. the user just enabled it
+  /// in Settings and came back. Re-applies the current mute intent.
+  Future<String?> retryMicrophone() => _setMicrophone(muted: state.muted);
+
+  /// Turns this device's camera on/off. Video is opt-in and additive: a denied
+  /// camera sets [cameraDenied] (the call stays audio-only) rather than failing.
+  /// Returns a user-facing message on failure, or null.
+  Future<String?> toggleCamera() async {
+    final participant = _room?.localParticipant;
+    if (participant == null) return null;
+    final next = !state.cameraOn;
+    try {
+      await participant.setCameraEnabled(next);
+    } catch (e) {
+      state = state.copyWith(cameraDenied: true);
+      return friendlyError(e);
+    }
+    if (_room == null) return null;
+    state = state.copyWith(
+      cameraOn: next,
+      cameraDenied: next ? state.cameraDenied : false,
+    );
+    return null;
+  }
 
   /// Switches between open-mic and push-to-talk. Entering PTT mutes the mic
   /// until the button is held; leaving restores open-mic.

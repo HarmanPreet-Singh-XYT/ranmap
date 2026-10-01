@@ -12,6 +12,7 @@ import {
   normalizeCategorySearch,
   normalizeDirections,
   normalizeGeocode,
+  normalizeSuggest,
 } from "../lib/mapbox.js";
 import type { NormalizedDetour, NormalizedPlace } from "../lib/mapbox.js";
 import { createMapboxTokenVendor } from "../lib/mapbox-token.js";
@@ -85,6 +86,8 @@ const MAPBOX_DIRECTIONS_BASE = "https://api.mapbox.com/directions/v5/mapbox";
 const MAPBOX_CATEGORY_URL = "https://api.mapbox.com/search/searchbox/v1/category";
 const MAPBOX_FORWARD_URL = "https://api.mapbox.com/search/searchbox/v1/forward";
 const MAPBOX_GEOCODE_URL = "https://api.mapbox.com/search/geocode/v6/forward";
+const MAPBOX_SUGGEST_URL = "https://api.mapbox.com/search/searchbox/v1/suggest";
+const MAPBOX_RETRIEVE_URL = "https://api.mapbox.com/search/searchbox/v1/retrieve";
 const MAX_GEOCODE_QUERY_CHARS = 200;
 const GEOCODE_LIMIT = 6;
 const GOOGLE_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText";
@@ -525,6 +528,123 @@ mapsRouter.get(
       res.json({ places });
     } catch (err) {
       fail(res, err, 502, "Could not search places. Please try again.", "maps: place search");
+    }
+  }),
+);
+
+// GET /maps/places/suggest?q=<free text>&session_token=<id>[&proximity=lat,lng]
+// -> { suggestions: [{ id, name, address }] }
+// Session-based autocomplete (Mapbox Search Box /suggest). Deliberately NOT
+// charged against the daily search allowance: it fires on every keystroke —
+// the single /places/retrieve on selection draws one unit, so a whole
+// autocomplete session costs one (mirrors Search Box session billing).
+mapsRouter.get(
+  "/places/suggest",
+  asyncHandler(async (req, res) => {
+    const { mapboxAccessToken } = env;
+    if (!mapboxAccessToken) {
+      notConfigured(res, "Place search");
+      return;
+    }
+
+    const query = String(req.query.q ?? "").trim();
+    if (query.length < 2) {
+      res.status(400).json({ error: "q must be at least 2 characters" });
+      return;
+    }
+    if (query.length > MAX_GEOCODE_QUERY_CHARS) {
+      res.status(400).json({ error: `q must be at most ${MAX_GEOCODE_QUERY_CHARS} characters` });
+      return;
+    }
+    const sessionToken = String(req.query.session_token ?? "").trim();
+    if (!sessionToken) {
+      res.status(400).json({ error: "session_token is required" });
+      return;
+    }
+    const proximityRaw = String(req.query.proximity ?? "").trim();
+    const proximity = proximityRaw ? parseLatLng(proximityRaw) : null;
+    if (proximityRaw && !proximity) {
+      res.status(400).json({ error: "proximity must be valid lat,lng" });
+      return;
+    }
+
+    const params = new URLSearchParams({
+      q: query,
+      session_token: sessionToken,
+      language: "en",
+      limit: String(MAX_RESULTS),
+      access_token: mapboxAccessToken,
+    });
+    if (proximity) params.set("proximity", `${proximity.longitude},${proximity.latitude}`);
+
+    try {
+      const response = await fetchJson(`${MAPBOX_SUGGEST_URL}?${params.toString()}`);
+      if (providerFailed("maps: place suggest", response)) {
+        res.status(502).json({ error: "Could not search places. Please try again." });
+        return;
+      }
+      const suggestions = normalizeSuggest(response.body);
+      if (suggestions === null) {
+        console.error("maps: place suggest: unexpected response shape");
+        res.status(502).json({ error: "Could not search places. Please try again." });
+        return;
+      }
+      res.json({ suggestions });
+    } catch (err) {
+      fail(res, err, 502, "Could not search places. Please try again.", "maps: place suggest");
+    }
+  }),
+);
+
+// GET /maps/places/retrieve?mapbox_id=<id>&session_token=<id>
+// -> { place: { id, name, lat, lng, category } }
+// Resolves a suggestion id to coordinates, completing the autocomplete session
+// (so this — not /suggest — is what draws on the daily search allowance).
+mapsRouter.get(
+  "/places/retrieve",
+  asyncHandler(async (req, res) => {
+    const { mapboxAccessToken } = env;
+    if (!mapboxAccessToken) {
+      notConfigured(res, "Place search");
+      return;
+    }
+
+    const mapboxId = String(req.query.mapbox_id ?? "").trim();
+    const sessionToken = String(req.query.session_token ?? "").trim();
+    if (!mapboxId) {
+      res.status(400).json({ error: "mapbox_id is required" });
+      return;
+    }
+    if (!sessionToken) {
+      res.status(400).json({ error: "session_token is required" });
+      return;
+    }
+
+    if (!(await chargeSearch(req, res))) return;
+
+    const params = new URLSearchParams({
+      session_token: sessionToken,
+      access_token: mapboxAccessToken,
+    });
+
+    try {
+      const response = await fetchJson(
+        `${MAPBOX_RETRIEVE_URL}/${encodeURIComponent(mapboxId)}?${params.toString()}`,
+      );
+      if (providerFailed("maps: place retrieve", response)) {
+        res.status(502).json({ error: "Could not load that place. Please try again." });
+        return;
+      }
+      // /retrieve returns the same FeatureCollection shape as /forward.
+      const places = normalizeCategorySearch(response.body);
+      if (places === null || places.length === 0) {
+        console.error("maps: place retrieve: unexpected response shape");
+        res.status(502).json({ error: "Could not load that place. Please try again." });
+        return;
+      }
+      res.json({ place: places[0] });
+    } catch (err) {
+      fail(res, err, 502, "Could not load that place. Please try again.", "maps: place retrieve");
     }
   }),
 );

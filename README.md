@@ -1,26 +1,68 @@
 # Ranmap
 
-Travel together, stay in sync. Start a trip with your group, watch each
-other move live on the map, talk over voice, and keep a shared log of the
-trip — stats, fuel, expenses, stops, and photos pinned to the route.
+**Google Maps is single-player. Ranmap makes the whole crew one map.**
 
-This repo currently contains the **foundational skeleton, live sync, social
-graph, trip logging, a stats dashboard, group text + voice chat, photo
-sharing, phone verification, route planning, and an AI trip assistant**:
-project architecture, Supabase schema, auth, onboarding (username + avatar +
-vehicle), friends/groups, starting/inviting to a trip with invite
-accept/decline, live teammate tracking with navigate-to-friend and
-per-vehicle-type 3D models, per-trip stops (map-picked or current-location,
-reorderable, with planned-arrival ETAs) + expense logging with totals, a
-live-updating distance/speed/duration dashboard with fuel cost averages,
-real-time group text chat plus a LiveKit voice channel per trip/group,
-capturing and pinning photos to the route, Twilio Verify-backed phone
-number OTP, alternate-route planning + nearby-places search via the
-Directions/Places APIs, and a chat-based AI assistant that can save places,
-create trips, and schedule them. The map is a real 3D layer — Mapbox
-Standard's extruded buildings, trees, landmarks, and terrain, with each
-teammate's vehicle drawn as a bundled 3D model. What's left of the product
-vision is tracked in "Roadmap" below.
+Ranmap is a social road-trip app. Start a trip with your group and everyone
+shows up live on one 3D map as their own vehicle — talking over push-to-talk
+voice, planning shared stops, splitting expenses, and pinning photos to the
+route, while an AI assistant plans the trip for you.
+
+<p align="center">
+  <img src="submission/app-icon-1024.png" width="144" alt="Ranmap app icon">
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: AGPL-3.0-or-later" src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg"></a>
+  <img alt="Flutter" src="https://img.shields.io/badge/Flutter-Dart%203.13-02569B?logo=flutter&logoColor=white">
+  <img alt="Supabase" src="https://img.shields.io/badge/backend-Supabase-3FCF8E?logo=supabase&logoColor=white">
+  <img alt="RevenueCat" src="https://img.shields.io/badge/monetization-RevenueCat-F25A5A?logo=revenuecat&logoColor=white">
+</p>
+
+> **Shipaton 2026 — Next Gen Award entry.** Demo video: <!-- TODO: paste YouTube/Vimeo link --> · Devpost: <!-- TODO: paste Devpost submission link -->
+
+## The idea
+
+Navigation apps are built for one person: you type a destination, you drive, and
+the people you're travelling *with* are invisible. Ranmap adds the missing
+multiplayer layer. On a trip, every rider shows up on the same live map as their
+own vehicle, and the whole convoy can talk, plan, and split the trip in one
+place.
+
+It's deliberately crew-first. Solo search and navigation exist only as the
+on-ramp to a shared trip; the features that matter get better the more people
+are on the trip — live positions, voice, shared stops, voting, a shared ledger.
+
+## What's in the app
+
+- **Live 3D convoy map** — Mapbox Standard's extruded buildings, terrain and
+  time-of-day lighting, with each teammate drawn as a bundled 3D vehicle model
+  (car / bike / scooter / SUV), rotated to their heading.
+- **Live sync & tracking** — positions stream over a private, per-trip Supabase
+  Realtime broadcast (server-attested, so a member can't forge another's
+  position) and keep updating while the app is backgrounded.
+- **Voice and chat** — LiveKit voice rooms with push-to-talk and speaking
+  indicators, plus realtime group text, per trip and per group.
+- **Shared trip toolkit** — reorderable stops with next-stop ETAs, weather en
+  route, expenses with fuel-cost estimates projected over the whole route, and a
+  shared packing checklist.
+- **AI trip assistant** — Gemini with Google Search grounding that can actually
+  create trips, schedule them, invite friends, and save places through tools.
+- **Group convoy** — a persistent crew screen independent of any trip, with SOS,
+  "regroup here" with auto check-in, quick statuses, and an SMS fallback.
+- **Offline-first** — a persisted write queue with idempotent replay, plus
+  downloadable map tiles so the route works with no signal.
+- **Phones, photos, documents** — Twilio Verify phone OTP, photos pinned to the
+  route, and a private document wallet.
+
+## Screenshots
+
+<!-- TODO: drop the 1179x2556 screenshots into submission/ and uncomment.
+<p align="center">
+  <img src="submission/screenshot-map.png" width="240" alt="Live 3D convoy map">
+  <img src="submission/screenshot-trip.png" width="240" alt="Trip detail">
+  <img src="submission/screenshot-ai.png" width="240" alt="AI trip assistant">
+</p>
+-->
 
 ## Product focus
 
@@ -48,6 +90,31 @@ How to apply it when adding or changing something:
 - **Do not compete on generic navigation or fitness tracking.** Navigation and
   ride stats are there so a trip works end to end, not to out-feature Google
   Maps or Strava.
+
+## Monetization
+
+Ranmap is subscription-first, and the whole thing runs through **RevenueCat**.
+Three tiers (`free` < `pro` < `extreme`) are sold as monthly / annual products
+with a 7-day annual trial; the paywall (`lib/features/premium/`) reads real store
+prices from the RevenueCat offering instead of hard-coding them.
+
+- **The client** configures the RevenueCat SDK with a *public* key, logs the user
+  in with their Supabase id, and drives the paywall off the `pro` / `extreme`
+  entitlements. It never holds a secret.
+- **The server owns entitlement truth.** `POST /billing/revenuecat` verifies the
+  webhook's shared secret, re-reads the customer through the RevenueCat **v2**
+  REST API with the secret key, and writes `profiles.plan` — the only writer. A
+  leaked client key can't grant Pro.
+- **Enforcement is server- and database-side.** A paid gate returns HTTP 402
+  (`premium_required`) → paywall; a paid tier's fair-use ceiling returns a plain
+  429 (`limit_reached`). Hard caps (trips, photos, documents, group size) are
+  enforced by DB triggers, so a patched client can't bypass them.
+- **One subscription covers the whole crew.** Pro is evaluated per trip/group
+  (`trip_has_pro` / `group_has_pro`), so a single subscriber unlocks voice and
+  lifts the caps for everyone they travel with.
+- **Metered, not unlimited.** The AI assistant (tokens / 30 days) and route &
+  place search (per day) are metered with a visible allowance meter, so provider
+  cost stays bounded on every tier.
 
 ## Stack
 
@@ -608,8 +675,10 @@ picks it up automatically (and both files are gitignored).
   `push: false` so the app can be honest when unconfigured. It sends on trip
   invitations — from the app's own invite path (`POST /notifications/trip-invite`,
   creator-scoped) and from the AI assistant's `invite_friend_to_trip`. See
-  "Firebase" in Setup. Chat-message pushes still need a DB webhook/trigger,
-  since messages are written by the client, not the server.
+  "Firebase" in Setup. Chat-message pushes are sent by the client after a
+  message is posted — `POST /notifications/chat-message` (member-scoped) from
+  `lib/features/chat/chat_screen.dart` and `chat_share.dart`; no DB trigger is
+  needed because the client is the sender.
 - **Settings**: a `SettingsScreen` (gear in the Profile header) with
   Preferences (theme light/dark/system, distance units km/miles, default map
   style + 3D buildings + terrain — all persisted and applied to the live map),
@@ -643,30 +712,31 @@ picks it up automatically (and both files are gitignored).
 - **CI**: `.github/workflows/ci.yml` runs `flutter analyze` + `flutter test`
   and, for the server, `npm run typecheck` + `npm test` + `npm run build`.
 
-## Roadmap (not yet built)
+## Recently built / roadmap
 
-Each of these is a substantial feature; the schema and folder structure
-already anticipate them:
+Built since this section was a plain "not yet built" list:
 
-- **Voice polish**: voice is an app-wide session (`voice_session.dart`) that
-  auto-joins a trip's channel when the trip goes active (toggle in Settings),
-  shows a mini bar above the bottom nav, and supports mute, push-to-talk and
-  auto-reconnect with backoff. Still open: it's audio-only (no video) and
-  there's no deafen.
-- **Photo sharing polish**: capture/pin, the trip gallery, sharing to a group
-  and sharing with a friend (Profile → Shared with me) are live. Still open:
-  un-sharing / seeing who a photo is shared with.
-- **AI trip assistant polish**: the chat UI, conversation history, and all
-  five tools (`save_place`/`create_trip`/`schedule_trip`/
-  `invite_friend_to_trip`/`add_stop`) are live (see above). Still open: the
-  `ranmap-server` scheduler poller could move to a proper job queue or
-  Supabase Edge Function on a cron trigger for production instead of an
-  in-process `setTimeout` loop.
-- **Route planning polish**: origin/destination can be searched by name or
-  address (`GET /maps/geocode`, Mapbox Geocoding) or picked on the map, and a
-  planned or live trip's route can be changed from the trip's ⋮ menu
-  (`update_trip_route`). Still open: autocomplete-as-you-type suggestions are
-  debounced geocoding, not a session-based Places Autocomplete.
+- **Voice** — a **deafen** toggle (mutes all incoming audio by unsubscribing
+  every remote audio publication) and **video** (camera publish +
+  `VideoTrackRenderer` tiles in a participant grid), alongside mute and
+  push-to-talk. A denied mic/camera now shows an **Open Settings** hint with a
+  retry (`core/permissions/app_permission_hint.dart`) instead of a dead end.
+- **Photo sharing** — the viewer lists **who a photo is shared with** and can
+  **remove a share** (owner-only), revoking that recipient's access.
+- **Scheduled trips** — the in-process `setTimeout` poller is gone. **pg_cron**
+  starts due trips (`start_due_scheduled_trips()`, migration `0049`); a trigger
+  on `trips.status → 'active'` enqueues a durable **`push_jobs`** outbox row;
+  the server drains it (retryable). This also notifies on a *manual* start, and
+  a crash can no longer drop the "trip started" push.
+- **Route planning** — origin/destination **and** the nearby-POI free-text
+  search are now session-based **autocomplete**: Mapbox Search Box `/suggest`
+  (unmetered) + `/retrieve` (one search unit), with a client-generated session
+  id.
+
+Still open:
+
+- **Voice video** — the tile layout is a fixed two-column grid (tap a tile for
+  full-screen). Screen sharing is intentionally out of scope for the product.
 
 ## License
 

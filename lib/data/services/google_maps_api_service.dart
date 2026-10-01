@@ -33,6 +33,17 @@ class GeocodeResult {
   String get label => address == null ? name : '$name, $address';
 }
 
+/// One autocomplete suggestion from `/maps/places/suggest`. Carries no
+/// coordinates — resolve the chosen one with
+/// [GoogleMapsApiService.retrieve] to complete the session.
+class PlaceSuggestion {
+  const PlaceSuggestion({required this.id, required this.name, this.address});
+
+  final String id;
+  final String name;
+  final String? address;
+}
+
 class GoogleMapsApiService {
   GoogleMapsApiService._();
 
@@ -161,6 +172,53 @@ class GoogleMapsApiService {
       'proximity': '${near.lat},${near.lng}',
     });
     return _placesFrom(body);
+  }
+
+  /// Session-based autocomplete for a partial query: lightweight suggestions
+  /// (id + label, no coordinates). Deliberately unmetered server-side; the
+  /// [retrieve] that follows costs one search unit.
+  static Future<List<PlaceSuggestion>> suggest(
+    String query, {
+    required String sessionToken,
+    Position? near,
+  }) async {
+    final body = await _get('/maps/places/suggest', {
+      'q': query,
+      'session_token': sessionToken,
+      'proximity': ?(near == null ? null : '${near.lat},${near.lng}'),
+    });
+    final items = (body['suggestions'] as List? ?? const [])
+        .cast<Map<String, dynamic>>();
+    return [
+      for (final s in items)
+        PlaceSuggestion(
+          id: s['id'] as String? ?? '',
+          name: s['name'] as String? ?? 'Unnamed place',
+          address: s['address'] as String?,
+        ),
+    ];
+  }
+
+  /// Resolves a suggestion id to a coordinate, completing the autocomplete
+  /// session. Returns null when the provider can't resolve it.
+  static Future<GeocodeResult?> retrieve(
+    String mapboxId, {
+    required String sessionToken,
+  }) async {
+    final body = await _get('/maps/places/retrieve', {
+      'mapbox_id': mapboxId,
+      'session_token': sessionToken,
+    });
+    final place = body['place'] as Map<String, dynamic>?;
+    if (place == null) return null;
+    return GeocodeResult(
+      name: place['name'] as String? ?? 'Unnamed place',
+      address: null,
+      location: Position(
+        (place['lng'] as num).toDouble(),
+        (place['lat'] as num).toDouble(),
+      ),
+    );
   }
 
   /// The backend URL that streams one Google place photo (see the

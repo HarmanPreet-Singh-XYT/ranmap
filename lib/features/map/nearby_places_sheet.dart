@@ -94,6 +94,11 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
   String _type = _kPlaceTypes.first.$1;
   bool _alongRoute = false;
   List<NearbyPlace> _places = const [];
+  /// Autocomplete suggestions for a free-text query (id + label, no coordinates
+  /// until resolved with `retrieve`).
+  List<PlaceSuggestion> _suggestions = const [];
+  /// The Mapbox Search Box session for the current free-text burst.
+  String? _sessionToken;
   bool _loading = true;
   String? _error;
 
@@ -127,6 +132,8 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
       // Dropping back under the minimum returns to the category results — but
       // only when we were actually in free-text mode, so typing one character
       // from empty doesn't fire a needless category request.
+      _sessionToken = null;
+      _suggestions = const [];
       if (wasFreeText) {
         _search();
       } else {
@@ -135,6 +142,8 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
       return;
     }
     // Reflect the chip/free-text state immediately, then search once settled.
+    _sessionToken ??=
+        '${DateTime.now().microsecondsSinceEpoch}-${identityHashCode(this)}';
     setState(() {});
     _debounce = Timer(const Duration(milliseconds: 400), _search);
   }
@@ -148,9 +157,24 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
     });
     try {
       final polyline = widget.routePolyline;
-      final places = query.length >= 2
-          ? await GoogleMapsApiService.searchPlaces(query, near: widget.center)
-          : _alongRoute && polyline != null && polyline.isNotEmpty
+      if (query.length >= 2) {
+        // Free text: session-based autocomplete (unmetered server-side). The
+        // suggestions carry no coordinates — the chosen one is resolved with
+        // retrieve() on tap, which is what draws one search unit.
+        final suggestions = await GoogleMapsApiService.suggest(
+          query,
+          sessionToken: _sessionToken ??=
+              '${DateTime.now().microsecondsSinceEpoch}-${identityHashCode(this)}',
+          near: widget.center,
+        );
+        if (!mounted || token != _searchToken) return;
+        setState(() {
+          _suggestions = suggestions;
+          _places = const [];
+        });
+        return;
+      }
+      final places = _alongRoute && polyline != null && polyline.isNotEmpty
           ? await GoogleMapsApiService.placesAlongRoute(
               routePolyline: polyline,
               // Anchor the detour figures: the server measures from here.
@@ -183,6 +207,8 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
     // double-fire a search.
     _debounce?.cancel();
     _searchCtrl.clear();
+    _sessionToken = null;
+    _suggestions = const [];
     FocusScope.of(context).unfocus();
     setState(() => _type = id);
     _search();
@@ -191,8 +217,51 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
   void _clearQuery() {
     _debounce?.cancel();
     _searchCtrl.clear();
+    _sessionToken = null;
+    _suggestions = const [];
     setState(() {});
     _search();
+  }
+
+  /// Resolves a suggestion to coordinates (completing the search session), then
+  /// opens its details. A suggestion carries no geometry, hence the retrieve.
+  Future<void> _openSuggestion(PlaceSuggestion suggestion) async {
+    final session = _sessionToken;
+    if (session == null) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final resolved = await GoogleMapsApiService.retrieve(
+        suggestion.id,
+        sessionToken: session,
+      );
+      if (!mounted) return;
+      if (resolved == null) {
+        setState(() {
+          _loading = false;
+          _error = 'Could not load that place.';
+        });
+        return;
+      }
+      // The session ends once a suggestion is resolved.
+      _sessionToken = null;
+      setState(() => _loading = false);
+      await _openDetails(
+        NearbyPlace(
+          name: resolved.name,
+          placeId: suggestion.id,
+          location: resolved.location,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = friendlyError(e);
+      });
+    }
   }
 
   Future<void> _openDetails(NearbyPlace place) async {
@@ -315,7 +384,7 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
                         ),
                       ),
                     )
-                  : _places.isEmpty
+                  : (freeText ? _suggestions.isEmpty : _places.isEmpty)
                   ? Center(
                       child: Text(
                         freeText
@@ -327,8 +396,27 @@ class _NearbyPlacesSheetState extends ConsumerState<_NearbyPlacesSheet> {
                     )
                   : ListView.builder(
                       controller: scrollController,
-                      itemCount: _places.length,
+                      itemCount: freeText ? _suggestions.length : _places.length,
                       itemBuilder: (context, i) {
+                        if (freeText) {
+                          final suggestion = _suggestions[i];
+                          return FTile(
+                            prefix: Icon(
+                              Icons.place_outlined,
+                              color: c.activeRoute,
+                            ),
+                            title: Text(suggestion.name),
+                            subtitle: suggestion.address == null
+                                ? null
+                                : Text(
+                                    suggestion.address!,
+                                    style: BrandText.bodySm.copyWith(
+                                      color: c.mutedForeground,
+                                    ),
+                                  ),
+                            onPress: () => _openSuggestion(suggestion),
+                          );
+                        }
                         final place = _places[i];
                         final detour = place.detour;
                         return FTile(

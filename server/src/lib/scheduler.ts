@@ -1,56 +1,90 @@
 import { notifyUsers } from "./push.js";
 import { supabaseAdmin } from "./supabase.js";
 
-const BASE_INTERVAL_MS = 60_000;
+// Drain cadence. A trip's push is enqueued by a DB trigger the instant the trip
+// goes active (see 0049_scheduler_cron_and_outbox.sql); this loop just delivers
+// the queue, so a short interval keeps the notification prompt.
+const BASE_INTERVAL_MS = 30_000;
 const MAX_INTERVAL_MS = 15 * 60_000;
 // Spread instances out so they don't all hit Supabase in the same instant.
 const JITTER_MS = 10_000;
+// Give up after this many failed deliveries of one job.
+const MAX_ATTEMPTS = 5;
+const BATCH = 25;
 
 let running = false;
 let consecutiveFailures = 0;
 let timer: NodeJS.Timeout | undefined;
 
-/** One trip the `start_due_scheduled_trips` RPC just flipped to active. */
-type StartedTrip = {
-  trip_id: string;
-  title: string | null;
-  member_ids: string[];
+/** One row of the durable push outbox (`push_jobs`). */
+type PushJob = {
+  id: string;
+  kind: string;
+  payload: Record<string, unknown>;
+  attempts: number;
 };
 
-/**
- * Pushes a "trip started" notification to each started trip's members, under the
- * `trip_updates` preference. Best-effort: notifyUsers never throws, so a push
- * problem can't affect the polling loop.
- */
-async function notifyStartedTrips(trips: StartedTrip[]): Promise<void> {
-  for (const trip of trips) {
-    const members = Array.isArray(trip.member_ids) ? trip.member_ids.filter(Boolean) : [];
-    if (members.length === 0) continue;
-    await notifyUsers(
-      members,
-      {
-        title: "Trip started",
-        body: trip.title
-          ? `"${trip.title}" has started — the convoy is live.`
-          : "Your scheduled trip has started.",
-        data: { type: "trip_update", tripId: trip.trip_id },
-      },
-      "trip_updates",
-    );
+function backoffMs(attempts: number): number {
+  return Math.min(BASE_INTERVAL_MS * 2 ** attempts, MAX_INTERVAL_MS);
+}
+
+/** Delivers one queued job, then marks it done (or schedules a retry). */
+async function runJob(job: PushJob): Promise<void> {
+  try {
+    if (job.kind === "trip_started") {
+      const payload = job.payload as {
+        trip_id?: string;
+        title?: string;
+        member_ids?: unknown;
+      };
+      const members = Array.isArray(payload.member_ids)
+        ? payload.member_ids.filter((id): id is string => typeof id === "string" && id.length > 0)
+        : [];
+      if (members.length > 0) {
+        await notifyUsers(
+          members,
+          {
+            title: "Trip started",
+            body: payload.title
+              ? `"${payload.title}" has started — the convoy is live.`
+              : "Your scheduled trip has started.",
+            data: {
+              type: "trip_update",
+              tripId: typeof payload.trip_id === "string" ? payload.trip_id : "",
+            },
+          },
+          "trip_updates",
+        );
+      }
+    }
+    // notifyUsers is best-effort (never throws), so reaching here means the job
+    // is done; a genuinely failed delivery is retried by re-queuing, not here.
+    await supabaseAdmin
+      .from("push_jobs")
+      .update({ completed_at: new Date().toISOString() })
+      .eq("id", job.id);
+  } catch (err) {
+    const attempts = job.attempts + 1;
+    console.error(`scheduler: push job ${job.id} (${job.kind}) failed:`, err);
+    await supabaseAdmin
+      .from("push_jobs")
+      .update({
+        attempts,
+        next_attempt_at: new Date(Date.now() + backoffMs(attempts)).toISOString(),
+      })
+      .eq("id", job.id);
   }
 }
 
 /**
- * Polls scheduled_trips for entries whose time has arrived and starts the
- * corresponding trip. The whole "flip status + clear schedule" step runs in a
- * single Postgres function (`start_due_scheduled_trips`) so a crash can't
- * orphan a schedule row that then re-fires. The function returns the trips it
- * started (with their members) so they can be pushed to, rather than a count.
+ * Delivers pending `push_jobs` rows: `trip_started` fans a push out to the
+ * trip's members. This replaces the old in-process poll of
+ * `start_due_scheduled_trips` — the trip now flips to active from pg_cron
+ * (migration 0049) and the DB enqueues the job, so this loop only drains it.
  *
  * Uses a self-rescheduling timeout rather than a fixed interval: after a
- * failure the poll backs off exponentially (so a broken RPC doesn't log-spam
- * every minute forever) and every delay carries jitter so multiple instances
- * don't stampede.
+ * failure the poll backs off exponentially and every delay carries jitter so
+ * multiple instances don't stampede.
  */
 export function startScheduler(): void {
   const scheduleNext = (delayMs: number) => {
@@ -59,24 +93,28 @@ export function startScheduler(): void {
   };
 
   const tick = async () => {
-    // Skip if the previous tick is still running (a slow Supabase batch must
-    // not stack up concurrent passes).
+    // Skip if the previous tick is still running (a slow batch must not stack).
     if (running) return;
     running = true;
     try {
-      const { data, error } = await supabaseAdmin.rpc("start_due_scheduled_trips");
+      const { data, error } = await supabaseAdmin
+        .from("push_jobs")
+        .select("id, kind, payload, attempts")
+        .is("completed_at", null)
+        .lte("next_attempt_at", new Date().toISOString())
+        .lt("attempts", MAX_ATTEMPTS)
+        .order("next_attempt_at", { ascending: true })
+        .limit(BATCH);
       if (error) {
         consecutiveFailures += 1;
         console.error(
-          `scheduler: start_due_scheduled_trips failed (attempt ${consecutiveFailures}):`,
+          `scheduler: push_jobs select failed (attempt ${consecutiveFailures}):`,
           error.message,
         );
       } else {
         consecutiveFailures = 0;
-        const started = Array.isArray(data) ? (data as StartedTrip[]) : [];
-        if (started.length > 0) {
-          console.log(`scheduler: auto-started ${started.length} trip(s)`);
-          await notifyStartedTrips(started);
+        for (const job of (data ?? []) as PushJob[]) {
+          await runJob(job);
         }
       }
     } catch (err) {
@@ -159,8 +197,8 @@ async function runPrune(): Promise<void> {
 }
 
 /**
- * Starts the daily location-ping retention job. Kept separate from the trip
- * scheduler so a failure in one can't affect the other's cadence.
+ * Starts the daily location-ping retention job. Kept separate from the push
+ * drainer so a failure in one can't affect the other's cadence.
  */
 export function startPruner(): void {
   const first = setTimeout(() => void runPrune(), PRUNE_INITIAL_DELAY_MS);

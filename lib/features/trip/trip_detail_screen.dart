@@ -222,6 +222,29 @@ class TripDetailScreen extends ConsumerWidget {
     }
   }
 
+  /// Pauses a running trip. The screen pops for the same reason starting does:
+  /// it was handed a snapshot of the trip, so leaving returns the user to the
+  /// list/map, which re-reads the now-paused trip.
+  Future<void> _pauseTrip(BuildContext context, WidgetRef ref) async {
+    final confirmed = await _confirm(
+      context,
+      title: 'Pause trip?',
+      body: 'Your crew stops seeing you live. You can resume it any time.',
+      confirmLabel: 'Pause',
+    );
+    if (!confirmed) return;
+
+    try {
+      await ref.read(tripRepositoryProvider).pauseTrip(trip.id);
+      refreshTripData(ref, tripId: trip.id);
+      if (!context.mounted) return;
+      showAppToast(context, 'Trip paused. Resume it whenever you are ready.');
+      Navigator.of(context).maybePop();
+    } catch (e) {
+      if (context.mounted) showAppToast(context, friendlyError(e), error: true);
+    }
+  }
+
   Future<void> _leaveTrip(BuildContext context, WidgetRef ref) async {
     final confirmed = await _confirm(
       context,
@@ -523,9 +546,20 @@ class TripDetailScreen extends ConsumerWidget {
                 ),
               ),
               const Spacer(),
-              if (trip.status == TripStatus.planned) ...[
+              if (trip.status == TripStatus.active) ...[
                 _TripActionButton(
-                  label: 'Start',
+                  label: 'Pause',
+                  onPressed: () => _pauseTrip(context, ref),
+                ),
+                const SizedBox(width: BrandSpace.sm),
+              ] else if (trip.status == TripStatus.planned ||
+                  trip.status == TripStatus.completed) ...[
+                _TripActionButton(
+                  label: trip.status == TripStatus.completed
+                      ? 'Start again'
+                      : trip.isPaused
+                      ? 'Resume'
+                      : 'Start',
                   onPressed: () => _startTrip(context, ref),
                 ),
                 const SizedBox(width: BrandSpace.sm),

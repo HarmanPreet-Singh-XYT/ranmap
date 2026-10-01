@@ -151,6 +151,12 @@ class Trip {
   final DateTime? endedAt;
   final String? routePolyline;
 
+  /// A trip that was started and then paused. Pausing keeps the trip in the
+  /// `planned` state (so it stops being live and still counts against the trip
+  /// cap) but leaves [startedAt] set, which is what tells it apart from a trip
+  /// that has never run.
+  bool get isPaused => status == TripStatus.planned && startedAt != null;
+
   /// ISO 4217 code the trip's expenses and ledger are denominated in.
   final String currency;
 
