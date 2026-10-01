@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import type { Room as RoomType } from "livekit-client";
 import { Mic, MicOff, Phone, PhoneOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ export function VoiceRoom({ tripId, groupId }: { tripId?: string; groupId?: stri
   const [muted, setMuted] = useState(false);
   const [count, setCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [premium, setPremium] = useState(false);
 
   const refresh = useCallback(() => {
     const room = roomRef.current;
@@ -46,6 +48,8 @@ export function VoiceRoom({ tripId, groupId }: { tripId?: string; groupId?: stri
         error?: string;
       };
       if (!res.ok || !body.url || !body.token) {
+        // 402 = voice is a Pro feature (and any Pro member unlocks the room).
+        setPremium(res.status === 402);
         setError(body.error ?? "Voice isn't available right now.");
         setStatus("idle");
         return;
@@ -124,7 +128,19 @@ export function VoiceRoom({ tripId, groupId }: { tripId?: string; groupId?: stri
         <Phone aria-hidden />
         {status === "connecting" ? "Connecting…" : "Join voice"}
       </Button>
-      {error && <span className="text-xs text-red-700">{error}</span>}
+      {error && (
+        <span className="text-xs text-red-700">
+          {error}
+          {premium && (
+            <Link
+              href="/app/upgrade"
+              className="ml-2 font-semibold text-emerald-700 hover:text-emerald-800"
+            >
+              Upgrade
+            </Link>
+          )}
+        </span>
+      )}
     </div>
   );
 }

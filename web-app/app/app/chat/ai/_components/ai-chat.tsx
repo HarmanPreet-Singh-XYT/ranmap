@@ -182,7 +182,7 @@ export function AiChat({
             className="mb-2"
             cta={{
               label: "Upgrade",
-              onClick: () => router.push("/account/billing"),
+              onClick: () => router.push("/app/upgrade"),
             }}
           >
             {error}

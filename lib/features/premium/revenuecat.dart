@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 
 import '../../core/constants/env.dart';
+import '../../data/repositories/billing_repository.dart';
+import '../../data/services/supabase_service.dart';
 import 'premium_purchaser.dart';
 
 /// The RevenueCat entitlement that maps to Ranmap Pro. Must match the
@@ -46,7 +48,9 @@ Future<void> identifyRevenueCatUser(String? appUserId) async {
       await Purchases.logIn(appUserId);
     }
   } catch (e) {
-    debugPrint('RevenueCat identify failed: $e');
+    // Logged loudly (not silently swallowed): a failed logIn means a purchase
+    // can be attributed to an anonymous id, which the webhook then can't map.
+    debugPrint('RevenueCat identify FAILED (purchase may not link to profile): $e');
   }
 }
 
@@ -104,16 +108,24 @@ class RevenueCatPremiumPurchaser implements PremiumPurchaser {
 
   @override
   Future<void> purchase({PaywallPlan plan = PaywallPlan.proAnnual}) async {
+    // Attribute the purchase to the Supabase user *before* buying, so the
+    // RevenueCat event carries the uid the webhook maps to a profile.
+    await identifyRevenueCatUser(SupabaseService.currentUserId);
     final package = await _packageFor(plan);
     if (package == null) throw const PremiumPurchaseUnavailable();
     await _guarded(() => Purchases.purchase(PurchaseParams.package(package)));
+    // The webhook may lag or fail; reconcile the DB directly so the plan is
+    // reflected everywhere immediately.
+    await const BillingRepository().sync();
   }
 
   @override
   Future<bool> restore() async {
     try {
       final info = await Purchases.restorePurchases();
-      return _isProCustomerInfo(info);
+      final active = _isProCustomerInfo(info);
+      if (active) await const BillingRepository().sync();
+      return active;
     } on PlatformException catch (e) {
       if (PurchasesErrorHelper.getErrorCode(e) ==
           PurchasesErrorCode.purchaseCancelledError) {

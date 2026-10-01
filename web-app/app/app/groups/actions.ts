@@ -4,9 +4,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { currentUserId } from "@/lib/data/auth";
+import { planErrorMessage } from "@/lib/data/plan";
 
 export interface GroupActionState {
   error: string | null;
+  /** True when the failure is a free-tier lock (show the paywall). */
+  premium?: boolean;
   message?: string;
 }
 
@@ -28,7 +31,7 @@ export async function createGroup(
     return { error: "You're signed out. Sign in and try again." };
   }
   const { data, error } = await supabase.rpc("create_group", { p_name: name });
-  if (error) return { error: "Couldn't create the group. Please try again." };
+  if (error) return planErrorMessage(error, "Couldn't create the group. Please try again.");
 
   const id = (data as { id?: string } | null)?.id;
   revalidatePath("/app/groups");
@@ -47,7 +50,9 @@ export async function joinGroup(
     return { error: "You're signed out. Sign in and try again." };
   }
   const { data, error } = await supabase.rpc("join_group", { p_code: code });
-  if (error) return { error: "That invite code didn't work." };
+  // A full group raises the member-cap trigger; surface that instead of
+  // mislabelling it a bad code.
+  if (error) return planErrorMessage(error, "That invite code didn't work.");
 
   const row = ((data ?? []) as { status: string; group_id: string | null }[])[0];
   if (!row) return { error: "That invite code didn't work." };
@@ -62,13 +67,20 @@ export async function joinGroup(
   return { error: "No group found for that code." };
 }
 
-/** Used by the invite-link landing page (no form state, redirects on result). */
-export async function joinGroupByCode(formData: FormData): Promise<void> {
+/** Used by the invite-link landing page. Redirects on success, reports on lock. */
+export async function joinGroupByCode(
+  _prev: GroupActionState,
+  formData: FormData,
+): Promise<GroupActionState> {
   const code = str(formData.get("code"));
-  if (!code) return;
+  if (!code) return { error: "Enter an invite code." };
   const supabase = await createClient();
-  if (!(await currentUserId(supabase))) return;
-  const { data } = await supabase.rpc("join_group", { p_code: code });
+  if (!(await currentUserId(supabase))) return { error: "You're signed out." };
+
+  const { data, error } = await supabase.rpc("join_group", { p_code: code });
+  // A full group raises the member-cap trigger (P0001) — the invite isn't bad.
+  if (error) return planErrorMessage(error, "That invite code didn't work.");
+
   const row = ((data ?? []) as { status: string; group_id: string | null }[])[0];
   revalidatePath("/app/groups");
   if (row && (row.status === "joined" || row.status === "already_member") && row.group_id) {
@@ -87,6 +99,34 @@ export async function updateGroupDetails(formData: FormData): Promise<void> {
     p_group: groupId,
     p_name: name,
     p_description: str(formData.get("description")),
+  });
+  revalidatePath(`/app/groups/${groupId}`);
+}
+
+/**
+ * Sets a group's avatar. The caller passes a seed or a `custom:<path>` string
+ * (the file is uploaded to the public `avatars` bucket under the uploader's own
+ * folder), matching the mobile convention. update_group only changes avatar_id
+ * (we pass the current name/description through).
+ */
+export async function setGroupAvatar(groupId: string, avatarId: string): Promise<void> {
+  if (!groupId || !avatarId) return;
+  const supabase = await createClient();
+  if (!(await currentUserId(supabase))) return;
+
+  const { data } = await supabase
+    .from("groups")
+    .select("name, description")
+    .eq("id", groupId)
+    .maybeSingle();
+  const group = data as { name?: string; description?: string | null } | null;
+  if (!group?.name) return;
+
+  await supabase.rpc("update_group", {
+    p_group: groupId,
+    p_name: group.name,
+    p_description: group.description ?? null,
+    p_avatar_id: avatarId,
   });
   revalidatePath(`/app/groups/${groupId}`);
 }
@@ -155,19 +195,26 @@ export async function removeMember(formData: FormData): Promise<void> {
   revalidatePath(`/app/groups/${groupId}`);
 }
 
-export async function respondJoinRequest(formData: FormData): Promise<void> {
+export async function respondJoinRequest(
+  _prev: GroupActionState,
+  formData: FormData,
+): Promise<GroupActionState> {
   const groupId = str(formData.get("group_id"));
   const userId = str(formData.get("user_id"));
-  if (!groupId || !userId) return;
+  if (!groupId || !userId) return { error: "Invalid request." };
   const accept = formData.get("accept") === "1";
   const supabase = await createClient();
-  if (!(await currentUserId(supabase))) return;
-  await supabase.rpc("respond_group_request", {
+  if (!(await currentUserId(supabase))) return { error: "You're signed out." };
+
+  // Accepting activates a membership, which re-runs the member-cap trigger.
+  const { error } = await supabase.rpc("respond_group_request", {
     p_group: groupId,
     p_user: userId,
     p_accept: accept,
   });
   revalidatePath(`/app/groups/${groupId}`);
+  if (error) return planErrorMessage(error, "Couldn't update that request.");
+  return { error: null };
 }
 
 export async function leaveGroup(formData: FormData): Promise<void> {

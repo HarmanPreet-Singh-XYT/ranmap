@@ -13,11 +13,9 @@ import {
   deleteTrip,
   leaveTrip,
   revokeWatchLink,
-  updateTripStatus,
 } from "../actions";
 import { TripStatusBadge } from "../_components/trip-status-badge";
-
-const STATUSES = ["planned", "active", "completed", "cancelled"] as const;
+import { TripStatusForm } from "./_components/trip-status-form";
 
 export default async function TripLayout({
   children,
@@ -69,24 +67,7 @@ export default async function TripLayout({
             </p>
           )}
         </div>
-        <form action={updateTripStatus} className="flex items-center gap-2">
-          <input type="hidden" name="trip_id" value={trip.id} />
-          <select
-            name="status"
-            defaultValue={trip.status}
-            aria-label="Trip status"
-            className="h-8 rounded-lg border border-[#E6E3DA] bg-white px-2 text-xs font-semibold outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40"
-          >
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s[0].toUpperCase() + s.slice(1)}
-              </option>
-            ))}
-          </select>
-          <Button type="submit" size="sm" variant="outline">
-            Update
-          </Button>
-        </form>
+        <TripStatusForm tripId={trip.id} status={trip.status} />
       </div>
 
       <nav className="flex gap-2 border-b border-[#E6E3DA] pb-3">

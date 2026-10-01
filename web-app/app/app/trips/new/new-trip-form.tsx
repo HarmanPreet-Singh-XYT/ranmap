@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PlaceSearch } from "../../_components/place-search";
+import { PaywallNotice } from "../../_components/paywall-notice";
 import { createTrip, type TripActionState } from "../actions";
 
 const CURRENCIES = ["USD", "EUR", "GBP", "INR", "CAD", "AUD"];
@@ -112,11 +113,7 @@ export function NewTripForm({
         </CardContent>
       </Card>
 
-      {state.error && (
-        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-medium text-red-800">
-          {state.error}
-        </p>
-      )}
+      {state.error && <PaywallNotice message={state.error} premium={state.premium} />}
 
       <Button type="submit" size="lg" disabled={pending}>
         {pending ? "Creating…" : "Create trip"}

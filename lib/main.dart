@@ -9,6 +9,7 @@ import 'app/app.dart';
 import 'core/providers/app_prefs_provider.dart';
 import 'core/push/push_service.dart';
 import 'core/storage/secure_store.dart';
+import 'data/repositories/billing_repository.dart';
 import 'data/services/supabase_service.dart';
 import 'features/premium/revenuecat.dart';
 
@@ -34,7 +35,12 @@ Future<void> main() async {
   // also refresh this device's push token for the new user.
   SupabaseService.auth.onAuthStateChange.listen((state) {
     unawaited(identifyRevenueCatUser(state.session?.user.id));
-    if (state.session != null) unawaited(syncPushRegistration());
+    if (state.session != null) {
+      unawaited(syncPushRegistration());
+      // Converge profiles.plan with RevenueCat on launch/sign-in, so a purchase
+      // isn't stranded on "free" when the webhook failed to land.
+      unawaited(const BillingRepository().sync());
+    }
   });
   runApp(
     ProviderScope(

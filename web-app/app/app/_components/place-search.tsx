@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Loader2, MapPin, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PaywallNotice } from "./paywall-notice";
 
 interface Place {
   name: string;
@@ -37,6 +38,7 @@ export function PlaceSearch({
   const [selected, setSelected] = useState<Place | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [premium, setPremium] = useState(false);
 
   async function search() {
     const q = query.trim();
@@ -55,6 +57,7 @@ export function PlaceSearch({
       if (!res.ok) {
         // 402/429 are the backend's per-tier search limits — spell that out so
         // the user knows it isn't a transient failure.
+        setPremium(res.status === 402);
         setError(
           res.status === 402 || res.status === 429
             ? (body.error ?? "You've reached your map search limit.")
@@ -138,7 +141,7 @@ export function PlaceSearch({
         )
       )}
 
-      {error && <p className="text-xs text-red-700">{error}</p>}
+      {error && <PaywallNotice message={error} premium={premium} />}
 
       <input type="hidden" name={nameField} value={selected?.name ?? ""} />
       <input type="hidden" name={latField} value={selected?.lat ?? ""} />

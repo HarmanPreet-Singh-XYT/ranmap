@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
+import { PaywallNotice } from "../../_components/paywall-notice";
 import { joinGroup, type GroupActionState } from "../actions";
 
 const initialState: GroupActionState = { error: null };
@@ -22,7 +23,7 @@ export function JoinGroupForm() {
           {pending ? "Joining…" : "Join"}
         </Button>
       </div>
-      {state.error && <p className="text-xs text-red-700">{state.error}</p>}
+      {state.error && <PaywallNotice message={state.error} premium={state.premium} />}
       {state.message && <p className="text-xs text-emerald-700">{state.message}</p>}
     </form>
   );

@@ -8,6 +8,7 @@ import {
   listGroupMembers,
   listPendingRequests,
 } from "@/lib/data/groups";
+import { limitFor, tierFromPlan } from "@/lib/data/plan";
 import { siteUrl } from "@/lib/site";
 import { AvatarView } from "@/app/(account)/_components/avatar-view";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import {
   leaveGroup,
   removeMember,
-  respondJoinRequest,
   rotateInviteCode,
   setInviteApproval,
   setMemberRole,
@@ -23,6 +23,8 @@ import {
   updateGroupDetails,
 } from "../actions";
 import { CopyButton } from "./_components/copy-button";
+import { GroupAvatarUpload } from "./_components/group-avatar-upload";
+import { JoinRequestActions } from "./_components/join-request-actions";
 
 const fieldClass =
   "h-9 w-full rounded-lg border border-[#E6E3DA] bg-white px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40";
@@ -44,10 +46,15 @@ export default async function GroupDetailPage({
   if (!group || !role) notFound();
 
   const isAdmin = role === "owner" || role === "admin";
-  const [members, pending] = await Promise.all([
+  const [members, pending, planResult] = await Promise.all([
     listGroupMembers(supabase, id),
     isAdmin ? listPendingRequests(supabase, id) : Promise.resolve([]),
+    supabase.rpc("my_plan").maybeSingle(),
   ]);
+  const tier = tierFromPlan(
+    (planResult.data ?? null) as { is_pro?: boolean; is_extreme?: boolean } | null,
+  );
+  const memberLimit = limitFor("members", tier);
 
   const inviteLink = group.invite_code
     ? `${siteUrl}/app/groups/join/${group.invite_code}`
@@ -55,18 +62,28 @@ export default async function GroupDetailPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
-            {group.name}
-          </h1>
-          {group.description && (
-            <p className="mt-1 text-sm text-muted-foreground">{group.description}</p>
-          )}
-          <p className="mt-1 text-xs font-semibold text-slate-500">
-            You are {role} · {members.length}{" "}
-            {members.length === 1 ? "member" : "members"}
-          </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <span className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-emerald-50 ring-1 ring-[#E6E3DA]">
+            <AvatarView seed={group.avatar_id ?? "default"} />
+          </span>
+          <div className="min-w-0">
+            <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
+              {group.name}
+            </h1>
+            {group.description && (
+              <p className="mt-1 text-sm text-muted-foreground">{group.description}</p>
+            )}
+            <p className="mt-1 text-xs font-semibold text-slate-500">
+              You are {role} · {members.length}{" "}
+              {members.length === 1 ? "member" : "members"}
+            </p>
+            {isAdmin && (
+              <div className="mt-2">
+                <GroupAvatarUpload groupId={id} userId={user.id} />
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Button
@@ -98,10 +115,10 @@ export default async function GroupDetailPage({
           <div>
             <p className="text-sm font-semibold text-slate-700">Capacity</p>
             <p className="text-xs text-muted-foreground">
-              {members.length} of 6 members on the free plan.
+              {members.length} of {memberLimit} members on the {tier} plan.
             </p>
           </div>
-          {members.length >= 6 && (
+          {members.length >= memberLimit && tier !== "extreme" && (
             <Button nativeButton={false} render={<Link href="/app/upgrade" />} variant="outline" size="sm">
               Upgrade for more
             </Button>
@@ -233,24 +250,7 @@ export default async function GroupDetailPage({
                     @{request.profile?.username}
                   </span>
                 </span>
-                <div className="flex shrink-0 gap-2">
-                  <form action={respondJoinRequest}>
-                    <input type="hidden" name="group_id" value={id} />
-                    <input type="hidden" name="user_id" value={request.user_id} />
-                    <input type="hidden" name="accept" value="1" />
-                    <Button type="submit" size="sm">
-                      Accept
-                    </Button>
-                  </form>
-                  <form action={respondJoinRequest}>
-                    <input type="hidden" name="group_id" value={id} />
-                    <input type="hidden" name="user_id" value={request.user_id} />
-                    <input type="hidden" name="accept" value="0" />
-                    <Button type="submit" size="sm" variant="ghost">
-                      Decline
-                    </Button>
-                  </form>
-                </div>
+                <JoinRequestActions groupId={id} userId={request.user_id} />
               </div>
             ))}
           </CardContent>

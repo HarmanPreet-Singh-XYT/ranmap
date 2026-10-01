@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { groupInvitePreview } from "@/lib/data/groups";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { joinGroupByCode } from "../../actions";
+import { JoinButton } from "./_components/join-button";
 
 export const metadata: Metadata = { title: "Join group" };
 
@@ -61,12 +61,7 @@ export default async function GroupJoinPage({
           ) : preview.membership === "pending" ? (
             <p className="text-sm text-muted-foreground">Your request is pending.</p>
           ) : (
-            <form action={joinGroupByCode}>
-              <input type="hidden" name="code" value={code} />
-              <Button type="submit">
-                {preview.requires_approval ? "Request to join" : "Join group"}
-              </Button>
-            </form>
+            <JoinButton code={code} requiresApproval={preview.requires_approval} />
           )}
         </CardContent>
       </Card>

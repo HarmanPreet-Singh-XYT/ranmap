@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
+import { PaywallNotice } from "../../_components/paywall-notice";
 import { createGroup, type GroupActionState } from "../actions";
 
 const initialState: GroupActionState = { error: null };
@@ -23,7 +24,7 @@ export function CreateGroupForm() {
           {pending ? "Creating…" : "Create group"}
         </Button>
       </div>
-      {state.error && <p className="text-xs text-red-700">{state.error}</p>}
+      {state.error && <PaywallNotice message={state.error} premium={state.premium} />}
     </form>
   );
 }

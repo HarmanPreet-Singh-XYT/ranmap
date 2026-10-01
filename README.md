@@ -255,7 +255,8 @@ GEMINI_API_KEY=your-gemini-api-key
 # GOOGLE_MAPS_API_KEY=your-google-maps-server-key   # Places API (New); per-place details only
 # MAPBOX_ACCESS_TOKEN=sk.your-mapbox-secret-token   # SECRET (sk.), not pk.: mints the app's map token, so needs tokens:write + styles:read/fonts:read/styles:tiles
 # MAPBOX_USERNAME=your-mapbox-username              # account the app's rendering tokens are minted under
-# REVENUECAT_SECRET_KEY=sk_your_revenuecat_secret_key   # billing. Reads subscriber state
+# REVENUECAT_SECRET_KEY=sk_your_revenuecat_secret_key   # billing (V2 key). Reads customer state
+# REVENUECAT_PROJECT_ID=proj_your_revenuecat_project_id # billing. Scopes the v2 REST API
 # REVENUECAT_WEBHOOK_AUTH=long-random-string            # matches the RevenueCat webhook's Authorization header
 # TWILIO_ACCOUNT_SID=your-twilio-account-sid
 # TWILIO_AUTH_TOKEN=your-twilio-auth-token
@@ -358,15 +359,16 @@ Billing is wired through **RevenueCat** (which wraps StoreKit 2 / Play Billing):
   user in with their Supabase id, and drives the paywall from the `pro`
   entitlement (`lib/features/premium/revenuecat.dart`).
 - RevenueCat calls `POST /billing/revenuecat`; the server verifies the shared
-  `Authorization` value (`REVENUECAT_WEBHOOK_AUTH`), re-reads the subscriber via
-  the RevenueCat API with the secret key (`REVENUECAT_SECRET_KEY`), and writes
-  `profiles.plan` — the only writer. So a leaked client key can't grant Pro, and
-  the app never holds a secret.
+  `Authorization` value (`REVENUECAT_WEBHOOK_AUTH`), re-reads the customer via
+  the RevenueCat **v2** API with the secret key (`REVENUECAT_SECRET_KEY`) and
+  project id (`REVENUECAT_PROJECT_ID`), and writes `profiles.plan` — the only
+  writer. So a leaked client key can't grant Pro, and the app never holds a
+  secret.
 
 To enable it: create the products in App Store Connect / Play Console, attach
 them to a `pro` entitlement with current + default offerings in RevenueCat, set
-the two public keys in `.env` and the two server keys in `server/.env`, and point
-the RevenueCat webhook at `/billing/revenuecat`. With no keys set the app runs
+the two public keys in `.env` and the three server values in `server/.env`, and
+point the RevenueCat webhook at `/billing/revenuecat`. With no keys set the app runs
 normally and the paywall reports billing as unavailable.
 
 Recommended products (the paywall reads real store prices, so these are the

@@ -62,6 +62,7 @@ export default async function GroupsPage() {
                       <span className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-emerald-50 ring-1 ring-[#E6E3DA]">
                         <AvatarView seed={group.avatar_id ?? "default"} />
                       </span>
+
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-display font-bold text-slate-900">
                           {group.name}

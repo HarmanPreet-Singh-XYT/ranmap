@@ -19,7 +19,7 @@ const TOGGLES = [
 const LINKS = [
   { href: "/app/settings/blocked", label: "Blocked accounts", description: "People you've blocked", icon: ShieldAlert },
   { href: "/app/settings/socials", label: "Linked socials & phone", description: "Handles and verified number", icon: UserRound },
-  { href: "/account", label: "Change password", description: "Update your account credentials", icon: KeyRound },
+  { href: "/app/settings/account", label: "Password & security", description: "Password and account deletion", icon: KeyRound },
 ];
 
 export default async function SettingsPage() {

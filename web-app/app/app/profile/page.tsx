@@ -38,11 +38,11 @@ function formatNumber(n: number): string {
 
 const LINKS = [
   { href: "/app/settings", label: "Settings", description: "Notifications, blocked accounts, linked socials", icon: Settings },
-  { href: "/account", label: "Edit profile", description: "Name, username, avatar, vehicle", icon: UserRound },
+  { href: "/app/profile/edit", label: "Edit profile", description: "Name, username, avatar, vehicle", icon: UserRound },
   { href: "/app/documents", label: "Documents", description: "Private license, insurance, and ticket wallet", icon: FileText },
   { href: "/app/service", label: "Vehicle service", description: "Service interval and odometer reminders", icon: Wrench },
-  { href: "/account/billing", label: "Billing", description: "Plan, payment, and subscription", icon: CreditCard },
-  { href: "/account/stats", label: "Your stats", description: "Trips, distance, and groups", icon: TrendingUp },
+  { href: "/app/profile/billing", label: "Billing", description: "Plan, payment, and subscription", icon: CreditCard },
+  { href: "/app/profile/stats", label: "Your stats", description: "Trips, distance, and groups", icon: TrendingUp },
   { href: "/app/notifications", label: "Notifications", description: "Invites, messages, and alerts", icon: Bell },
 ];
 
@@ -87,7 +87,7 @@ export default async function ProfilePage() {
             </span>
           )}
         </div>
-        <Button nativeButton={false} render={<Link href="/account" />} variant="outline" size="sm">
+        <Button nativeButton={false} render={<Link href="/app/profile/edit" />} variant="outline" size="sm">
           Edit profile
         </Button>
       </div>

@@ -77,6 +77,9 @@ links: `ranmap.app`
       match what the app expects (paywall uses the `pro_annual` package / the
       standard annual package).
 - [ ] Link the RevenueCat webhook secret in the dashboard (`REVENUECAT_WEBHOOK_AUTH`).
+- [ ] Set `REVENUECAT_PROJECT_ID` (`proj_…`) in `server/.env`, and make sure
+      `REVENUECAT_SECRET_KEY` is a **V2** secret key (the server reads the v2
+      REST API; a v1 key is rejected with a 403).
 - [ ] Verify a real sandbox purchase and **Restore Purchases** on device.
 
 > Do this only once the store products exist — swapping keys before then leaves

@@ -4,9 +4,8 @@ import { ArrowLeft, Route, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { listRouteTemplates } from "@/lib/data/trips";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { PlaceSearch } from "../../_components/place-search";
-import { deleteRouteTemplate, saveRouteTemplate } from "../actions";
+import { deleteRouteTemplate } from "../actions";
+import { RouteTemplateForm } from "./_components/route-template-form";
 
 export const metadata: Metadata = { title: "Saved routes" };
 
@@ -37,37 +36,7 @@ export default async function SavedRoutesPage() {
         </p>
       </div>
 
-      <Card size="sm">
-        <CardContent>
-          <form action={saveRouteTemplate} className="space-y-4">
-            <input
-              name="name"
-              required
-              maxLength={60}
-              placeholder="Route name"
-              className="h-9 w-full rounded-lg border border-[#E6E3DA] bg-white px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40"
-            />
-            <PlaceSearch
-              label="From"
-              nameField="origin_name"
-              latField="origin_lat"
-              lngField="origin_lng"
-              placeholder="Starting point…"
-            />
-            <PlaceSearch
-              label="To"
-              nameField="destination_name"
-              latField="destination_lat"
-              lngField="destination_lng"
-              placeholder="Destination…"
-            />
-            <Button type="submit" size="sm">
-              <Route aria-hidden />
-              Save route
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      <RouteTemplateForm />
 
       {routes.length === 0 ? (
         <Card>

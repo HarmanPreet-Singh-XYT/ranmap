@@ -5,6 +5,7 @@ import { Loader2, Search, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { PlaceSearch } from "../../_components/place-search";
+import { PaywallNotice } from "../../_components/paywall-notice";
 
 const CATEGORIES = [
   "restaurant",
@@ -44,6 +45,7 @@ export function PlacesSearch() {
   const [details, setDetails] = useState<Details | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [premium, setPremium] = useState(false);
 
   async function search() {
     if (!coords) {
@@ -59,6 +61,7 @@ export function PlacesSearch() {
       );
       const body = (await res.json().catch(() => ({}))) as { places?: Place[]; error?: string };
       if (!res.ok) {
+        setPremium(res.status === 402);
         setError(
           res.status === 402 || res.status === 429
             ? (body.error ?? "You've reached your map search limit.")
@@ -82,9 +85,15 @@ export function PlacesSearch() {
         `/api/ranmap/maps/places/details?name=${encodeURIComponent(place.name)}&lat=${place.lat}&lng=${place.lng}`,
       );
       const body = (await res.json().catch(() => ({}))) as Details & { error?: string };
-      if (res.ok) setDetails(body);
+      if (res.ok) {
+        setDetails(body);
+        return;
+      }
+      // Details share the maps_search meter — don't drop the 402/429.
+      setPremium(res.status === 402);
+      setError(body.error ?? "Couldn't load those details.");
     } catch {
-      // Details are best-effort.
+      setError("Couldn't load those details.");
     }
   }
 
@@ -126,7 +135,7 @@ export function PlacesSearch() {
         </CardContent>
       </Card>
 
-      {error && <p className="text-xs text-red-700">{error}</p>}
+      {error && <PaywallNotice message={error} premium={premium} />}
 
       {details && (
         <Card size="sm">

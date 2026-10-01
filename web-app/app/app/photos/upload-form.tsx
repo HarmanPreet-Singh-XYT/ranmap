@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { ImagePlus, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { toEwkt } from "@/lib/data/geo";
+import { classifyPlanMessage } from "@/lib/data/plan";
+import { PaywallNotice } from "../_components/paywall-notice";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PlaceSearch } from "../_components/place-search";
@@ -21,11 +23,13 @@ export function UploadForm({ userId }: { userId: string }) {
   const [caption, setCaption] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [premium, setPremium] = useState(false);
 
   async function upload() {
     if (!file || !place || busy) return;
     setBusy(true);
     setError(null);
+    setPremium(false);
     try {
       const supabase = createClient();
       const ext =
@@ -51,8 +55,12 @@ export function UploadForm({ userId }: { userId: string }) {
       setPlace(null);
       setCaption("");
       router.refresh();
-    } catch {
-      setError("Couldn't upload that photo. Please try again.");
+    } catch (err) {
+      // The DB's free-tier cap raises P0001 with a "Ranmap Pro required" message
+      // — surface it (with an upgrade path) instead of a generic failure.
+      const info = classifyPlanMessage(err instanceof Error ? err.message : "");
+      setError(info.message || "Couldn't upload that photo. Please try again.");
+      setPremium(info.premium);
     } finally {
       setBusy(false);
     }
@@ -93,7 +101,7 @@ export function UploadForm({ userId }: { userId: string }) {
           className="h-9 w-full rounded-lg border border-[#E6E3DA] bg-white px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40"
         />
 
-        {error && <p className="text-xs text-red-700">{error}</p>}
+        {error && <PaywallNotice message={error} premium={premium} />}
 
         <Button
           type="button"

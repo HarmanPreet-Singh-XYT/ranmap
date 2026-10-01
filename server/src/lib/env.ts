@@ -92,10 +92,12 @@ export const env = {
   // Mapbox account username the rendering tokens are minted under.
   mapboxUsername: optionalValue("MAPBOX_USERNAME"),
   // RevenueCat billing (optional; the app runs without it). The secret key
-  // reads subscriber state, and `revenueCatWebhookAuth` is the shared
-  // Authorization value configured on the RevenueCat webhook. Both must be set
-  // for the webhook to accept anything.
+  // reads customer state, `revenueCatProjectId` (proj_…) scopes the v2 REST
+  // API, and `revenueCatWebhookAuth` is the shared Authorization value
+  // configured on the RevenueCat webhook. All three must be set for the webhook
+  // to accept anything.
   revenueCatSecretKey: optionalValue("REVENUECAT_SECRET_KEY"),
+  revenueCatProjectId: optionalValue("REVENUECAT_PROJECT_ID"),
   revenueCatWebhookAuth: optionalValue("REVENUECAT_WEBHOOK_AUTH"),
   twilioAccountSid: optionalValue("TWILIO_ACCOUNT_SID"),
   twilioAuthToken: optionalValue("TWILIO_AUTH_TOKEN"),

@@ -5,10 +5,25 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { toEwkt } from "@/lib/data/geo";
 import { currentUserId } from "@/lib/data/auth";
+import { classifyDbError } from "@/lib/data/plan";
 import type { TripStatus } from "@/lib/data/types";
 
 export interface TripActionState {
   error: string | null;
+  /** True when the failure is a free-tier lock (show the paywall). */
+  premium?: boolean;
+}
+
+/** A DB error the user should see — the plan-limit message, or a generic one. */
+function dbErrorMessage(error: { message?: string; code?: string } | null): {
+  error: string;
+  premium: boolean;
+} {
+  const info = classifyDbError(error);
+  return {
+    error: info.message || "Something went wrong. Please try again.",
+    premium: info.premium,
+  };
 }
 
 function num(value: FormDataEntryValue | null): number | null {
@@ -19,14 +34,6 @@ function num(value: FormDataEntryValue | null): number | null {
 function str(value: FormDataEntryValue | null): string | null {
   const s = String(value ?? "").trim();
   return s.length ? s : null;
-}
-
-/** Maps a raised Postgres error to something a user can act on. */
-function messageFor(error: { message?: string; code?: string } | null): string {
-  if (!error) return "Something went wrong. Please try again.";
-  // P0001 is a plan-limit / validation raise from the app's triggers/functions.
-  if (error.code === "P0001" && error.message) return error.message;
-  return "Something went wrong. Please try again.";
 }
 
 export async function createTrip(
@@ -55,7 +62,7 @@ export async function createTrip(
     p_destination_lng: num(formData.get("destination_lng")),
     p_currency: str(formData.get("currency")) ?? "USD",
   });
-  if (error) return { error: messageFor(error) };
+  if (error) return dbErrorMessage(error);
 
   const id = (data as { id?: string } | null)?.id;
   revalidatePath("/app/trips");
@@ -83,15 +90,22 @@ export async function respondTripInvite(formData: FormData): Promise<void> {
   revalidatePath("/app/trips");
 }
 
-export async function updateTripStatus(formData: FormData): Promise<void> {
+export async function updateTripStatus(
+  _prev: TripActionState,
+  formData: FormData,
+): Promise<TripActionState> {
   const tripId = str(formData.get("trip_id"));
   const status = str(formData.get("status")) as TripStatus | null;
-  if (!tripId || !status) return;
+  if (!tripId || !status) return { error: "Invalid request." };
   const supabase = await createClient();
-  if (!(await currentUserId(supabase))) return;
-  await supabase.from("trips").update({ status }).eq("id", tripId);
+  if (!(await currentUserId(supabase))) return { error: "You're signed out." };
+
+  // Re-activating a trip re-runs the trip cap trigger, so surface it.
+  const { error } = await supabase.from("trips").update({ status }).eq("id", tripId);
   revalidatePath(`/app/trips/${tripId}`);
   revalidatePath("/app/trips");
+  if (error) return dbErrorMessage(error);
+  return { error: null };
 }
 
 export async function addStop(formData: FormData): Promise<void> {
@@ -280,19 +294,23 @@ export async function voteProposal(formData: FormData): Promise<void> {
   revalidatePath(`/app/trips/${tripId}`);
 }
 
-export async function saveRouteTemplate(formData: FormData): Promise<void> {
+export async function saveRouteTemplate(
+  _prev: TripActionState,
+  formData: FormData,
+): Promise<TripActionState> {
   const name = str(formData.get("name"));
-  if (!name) return;
+  if (!name) return { error: "Give the route a name." };
   const supabase = await createClient();
   const userId = await currentUserId(supabase);
-  if (!userId) return;
+  if (!userId) return { error: "You're signed out." };
 
   const originLat = num(formData.get("origin_lat"));
   const originLng = num(formData.get("origin_lng"));
   const destLat = num(formData.get("destination_lat"));
   const destLng = num(formData.get("destination_lng"));
 
-  await supabase.from("route_templates").insert({
+  // Free accounts are capped at 1 saved route (DB trigger).
+  const { error } = await supabase.from("route_templates").insert({
     user_id: userId,
     name: name.slice(0, 60),
     origin_name: str(formData.get("origin_name")),
@@ -300,7 +318,9 @@ export async function saveRouteTemplate(formData: FormData): Promise<void> {
     destination_name: str(formData.get("destination_name")),
     destination_point: destLat !== null && destLng !== null ? toEwkt(destLat, destLng) : null,
   });
+  if (error) return dbErrorMessage(error);
   revalidatePath("/app/trips/routes");
+  return { error: null };
 }
 
 export async function deleteRouteTemplate(formData: FormData): Promise<void> {

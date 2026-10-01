@@ -6,7 +6,7 @@ import type { PlanTier } from "./plans.js";
  * verification logic is unit-testable; the route does the fetching/updating.
  *
  * The webhook event is treated only as a *trigger*: the route re-reads the
- * subscriber from RevenueCat's REST API and derives entitlement state from
+ * customer from RevenueCat's REST API and derives entitlement state from
  * that, so we never have to model every event type (renewal, billing issue,
  * transfer, …) ourselves.
  */
@@ -22,11 +22,22 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
 }
 
-/** Constant-time compare of the webhook's Authorization header value. */
+/** Strips an optional, case-insensitive `Bearer ` scheme prefix. */
+function stripBearer(value: string): string {
+  return value.replace(/^bearer\s+/i, "").trim();
+}
+
+/**
+ * Constant-time compare of the webhook's Authorization header value. Tolerates
+ * the extremely common misconfiguration where the RevenueCat dashboard sends
+ * `Bearer <secret>` but the env holds only `<secret>` (or vice-versa) — both
+ * sides are normalized before comparison, so a scheme-prefix mismatch no longer
+ * fails an otherwise-correct secret.
+ */
 export function isAuthorizedWebhook(header: string | undefined, expected: string): boolean {
   if (!header || !expected) return false;
-  const a = Buffer.from(header);
-  const b = Buffer.from(expected);
+  const a = Buffer.from(stripBearer(header));
+  const b = Buffer.from(stripBearer(expected));
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
@@ -48,41 +59,34 @@ export function extractUserId(event: Record<string, unknown>): string | null {
   return null;
 }
 
-export interface ProEntitlement {
+interface ActiveEntitlement {
   active: boolean;
   /** Null means "no expiry" — lifetime access. */
   expiresAt: Date | null;
 }
 
 /**
- * Reads one entitlement object from a subscriber's `entitlements` map. Absent →
- * inactive. A null/absent `expires_date` means the entitlement never lapses
- * (lifetime/non-expiring).
+ * Reads one entitlement from a v2 customer's `active_entitlements` list by its
+ * id. Absent → inactive. A null/absent `expires_at` means the entitlement never
+ * lapses (lifetime/non-expiring); otherwise it's milliseconds since the epoch.
  */
-function readEntitlement(
-  entitlements: Record<string, unknown> | null,
-  id: string,
-  now: number,
-): ProEntitlement {
-  const entitlement = asRecord(entitlements?.[id]);
-  if (!entitlement) return { active: false, expiresAt: null };
+function readEntitlement(customer: unknown, entitlementId: string, now: number): ActiveEntitlement {
+  const list = asRecord(asRecord(customer)?.active_entitlements);
+  const items = Array.isArray(list?.items) ? list.items : [];
 
-  const expiresRaw = entitlement.expires_date;
-  if (expiresRaw === null || expiresRaw === undefined) return { active: true, expiresAt: null };
-  if (typeof expiresRaw !== "string") return { active: false, expiresAt: null };
+  for (const raw of items) {
+    const item = asRecord(raw);
+    if (!item || item.entitlement_id !== entitlementId) continue;
 
-  const expiresAt = new Date(expiresRaw);
-  if (Number.isNaN(expiresAt.getTime())) return { active: false, expiresAt: null };
-  return { active: expiresAt.getTime() > now, expiresAt };
-}
-
-/**
- * Reads the Pro entitlement from a RevenueCat subscriber payload
- * (`GET /v1/subscribers/{id}`). Absent entitlement → inactive.
- */
-export function readProEntitlement(body: unknown, now: number = Date.now()): ProEntitlement {
-  const subscriber = asRecord(asRecord(body)?.subscriber);
-  return readEntitlement(asRecord(subscriber?.entitlements), REVENUECAT_ENTITLEMENT_ID, now);
+    const expiresRaw = item.expires_at;
+    if (expiresRaw === null || expiresRaw === undefined) return { active: true, expiresAt: null };
+    if (typeof expiresRaw !== "number" || !Number.isFinite(expiresRaw)) {
+      return { active: false, expiresAt: null };
+    }
+    const expiresAt = new Date(expiresRaw);
+    return { active: expiresAt.getTime() > now, expiresAt };
+  }
+  return { active: false, expiresAt: null };
 }
 
 export interface PlanEntitlement {
@@ -92,19 +96,30 @@ export interface PlanEntitlement {
 }
 
 /**
- * The subscriber's plan, checking **Extreme first** so an active extreme
- * product wins over a lingering pro entitlement. Used by the webhook to write
- * `profiles.plan`.
+ * The customer's plan from a RevenueCat v2 customer payload
+ * (`GET /v2/projects/{project_id}/customers/{id}`), checking **Extreme first**
+ * so an active extreme product wins over a lingering pro entitlement.
+ *
+ * v2 reports a customer's entitlements by their opaque id, so the project's
+ * `lookup_key -> id` map bridges the dashboard lookup keys
+ * ("pro"/"extreme") to those ids.
  */
-export function readPlanEntitlement(body: unknown, now: number = Date.now()): PlanEntitlement {
-  const subscriber = asRecord(asRecord(body)?.subscriber);
-  const entitlements = asRecord(subscriber?.entitlements);
+export function readPlanEntitlement(
+  customer: unknown,
+  entitlementIdByLookupKey: ReadonlyMap<string, string>,
+  now: number = Date.now(),
+): PlanEntitlement {
+  const extremeId = entitlementIdByLookupKey.get(REVENUECAT_EXTREME_ENTITLEMENT_ID);
+  if (extremeId) {
+    const extreme = readEntitlement(customer, extremeId, now);
+    if (extreme.active) return { plan: "extreme", expiresAt: extreme.expiresAt };
+  }
 
-  const extreme = readEntitlement(entitlements, REVENUECAT_EXTREME_ENTITLEMENT_ID, now);
-  if (extreme.active) return { plan: "extreme", expiresAt: extreme.expiresAt };
-
-  const pro = readEntitlement(entitlements, REVENUECAT_ENTITLEMENT_ID, now);
-  if (pro.active) return { plan: "pro", expiresAt: pro.expiresAt };
+  const proId = entitlementIdByLookupKey.get(REVENUECAT_ENTITLEMENT_ID);
+  if (proId) {
+    const pro = readEntitlement(customer, proId, now);
+    if (pro.active) return { plan: "pro", expiresAt: pro.expiresAt };
+  }
 
   return { plan: "free", expiresAt: null };
 }
